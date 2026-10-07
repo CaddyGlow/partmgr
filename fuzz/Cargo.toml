@@ -1,0 +1,20 @@
+[package]
+name = "partmgr-fuzz"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[workspace]
+
+[dependencies]
+honggfuzz = "=0.5.62"
+partmgr = { path = ".." }
+virtdisk = "0.1.0"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[profile.release]
+debug = 1
+overflow-checks = true

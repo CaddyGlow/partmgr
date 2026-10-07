@@ -17,7 +17,8 @@ env = dict(os.environ, RUSTC_WRAPPER="", CARGO_INCREMENTAL="0", CC="gcc", NIX_HA
 receipt = {"iterations_requested": args.iterations, "targets": {}, "scope": "bounded coverage-guided smoke; not security qualification"}
 for tool in [["rustc", "--version"], ["cargo", "hfuzz", "version"]]:
     receipt[" ".join(tool)] = subprocess.check_output(tool, text=True).strip()
-receipt["source_sha256"] = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((ROOT / "fuzz/src").rglob("*.rs"))}
+source_paths = [p for directory in ["src", "tests", "fuzz/src"] for p in (ROOT / directory).rglob("*.rs")] + [ROOT / p for p in ["Cargo.toml", "Cargo.lock", "fuzz/Cargo.toml", "fuzz/Cargo.lock", "fuzz/targets.json"]]
+receipt["source_sha256"] = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(source_paths)}
 for target, limit in config.items():
     corpus = ROOT / "fuzz/corpus" / target
     corpus.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,28 @@
+name: Independent UEFI firmware integration
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ovmf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - name: Install explicit firmware and filesystem dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf dosfstools mtools fdisk
+      - name: Observe GPT and MBR fallback EFI execution
+        run: python3 scripts/firmware-gate.py --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd --output target/firmware-evidence
+      - name: Preserve firmware integration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-evidence
+          path: target/firmware-evidence
+          if-no-files-found: error

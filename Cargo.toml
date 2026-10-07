@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/CaddyGlow/partmgr"
-description = "Strict read-only GPT and MBR partition table parsing over virtdisk readers"
+description = "Lossless GPT and MBR inspection, checked editing, and durable partition metadata plans"
 
 readme = "README.md"
 homepage = "https://github.com/CaddyGlow/partmgr"
@@ -14,10 +14,10 @@ categories = ["filesystem", "parser-implementations"]
 
 [dependencies]
 virtdisk = { version = "0.1.0" }
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3.23"
-sha2 = "0.10"
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -221,6 +221,8 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "virtdisk"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "882aff9b18a61db4d0af6183ff8be1154ef76256ffab3c5f459f4edffeb1021f"
 dependencies = [
  "flate2",
  "ms-compress-ruzstd",

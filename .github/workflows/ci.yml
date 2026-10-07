@@ -49,3 +49,21 @@ jobs:
       - run: cargo fmt --manifest-path fuzz/Cargo.toml -- --check
       - run: cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --locked -- -D warnings
       - run: cargo test --manifest-path fuzz/Cargo.toml --locked
+
+  independent-partition-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: partmgr
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - name: Install independent partition tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fdisk gdisk
+          sfdisk --version
+          sgdisk --version
+      - name: Verify independent GPT and MBR fixtures
+        run: |
+          cargo test --all-features --locked sfdisk_generated -- --ignored
+          cargo test --test independent --all-features --locked -- --include-ignored

@@ -7,6 +7,11 @@ license = "MIT"
 repository = "https://github.com/CaddyGlow/partmgr"
 description = "Strict read-only GPT and MBR partition table parsing over virtdisk readers"
 
+readme = "README.md"
+homepage = "https://github.com/CaddyGlow/partmgr"
+keywords = ["partition", "gpt", "mbr", "disk"]
+categories = ["filesystem", "parser-implementations"]
+
 [dependencies]
 virtdisk = { version = "0.1.0", path = "../virtdisk" }
 

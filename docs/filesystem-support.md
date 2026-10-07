@@ -6,6 +6,18 @@ Update an operation only when its code and independent evidence meet
 `FILESYSTEM_PLAN.md`; attach the evidence record. The specification/profile
 inventory is in [filesystem-specifications.md](filesystem-specifications.md).
 
+The current tree now includes `fs_core` lossless names, metadata/capability/source
+contracts and shared cancellation/budgets; `fs_storage` owned bounded sessions,
+immutable bounded sources and the `ImageWriter` bridge; and `fs_file::ExtentFile`
+for indexed uncompressed positional reads. Focused `fs_core`, `fs_storage` and
+`fs_file` tests cover names, accounting, boundary rejection before mutation,
+short/uncertain writes, flush failures, raw read-after-write/lock retention,
+nonzero-region translation, sparse/unwritten ranges, map limits, random and
+concurrent access. Root verification reports these tests and clippy passing.
+These are shared foundations: they do not establish family codecs, recovery,
+independent native validation or numeric performance thresholds. FAT geometry
+and chain work is underway; strict namespace/payload support remains unaccepted.
+
 | Family/profile | Recognition/strict open | File/metadata access | New build | Existing edits/recovery | Independent/performance/native evidence |
 | --- | --- | --- | --- | --- | --- |
 | FAT12/16/32 and VFAT | Planned | Planned | Planned | Planned external recovery | Missing |

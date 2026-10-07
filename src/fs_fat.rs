@@ -1,20 +1,30 @@
-//! Initial FAT12/16/32 geometry and explicit chain reads.
+//! FAT12/16/32 geometry, bounded namespace inspection, and chain reads.
 //!
-//! This is not a namespace engine, ownership audit, or writable FAT profile.
+//! This is not an ownership audit or writable FAT profile.
 //! Inputs must remain immutable for all deferred reads. Files are opened from
 //! caller-supplied cluster/size facts; callers must establish their provenance.
 use crate::{
-    fs_core::{Reservation, Resources},
+    fs_core::{NativeName, ObjectId, Reservation, Resources},
     fs_file::{ExtentFile, ExtentKind, FileExtent},
 };
-use std::{io, sync::Arc};
+use std::{
+    io,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
 use virtdisk::{DiskView, ReadAt};
 
 /// FAT entry width selected solely from the data cluster count.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FatFamily {
+    /// Twelve-bit packed entries.
     Fat12,
+    /// Sixteen-bit entries.
     Fat16,
+    /// Twenty-eight meaningful bits in thirty-two-bit entries.
     Fat32,
 }
 /// Validated geometry of the supported BPB profile, in volume-relative bytes.
@@ -112,6 +122,7 @@ fn dword(b: &[u8], at: usize) -> u32 {
 pub struct FatVolume {
     source: Arc<dyn ReadAt>,
     geometry: FatGeometry,
+    identity: u128,
 }
 impl FatVolume {
     /// Inspect a bounded source without reading the entire FAT or any payload.
@@ -269,7 +280,11 @@ impl FatVolume {
             backup_sector,
         };
         let source = Arc::new(DiskView::new(source, 0, volume_bytes)?);
-        Ok(Self { source, geometry })
+        Ok(Self {
+            source,
+            geometry,
+            identity: u128::from(NEXT_SOURCE.fetch_add(1, Ordering::Relaxed)),
+        })
     }
     /// Validated BPB facts; this is not an allocation or namespace audit.
     pub fn geometry(&self) -> &FatGeometry {
@@ -408,5 +423,360 @@ impl FatFile {
     /// Validated data mapping; adjacent storage ranges are coalesced.
     pub fn extents(&self) -> &[FileExtent] {
         self.file.extents()
+    }
+}
+
+/// Namespace object validated from a directory slot, scoped to this volume open.
+#[derive(Clone, Debug)]
+pub struct FatEntry {
+    name: NativeName,
+    short_name: [u8; 11],
+    raw: [u8; 32],
+    identity: ObjectId,
+    cluster: u32,
+}
+impl FatEntry {
+    /// Exact UTF-16 LFN, or the exact eleven-byte short alias.
+    pub fn name(&self) -> &NativeName {
+        &self.name
+    }
+    /// Original short alias, including padding and the encoded 0x05 first byte.
+    pub fn short_name(&self) -> &[u8; 11] {
+        &self.short_name
+    }
+    /// Original metadata slot, retaining native timestamps and flags.
+    pub fn raw_metadata(&self) -> &[u8; 32] {
+        &self.raw
+    }
+    /// Source-scoped slot identity.
+    pub fn identity(&self) -> &ObjectId {
+        &self.identity
+    }
+    /// Whether this entry names a directory.
+    pub fn is_directory(&self) -> bool {
+        self.raw[11] & 0x10 != 0
+    }
+    /// Logical file length (zero for directories in this supported profile).
+    pub fn len(&self) -> u32 {
+        dword(&self.raw, 28)
+    }
+    /// Whether the declared length is zero.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+/// Bounded directory inventory retaining all memory accounting.
+pub struct FatDirectory {
+    entries: Vec<FatEntry>,
+    _reservation: Reservation,
+}
+impl FatDirectory {
+    /// Native entries; deleted slots, dot entries, and volume labels are excluded.
+    pub fn entries(&self) -> &[FatEntry] {
+        &self.entries
+    }
+    /// Exact native-name lookup. OEM codepage and case folding are not guessed.
+    pub fn lookup(&self, name: &NativeName) -> io::Result<Option<&FatEntry>> {
+        let mut matches = self.entries.iter().filter(|entry| &entry.name == name);
+        let first = matches.next();
+        if matches.next().is_some() {
+            return Err(invalid("ambiguous FAT name"));
+        }
+        Ok(first)
+    }
+}
+impl FatVolume {
+    /// Enumerate the root, bounding both chain traversal and scanned slots.
+    pub fn root_directory(
+        &self,
+        max_clusters: usize,
+        max_slots: usize,
+        resources: &Resources,
+    ) -> io::Result<FatDirectory> {
+        self.directory(None, max_clusters, max_slots, resources)
+    }
+    /// Enumerate a directory entry from this volume, without following dot links.
+    pub fn read_directory(
+        &self,
+        entry: &FatEntry,
+        max_clusters: usize,
+        max_slots: usize,
+        resources: &Resources,
+    ) -> io::Result<FatDirectory> {
+        self.check_entry(entry)?;
+        if !entry.is_directory() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "FAT object is not a directory",
+            ));
+        }
+        self.directory(Some(entry.cluster), max_clusters, max_slots, resources)
+    }
+    fn check_entry(&self, entry: &FatEntry) -> io::Result<()> {
+        if entry.identity.source != self.identity {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "FAT object belongs to another source",
+            ));
+        }
+        Ok(())
+    }
+    /// Open a validated namespace file, retaining its source-scoped identity.
+    pub fn open_entry(
+        &self,
+        entry: &FatEntry,
+        max_clusters: usize,
+        resources: &Resources,
+    ) -> io::Result<FatNamespaceFile> {
+        self.check_entry(entry)?;
+        if entry.is_directory() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "FAT directory is not a file",
+            ));
+        }
+        Ok(FatNamespaceFile {
+            identity: entry.identity.clone(),
+            file: self.open_file(entry.cluster, entry.len(), max_clusters, resources)?,
+        })
+    }
+    fn directory(
+        &self,
+        cluster: Option<u32>,
+        max_clusters: usize,
+        max_slots: usize,
+        resources: &Resources,
+    ) -> io::Result<FatDirectory> {
+        resources.cancellation.check().map_err(io::Error::other)?;
+        let charge = (max_slots as u64)
+            .checked_mul((std::mem::size_of::<FatEntry>() + 540) as u64)
+            .and_then(|v| v.checked_add((max_clusters as u64).checked_mul(4)?))
+            .ok_or_else(|| io::Error::other("FAT directory budget overflow"))?;
+        let reservation = resources.memory.reserve(charge).map_err(io::Error::other)?;
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(max_slots)
+            .map_err(io::Error::other)?;
+        let mut seen = Vec::new();
+        seen.try_reserve_exact(max_clusters)
+            .map_err(io::Error::other)?;
+        let mut current = cluster.or(self.geometry.root_cluster);
+        let mut slots = 0usize;
+        let mut lfn = Lfn::default();
+        loop {
+            let (base, bytes) = if let Some(c) = current {
+                if c < 2 || c > self.geometry.cluster_count + 1 {
+                    return Err(invalid("FAT directory cluster out of range"));
+                }
+                if seen.contains(&c) {
+                    return Err(invalid("FAT directory chain cycle"));
+                }
+                if seen.len() == max_clusters {
+                    return Err(io::Error::other("FAT directory chain budget exhausted"));
+                }
+                seen.push(c);
+                (
+                    self.geometry.data_offset + u64::from(c - 2) * self.geometry.cluster_bytes(),
+                    self.geometry.cluster_bytes(),
+                )
+            } else {
+                (
+                    self.geometry
+                        .root_offset
+                        .ok_or_else(|| invalid("missing FAT root"))?,
+                    self.geometry.root_bytes,
+                )
+            };
+            let mut ended = false;
+            for offset in (0..bytes).step_by(32) {
+                resources.cancellation.check().map_err(io::Error::other)?;
+                if slots == max_slots {
+                    return Err(io::Error::other("FAT directory slot budget exhausted"));
+                }
+                slots += 1;
+                let mut raw = [0; 32];
+                self.source.read_exact_at(base + offset, &mut raw)?;
+                if raw[0] == 0 {
+                    if lfn.total != 0 {
+                        return Err(invalid("orphan FAT long name"));
+                    }
+                    ended = true;
+                    break;
+                }
+                if raw[0] == 0xe5 {
+                    lfn = Lfn::default();
+                    continue;
+                }
+                if raw[11] == 0x0f {
+                    lfn.push(&raw)?;
+                    continue;
+                }
+                if raw[11] & 0xc0 != 0 || raw[11] & 0x18 == 0x18 {
+                    return Err(invalid("invalid FAT entry attributes"));
+                }
+                let mut short_name = [0; 11];
+                short_name.copy_from_slice(&raw[..11]);
+                let name = lfn.finish(&short_name)?;
+                if raw[11] & 8 != 0 {
+                    continue;
+                }
+                if &short_name == b".          " || &short_name == b"..         " {
+                    continue;
+                }
+                let high = word(&raw, 20);
+                if self.geometry.family != FatFamily::Fat32 && high != 0 {
+                    return Err(invalid("legacy FAT entry has high cluster bits"));
+                }
+                let c = u32::from(word(&raw, 26)) | (u32::from(high) << 16);
+                if raw[11] & 0x10 != 0 && (c < 2 || dword(&raw, 28) != 0) {
+                    return Err(invalid("invalid FAT directory entry"));
+                }
+                entries.push(FatEntry {
+                    name,
+                    short_name,
+                    raw,
+                    cluster: c,
+                    identity: ObjectId {
+                        source: self.identity,
+                        generation: 0,
+                        native: (base + offset).to_le_bytes().to_vec(),
+                    },
+                });
+            }
+            // A terminator bounds namespace reads; unused directory tail is not audited.
+            if ended {
+                break;
+            }
+            if let Some(c) = current {
+                let next = self.next(c)?;
+                let eoc = match self.geometry.family {
+                    FatFamily::Fat12 => 0xff8,
+                    FatFamily::Fat16 => 0xfff8,
+                    FatFamily::Fat32 => 0x0fff_fff8,
+                };
+                if next >= eoc {
+                    break;
+                }
+                current = Some(next);
+            } else {
+                break;
+            }
+        }
+        if lfn.total != 0 {
+            return Err(invalid("orphan FAT long name"));
+        }
+        Ok(FatDirectory {
+            entries,
+            _reservation: reservation,
+        })
+    }
+}
+#[derive(Default)]
+struct Lfn {
+    expected: u8,
+    checksum: u8,
+    total: usize,
+    parts: Vec<[u16; 13]>,
+}
+impl Lfn {
+    fn push(&mut self, raw: &[u8; 32]) -> io::Result<()> {
+        let ordinal = raw[0] & 0x1f;
+        if raw[0] & 0xa0 != 0 || ordinal == 0 || ordinal > 20 || raw[12] != 0 || word(raw, 26) != 0
+        {
+            return Err(invalid("invalid FAT long name slot"));
+        }
+        if raw[0] & 0x40 != 0 {
+            if self.total != 0 {
+                return Err(invalid("interrupted FAT long name"));
+            }
+            self.expected = ordinal;
+            self.total = usize::from(ordinal);
+            self.checksum = raw[13];
+            self.parts = vec![[0; 13]; self.total];
+        }
+        if self.expected != ordinal || self.checksum != raw[13] {
+            return Err(invalid("FAT long name ordinal/checksum mismatch"));
+        }
+        for (i, at) in [1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30]
+            .into_iter()
+            .enumerate()
+        {
+            self.parts[usize::from(ordinal - 1)][i] = word(raw, at);
+        }
+        self.expected -= 1;
+        Ok(())
+    }
+    fn finish(&mut self, short: &[u8; 11]) -> io::Result<NativeName> {
+        if self.total == 0 {
+            return Ok(NativeName::Bytes(short.to_vec()));
+        }
+        let sum = short
+            .iter()
+            .fold(0u8, |sum, byte| sum.rotate_right(1).wrapping_add(*byte));
+        if self.expected != 0 || sum != self.checksum {
+            return Err(invalid("FAT long name lacks matching short alias"));
+        }
+        let mut units = Vec::new();
+        let mut padding = false;
+        for unit in self.parts.iter().flatten().copied() {
+            if padding {
+                if unit != 0xffff {
+                    return Err(invalid("invalid FAT long name padding"));
+                }
+            } else if unit == 0 {
+                padding = true;
+            } else if unit == 0xffff {
+                return Err(invalid("FAT long name padding before terminator"));
+            } else {
+                units.push(unit);
+            }
+        }
+        if units.is_empty()
+            || units.len() > 255
+            || (padding && units.len() <= (self.total - 1) * 13)
+        {
+            return Err(invalid("invalid FAT long name length"));
+        }
+        *self = Self::default();
+        Ok(NativeName::Utf16(units))
+    }
+}
+/// Namespace-opened positional file handle.
+pub struct FatNamespaceFile {
+    identity: ObjectId,
+    file: FatFile,
+}
+impl crate::fs_core::FileRead for FatNamespaceFile {
+    fn identity(&self) -> &ObjectId {
+        &self.identity
+    }
+    fn len(&self) -> u64 {
+        self.file.len()
+    }
+    fn read_at(
+        &self,
+        offset: u64,
+        buffer: &mut [u8],
+        resources: &Resources,
+    ) -> crate::fs_core::Result<usize> {
+        resources.cancellation.check()?;
+        self.file
+            .read_at(offset, buffer, resources)
+            .map_err(|e| crate::fs_core::Error::io("FAT payload read", e))
+    }
+    fn visit_extents(
+        &self,
+        resources: &Resources,
+        visitor: &mut dyn FnMut(crate::fs_core::LogicalExtent) -> crate::fs_core::Result<()>,
+    ) -> crate::fs_core::Result<()> {
+        for extent in self.file.extents() {
+            resources.cancellation.check()?;
+            visitor(crate::fs_core::LogicalExtent {
+                offset: extent.offset,
+                length: extent.length,
+                kind: crate::fs_core::ExtentKind::Data,
+            })?;
+        }
+        Ok(())
     }
 }

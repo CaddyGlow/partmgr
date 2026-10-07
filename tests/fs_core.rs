@@ -112,3 +112,99 @@ fn whole_file_convenience_handles_short_reads_and_retains_memory_charge() {
     );
     assert_eq!(resources.memory.used(), 0);
 }
+
+#[test]
+fn budgeted_results_reserve_before_construction_and_refund_on_failure_or_drop() {
+    let budget = Budget::new(8);
+    let calls = std::cell::Cell::new(0);
+    let result = Budgeted::try_new(&budget, 9, || {
+        calls.set(calls.get() + 1);
+        Ok(vec![1_u8])
+    });
+    assert_eq!(result.unwrap_err().kind, ErrorKind::BudgetExhausted);
+    assert_eq!(calls.get(), 0);
+    let result = Budgeted::<Vec<u8>>::try_new(&budget, 8, || {
+        assert_eq!(budget.used(), 8);
+        Err(Error::new(ErrorKind::InvalidData, "malformed metadata"))
+    });
+    assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidData);
+    assert_eq!(budget.used(), 0);
+    let retained = Budgeted::try_new(&budget, 8, || {
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(8)
+            .map_err(|_| Error::new(ErrorKind::BudgetExhausted, "metadata allocation failed"))?;
+        bytes.extend_from_slice(b"metadata");
+        Ok(bytes)
+    })
+    .unwrap();
+    assert_eq!(retained.get(), b"metadata");
+    assert_eq!(retained.reserved_bytes(), 8);
+    assert_eq!(
+        budget.reserve(1).unwrap_err().kind,
+        ErrorKind::BudgetExhausted
+    );
+    drop(retained);
+    assert_eq!(budget.used(), 0);
+}
+
+struct ChangingFile {
+    identities: [ObjectId; 2],
+    read: std::sync::atomic::AtomicBool,
+    change_identity: bool,
+    change_length: bool,
+}
+impl FileRead for ChangingFile {
+    fn identity(&self) -> &ObjectId {
+        let changed = self.read.load(std::sync::atomic::Ordering::Acquire);
+        &self.identities[usize::from(changed && self.change_identity)]
+    }
+    fn len(&self) -> u64 {
+        let changed = self.read.load(std::sync::atomic::Ordering::Acquire);
+        if changed && self.change_length { 5 } else { 4 }
+    }
+    fn read_at(&self, _: u64, buffer: &mut [u8], _: &Resources) -> Result<usize> {
+        buffer.copy_from_slice(b"test");
+        self.read.store(true, std::sync::atomic::Ordering::Release);
+        Ok(4)
+    }
+    fn visit_extents(
+        &self,
+        _: &Resources,
+        _: &mut dyn FnMut(LogicalExtent) -> Result<()>,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn whole_file_rejects_identity_or_length_changes_and_refunds_memory() {
+    for (change_identity, change_length) in [(true, false), (false, true), (true, true)] {
+        let file = ChangingFile {
+            identities: [
+                ObjectId {
+                    source: 7,
+                    generation: 0,
+                    native: vec![1],
+                },
+                ObjectId {
+                    source: 7,
+                    generation: 1,
+                    native: vec![1],
+                },
+            ],
+            read: std::sync::atomic::AtomicBool::new(false),
+            change_identity,
+            change_length,
+        };
+        let resources = Resources {
+            memory: Budget::new(4),
+            cancellation: Cancellation::default(),
+        };
+        assert_eq!(
+            read_all(&file, 4, &resources).unwrap_err().kind,
+            ErrorKind::StalePlan
+        );
+        assert_eq!(resources.memory.used(), 0);
+    }
+}

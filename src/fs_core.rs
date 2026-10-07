@@ -14,15 +14,14 @@ use std::{
 
 /// Lossless on-disk name; conversion to display text is explicitly lossy.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-/// enum NativeName contract value.
 pub enum NativeName {
-    /// Bytes contract value.
+    /// Exact byte sequence, including non-UTF-8 names.
     Bytes(Vec<u8>),
-    /// Utf16 contract value.
+    /// Exact UTF-16 code units, including unpaired surrogates.
     Utf16(Vec<u16>),
 }
 impl NativeName {
-    /// fn display lossy contract value.
+    /// Convert to display text, replacing invalid sequences without changing native storage.
     pub fn display_lossy(&self) -> String {
         match self {
             Self::Bytes(v) => String::from_utf8_lossy(v).into_owned(),
@@ -32,82 +31,79 @@ impl NativeName {
 }
 /// Object identities are meaningful only within their source and generation.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-/// struct ObjectId contract value.
 pub struct ObjectId {
-    /// source contract value.
+    /// Origin identifier; identities from different sources cannot be equated.
     pub source: u128,
-    /// generation contract value.
+    /// Source generation preventing stale identities after object reuse.
     pub generation: u64,
-    /// native contract value.
+    /// Engine-defined opaque native object key.
     pub native: Vec<u8>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// enum ObjectKind contract value.
+/// Native namespace object category.
 pub enum ObjectKind {
-    /// File contract value.
+    /// Regular file object.
     File,
-    /// Directory contract value.
+    /// Directory containing native-name entries.
     Directory,
-    /// Symlink contract value.
+    /// Symbolic link inspected without following its target.
     Symlink,
-    /// Special contract value.
+    /// Format-specific device or special object requiring preservation policy.
     Special,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// enum StreamKind contract value.
+/// Object-owned content stream category.
 pub enum StreamKind {
-    /// Data contract value.
+    /// Ordinary stream data.
     Data,
-    /// Named contract value.
+    /// Named stream owned by its object.
     Named(NativeName),
-    /// ResourceFork contract value.
+    /// Separate resource fork.
     ResourceFork,
-    /// System contract value.
+    /// Format-specific system stream.
     System(NativeName),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// struct StreamInfo contract value.
+/// Stream inventory without payload allocation.
 pub struct StreamInfo {
-    /// kind contract value.
+    /// Semantic category, interpreted under the selected profile.
     pub kind: StreamKind,
-    /// length contract value.
+    /// Logical length in bytes.
     pub length: u64,
 }
 /// Unwritten allocated storage is distinct from a hole and from stored zero bytes.
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// enum ExtentKind contract value.
 pub enum ExtentKind {
-    /// Data contract value.
+    /// Ordinary stream data.
     Data,
-    /// Hole contract value.
+    /// Unallocated logical zeros.
     Hole,
-    /// Unwritten contract value.
+    /// Allocated extent whose content is logically zero until written.
     Unwritten,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// struct LogicalExtent contract value.
+/// One logical stream range, without assuming physical contiguity.
 pub struct LogicalExtent {
-    /// offset contract value.
+    /// Logical byte offset within the stream.
     pub offset: u64,
-    /// length contract value.
+    /// Logical length in bytes.
     pub length: u64,
-    /// kind contract value.
+    /// Semantic category, interpreted under the selected profile.
     pub kind: ExtentKind,
 }
 /// Absent and uninspectable fields must never be conflated.
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// enum MetadataField contract value.
 pub enum MetadataField<T> {
-    /// Absent contract value.
+    /// The native field is absent.
     Absent,
-    /// Uninspectable contract value.
+    /// The reader cannot establish whether or how this field is represented.
     Uninspectable {
         /// Why inspection is unavailable.
         reason: String,
     },
-    /// Known contract value.
+    /// The reader understands the typed value.
     Known(T),
-    /// Opaque contract value.
+    /// Original bytes retained without claiming safe transplantation.
     Opaque {
         /// Native uninterpreted field encoding; no relocation assurance.
         bytes: Vec<u8>,
@@ -117,159 +113,158 @@ pub enum MetadataField<T> {
 }
 /// Native ticks preserve precision and epoch; conversion/rounding belongs to an explicit policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// struct NativeTimestamp contract value.
 pub struct NativeTimestamp {
-    /// ticks contract value.
+    /// Signed native tick count relative to the declared epoch.
     pub ticks: i128,
-    /// ticks per second contract value.
+    /// Nonzero native clock resolution; engines reject a zero denominator.
     pub ticks_per_second: u64,
-    /// epoch contract value.
+    /// Native epoch and calendar interpretation, without implicit Unix conversion.
     pub epoch: String,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// struct Metadata contract value.
+/// Native object metadata and explicit inspection status.
 pub struct Metadata {
-    /// created contract value.
+    /// Creation timestamp with native precision.
     pub created: MetadataField<NativeTimestamp>,
-    /// modified contract value.
+    /// Content modification timestamp with native precision.
     pub modified: MetadataField<NativeTimestamp>,
-    /// accessed contract value.
+    /// Access timestamp with native precision.
     pub accessed: MetadataField<NativeTimestamp>,
-    /// owner contract value.
+    /// Native ownership encoding; engines specify its typed interpretation.
     pub owner: MetadataField<Vec<u8>>,
-    /// mode contract value.
+    /// Native permission/mode bits under the profile.
     pub mode: MetadataField<u32>,
-    /// security contract value.
+    /// ACL or security descriptor encoding.
     pub security: MetadataField<Vec<u8>>,
-    /// attributes contract value.
+    /// Native extended attribute names and their interpreted or opaque values.
     pub attributes: Vec<(NativeName, MetadataField<Vec<u8>>)>,
-    /// native flags contract value.
+    /// Format-specific object flags.
     pub native_flags: MetadataField<Vec<u8>>,
-    /// symlink target contract value.
+    /// Unfollowed symbolic-link target in its native representation.
     pub symlink_target: MetadataField<NativeName>,
-    /// reparse data contract value.
+    /// Separate native reparse payload.
     pub reparse_data: MetadataField<Vec<u8>>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// struct DirectoryEntry contract value.
+/// Directory name referring to a source-scoped object.
 pub struct DirectoryEntry {
-    /// name contract value.
+    /// Exact native directory entry name.
     pub name: NativeName,
-    /// object contract value.
+    /// Source-scoped identity shared by hard-linked entries.
     pub object: ObjectId,
-    /// kind contract value.
+    /// Semantic category, interpreted under the selected profile.
     pub kind: ObjectKind,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-/// enum Family contract value.
+/// Format family inventory; variants do not advertise implemented engines.
 pub enum Family {
-    /// Fat12 contract value.
+    /// Fat12 filesystem family; support is determined by individual profiles.
     Fat12,
-    /// Fat16 contract value.
+    /// Fat16 filesystem family; support is determined by individual profiles.
     Fat16,
-    /// Fat32 contract value.
+    /// Fat32 filesystem family; support is determined by individual profiles.
     Fat32,
-    /// ExFat contract value.
+    /// ExFat filesystem family; support is determined by individual profiles.
     ExFat,
-    /// Ntfs contract value.
+    /// Ntfs filesystem family; support is determined by individual profiles.
     Ntfs,
-    /// Ext2 contract value.
+    /// Ext2 filesystem family; support is determined by individual profiles.
     Ext2,
-    /// Ext3 contract value.
+    /// Ext3 filesystem family; support is determined by individual profiles.
     Ext3,
-    /// Ext4 contract value.
+    /// Ext4 filesystem family; support is determined by individual profiles.
     Ext4,
-    /// Xfs contract value.
+    /// Xfs filesystem family; support is determined by individual profiles.
     Xfs,
-    /// Hfs contract value.
+    /// Hfs filesystem family; support is determined by individual profiles.
     Hfs,
-    /// HfsPlus contract value.
+    /// HfsPlus filesystem family; support is determined by individual profiles.
     HfsPlus,
-    /// HfsX contract value.
+    /// HfsX filesystem family; support is determined by individual profiles.
     HfsX,
-    /// Apfs contract value.
+    /// Apfs filesystem family; support is determined by individual profiles.
     Apfs,
-    /// Jfs contract value.
+    /// Jfs filesystem family; support is determined by individual profiles.
     Jfs,
-    /// Jffs2 contract value.
+    /// Jffs2 filesystem family; support is determined by individual profiles.
     Jffs2,
-    /// Udf contract value.
+    /// Udf filesystem family; support is determined by individual profiles.
     Udf,
-    /// Iso9660 contract value.
+    /// Iso9660 filesystem family; support is determined by individual profiles.
     Iso9660,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-/// enum Operation contract value.
+/// Independently gated filesystem operation or feature.
 pub enum Operation {
-    /// Recognize contract value.
+    /// Identify the format signature and candidate profile.
     Recognize,
-    /// ValidateMetadata contract value.
+    /// Strictly validate metadata needed for access.
     ValidateMetadata,
-    /// AuditAllocation contract value.
+    /// Establish complete ownership accounting under the profile.
     AuditAllocation,
-    /// DecodePayload contract value.
+    /// Decode file contents under supported feature states.
     DecodePayload,
-    /// Read contract value.
+    /// Provide positional file and stream access.
     Read,
-    /// Build contract value.
+    /// Author a new unpublished filesystem.
     Build,
-    /// Create contract value.
+    /// Allocate and create objects.
     Create,
-    /// Replace contract value.
+    /// Replace supported file ranges.
     Replace,
-    /// Truncate contract value.
+    /// Change file length with allocation accounting.
     Truncate,
-    /// Delete contract value.
+    /// Remove objects or entries.
     Delete,
-    /// Rename contract value.
+    /// Change directory entry names.
     Rename,
-    /// Link contract value.
+    /// Create additional entries for an existing identity.
     Link,
-    /// EditMetadata contract value.
+    /// Modify supported native metadata.
     EditMetadata,
-    /// Sparse contract value.
+    /// Represent sparse holes and unwritten extents.
     Sparse,
-    /// Compression contract value.
+    /// Decode or encode the declared compression profile.
     Compression,
-    /// Encryption contract value.
+    /// Access the declared encryption profile.
     Encryption,
-    /// Snapshots contract value.
+    /// Inspect or manage declared snapshot/clone semantics.
     Snapshots,
-    /// AuxiliaryDevices contract value.
+    /// Use explicitly authorized auxiliary storage.
     AuxiliaryDevices,
-    /// Recover contract value.
+    /// Replay or restore the declared recovery protocol.
     Recover,
-    /// Resize contract value.
+    /// Relocate allocations and change filesystem boundaries.
     Resize,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// enum Availability contract value.
+/// Explicit operation support and prerequisites.
 pub enum Availability {
-    /// Supported contract value.
+    /// Available under this precise profile and its stated conditions.
     Supported,
-    /// Unsupported contract value.
+    /// Unavailable with an explicit reason.
     Unsupported {
         /// Why this operation is unavailable.
         reason: String,
     },
-    /// Requires contract value.
+    /// Available only after satisfying the stated prerequisite.
     Requires {
         /// Prerequisite that must hold before the operation.
         condition: String,
     },
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// struct CapabilityProfile contract value.
+/// Per-profile capability and evidence report.
 pub struct CapabilityProfile {
-    /// family contract value.
+    /// On-disk format family; this alone does not imply support.
     pub family: Family,
-    /// profile contract value.
+    /// Precise version, feature set and operation scope.
     pub profile: String,
-    /// operations contract value.
+    /// Per-operation availability; absent operations remain unsupported.
     pub operations: Vec<(Operation, Availability)>,
-    /// durability contract value.
+    /// Declared flush, recovery and publication guarantees.
     pub durability: String,
-    /// validation evidence contract value.
+    /// Independent evidence establishing the advertised profile.
     pub validation_evidence: Vec<String>,
 }
 impl CapabilityProfile {
@@ -285,39 +280,39 @@ impl CapabilityProfile {
     }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// enum ErrorKind contract value.
+/// Structured failure category.
 pub enum ErrorKind {
-    /// InvalidData contract value.
+    /// Malformed or inconsistent native structures.
     InvalidData,
-    /// Unsupported contract value.
+    /// Unavailable with an explicit reason.
     Unsupported,
-    /// BudgetExhausted contract value.
+    /// A shared memory or declared work limit would be exceeded.
     BudgetExhausted,
-    /// InvalidOperation contract value.
+    /// An operation violates current object or session semantics.
     InvalidOperation,
-    /// StalePlan contract value.
+    /// Identity, generation or source state changed after planning.
     StalePlan,
-    /// Cancelled contract value.
+    /// Cancellation observed before an irreversible step.
     Cancelled,
-    /// InterruptedWrite contract value.
+    /// Mutation started and requires explicit recovery.
     InterruptedWrite,
-    /// UncertainDurability contract value.
+    /// Writes or barriers may have completed without durable confirmation.
     UncertainDurability,
-    /// Io contract value.
+    /// An underlying I/O operation failed; the source is retained.
     Io,
 }
 #[derive(Debug)]
-/// struct Error contract value.
+/// Filesystem failure retaining underlying I/O diagnostics.
 pub struct Error {
-    /// kind contract value.
+    /// Semantic category, interpreted under the selected profile.
     pub kind: ErrorKind,
-    /// context contract value.
+    /// Operation and object context explaining the failure.
     pub context: String,
-    /// source contract value.
+    /// Original underlying I/O failure, when this error was caused by I/O.
     pub source: Option<io::Error>,
 }
 impl Error {
-    /// fn new contract value.
+    /// Describe a semantic failure without an underlying I/O cause.
     pub fn new(kind: ErrorKind, context: impl Into<String>) -> Self {
         Self {
             kind,
@@ -325,7 +320,7 @@ impl Error {
             source: None,
         }
     }
-    /// fn io contract value.
+    /// Construct an I/O failure while retaining its original cause.
     pub fn io(context: impl Into<String>, source: io::Error) -> Self {
         Self {
             kind: ErrorKind::Io,
@@ -335,29 +330,27 @@ impl Error {
     }
 }
 impl fmt::Display for Error {
-    /// fn fmt contract value.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}: {}", self.kind, self.context)
     }
 }
 impl std::error::Error for Error {
-    /// fn source contract value.
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.source.as_ref().map(|e| e as _)
     }
 }
-/// type Result contract value.
+/// Filesystem operation result.
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Default, Debug)]
-/// struct Cancellation contract value.
+/// Shareable cooperative cancellation signal.
 pub struct Cancellation(Arc<AtomicBool>);
 impl Cancellation {
-    /// fn cancel contract value.
+    /// Signal cancellation to every clone.
     pub fn cancel(&self) {
         self.0.store(true, Ordering::Release);
     }
-    /// fn check contract value.
+    /// Return cancellation before starting the next bounded unit of work.
     pub fn check(&self) -> Result<()> {
         if self.0.load(Ordering::Acquire) {
             Err(Error::new(ErrorKind::Cancelled, "operation cancelled"))
@@ -368,24 +361,23 @@ impl Cancellation {
 }
 /// A shared concurrent accounting pool. A reservation refunds memory on drop.
 #[derive(Clone, Debug)]
-/// struct Budget contract value.
 pub struct Budget {
     limit: u64,
     used: Arc<AtomicU64>,
 }
 impl Budget {
-    /// fn new contract value.
+    /// Create a shared pool with a maximum retained byte charge.
     pub fn new(limit: u64) -> Self {
         Self {
             limit,
             used: Arc::new(AtomicU64::new(0)),
         }
     }
-    /// fn used contract value.
+    /// Read the currently reserved byte count.
     pub fn used(&self) -> u64 {
         self.used.load(Ordering::Acquire)
     }
-    /// fn reserve contract value.
+    /// Atomically reserve bytes or fail without changing shared accounting.
     pub fn reserve(&self, bytes: u64) -> Result<Reservation> {
         self.used
             .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
@@ -404,43 +396,89 @@ impl Budget {
     }
 }
 #[derive(Debug)]
-/// struct Reservation contract value.
+/// Owned refundable accounting charge.
 pub struct Reservation {
     budget: Budget,
     bytes: u64,
 }
 impl Drop for Reservation {
-    /// fn drop contract value.
     fn drop(&mut self) {
         self.budget.used.fetch_sub(self.bytes, Ordering::AcqRel);
     }
 }
+/// An owned result whose memory charge remains reserved for its entire lifetime.
+///
+/// The value is exposed by shared reference only: extracting or growing it would
+/// detach retained allocations from their accounting. Cloning a referenced value
+/// requires a separate reservation from the caller.
+#[derive(Debug)]
+pub struct Budgeted<T> {
+    value: T,
+    reservation: Reservation,
+}
+impl<T> Budgeted<T> {
+    /// Reserve an upper bound before constructing the value.
+    ///
+    /// `bytes` must include retained container capacities and all nested heap
+    /// allocations, with checked arithmetic. The constructor must use fallible
+    /// allocation and return `BudgetExhausted` on allocation failure. Temporary
+    /// scratch needs its own reservation. On failure the charge is refunded.
+    pub fn try_new(
+        budget: &Budget,
+        bytes: u64,
+        construct: impl FnOnce() -> Result<T>,
+    ) -> Result<Self> {
+        let reservation = budget.reserve(bytes)?;
+        Ok(Self {
+            value: construct()?,
+            reservation,
+        })
+    }
+
+    /// Inspect the retained value without releasing its charge.
+    pub fn get(&self) -> &T {
+        &self.value
+    }
+
+    /// Return the upper bound charged to the shared budget.
+    pub fn reserved_bytes(&self) -> u64 {
+        self.reservation.bytes
+    }
+}
+impl<T> std::ops::Deref for Budgeted<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.get()
+    }
+}
 /// Inventory and every metadata/cache/scratch consumer must retain reservations.
 #[derive(Clone, Debug)]
-/// struct Resources contract value.
 pub struct Resources {
-    /// memory contract value.
+    /// Shared accounting across inventory, caches and payload scratch.
     pub memory: Budget,
-    /// cancellation contract value.
+    /// Shared cancellation signal across deferred operations.
     pub cancellation: Cancellation,
 }
 
 /// Reusable immutable positional stream. No shared seek cursor or whole-file buffering.
 /// Reads at/after EOF return zero; short reads may occur before EOF. Engines must
 /// check cancellation and locally validate mappings, retaining shared accounting.
-/// Sharing a handle permits concurrent reads; it does not establish source isolation.
+/// A valid handle keeps its identity and logical length fixed. Source mutation
+/// must fail explicitly under the declared stability assurance. Sharing a handle
+/// permits concurrent reads; it does not establish source isolation.
 pub trait FileRead: Send + Sync {
-    /// fn identity contract value.
+    /// Return the source-scoped identity and generation for this handle.
     fn identity(&self) -> &ObjectId;
-    /// fn len contract value.
+    /// Return the logical stream length in bytes.
     fn len(&self) -> u64;
-    /// fn is empty contract value.
+    /// Report whether the logical stream length is zero.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    /// fn read at contract value.
+    /// Read a bounded range into caller storage; return the actual count.
     fn read_at(&self, offset: u64, buffer: &mut [u8], resources: &Resources) -> Result<usize>;
-    /// fn visit extents contract value.
+    /// Visit validated logical extents without buffering file contents.
     fn visit_extents(
         &self,
         resources: &Resources,
@@ -449,13 +487,14 @@ pub trait FileRead: Send + Sync {
 }
 /// Size-bounded convenience access. Retains the allocation reservation with its bytes.
 #[derive(Debug)]
-/// struct BoundedContent contract value.
 pub struct BoundedContent {
-    /// bytes contract value.
+    /// Owned payload bytes, charged to the retained memory reservation.
     pub bytes: Vec<u8>,
     _reservation: Reservation,
 }
-/// fn read all contract value.
+/// Read a size-bounded whole stream, handling short reads and rejecting observed
+/// identity or length changes. This check cannot establish snapshot isolation: a
+/// source must still uphold its declared stability assurance throughout reading.
 pub fn read_all(
     file: &dyn FileRead,
     maximum: u64,
@@ -502,41 +541,44 @@ pub fn read_all(
     })
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// enum SourceStability contract value.
+/// Actual deferred-read stability assurance.
 pub enum SourceStability {
-    /// ImmutableSnapshot contract value.
+    /// Source bytes are retained in a genuine immutable snapshot.
     ImmutableSnapshot,
-    /// CallerGuaranteedStable contract value.
+    /// Caller guarantees unchanged backing storage during all deferred access.
     CallerGuaranteedStable,
-    /// ChangeDetectionOnly contract value.
+    /// Changes can be detected, but concurrent mutation is not excluded.
     ChangeDetectionOnly,
 }
 /// Inventory is paged by the engine using an opaque continuation token. Hard links
 /// retain identical object identities. No host path lookup or implicit symlink following.
 pub struct DirectoryPage {
-    /// entries contract value.
+    /// Bounded page of native-name entries retaining hard-link identities.
     pub entries: Vec<DirectoryEntry>,
-    /// next contract value.
+    /// Opaque continuation token, or none at the end of iteration.
     pub next: Option<Vec<u8>>,
-    /// reservation contract value.
+    /// Memory charge retained while the page remains alive.
     pub reservation: Reservation,
 }
-/// trait TreeSource contract value.
+/// Bounded native tree inventory and deferred content source.
 /// Implementations must check source-scoped identities and generation on every
 /// operation. Reusing an identifier after deletion must change its generation.
 /// All returned inventory, metadata, and stream lists count against shared memory
 /// accounting; directory pages carry reservations for their entire retained data.
+/// Reserve before allocation, use checked size arithmetic and fallible allocation,
+/// and charge capacities, nested names, opaque metadata, and continuation tokens.
+/// Scratch and caches share the same pool but retain their own reservations.
 /// Deferred payload errors retain their I/O cause and never become empty files.
 /// Open streams must remain valid under the declared stability assurance, or fail
 /// explicitly if the source changes. Repeated reads must produce the same bytes.
 pub trait TreeSource: Send + Sync {
-    /// fn root contract value.
+    /// Return the source-scoped root identity.
     fn root(&self) -> ObjectId;
-    /// fn stability contract value.
+    /// Report actual source isolation assurance.
     fn stability(&self) -> SourceStability;
-    /// fn metadata contract value.
-    fn metadata(&self, object: &ObjectId, resources: &Resources) -> Result<Metadata>;
-    /// fn directory page contract value.
+    /// Inspect native metadata without conflating absent and unknown fields.
+    fn metadata(&self, object: &ObjectId, resources: &Resources) -> Result<Budgeted<Metadata>>;
+    /// Read at most the requested number of entries using an opaque continuation.
     fn directory_page(
         &self,
         directory: &ObjectId,
@@ -544,9 +586,13 @@ pub trait TreeSource: Send + Sync {
         maximum_entries: usize,
         resources: &Resources,
     ) -> Result<DirectoryPage>;
-    /// fn streams contract value.
-    fn streams(&self, object: &ObjectId, resources: &Resources) -> Result<Vec<StreamInfo>>;
-    /// fn open stream contract value.
+    /// Enumerate object-owned ordinary, named and fork streams.
+    fn streams(
+        &self,
+        object: &ObjectId,
+        resources: &Resources,
+    ) -> Result<Budgeted<Vec<StreamInfo>>>;
+    /// Open reusable deferred positional access to one owned stream.
     fn open_stream(
         &self,
         object: &ObjectId,
@@ -560,18 +606,17 @@ pub trait TreeSource: Send + Sync {
 
 /// Reviewable decision for each metadata class; opaque bytes are never presumed relocatable.
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// enum Preservation contract value.
 pub enum Preservation {
-    /// Preserve contract value.
+    /// Retain the supported native semantics exactly.
     Preserve,
-    /// Transform contract value.
+    /// Apply an explicit transformation and report its information loss.
     Transform {
         /// Explicit transformation policy.
         policy: String,
         /// Declared information loss.
         report: String,
     },
-    /// Reject contract value.
+    /// Refuse unsupported preservation before emission.
     Reject {
         /// Unsupported preservation requirement.
         reason: String,
@@ -590,9 +635,9 @@ pub trait TreeSink {
     type Plan;
     /// Verification evidence and preservation outcomes.
     type Report;
-    /// fn plan contract value.
+    /// Inventory and preflight the source before any payload mutation.
     fn plan(&mut self, source: &dyn TreeSource, resources: &Resources) -> Result<Self::Plan>;
-    /// fn emit contract value.
+    /// Stream the preflighted payload and metadata into unpublished staging.
     fn emit(
         &mut self,
         plan: &Self::Plan,

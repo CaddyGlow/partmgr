@@ -32,6 +32,8 @@ pub use partition::PartitionTable;
 pub mod conversion;
 /// Lossless filesystem contracts, resource accounting, and operation capabilities.
 pub mod fs_core;
+/// Strict baseline FAT geometry and bounded allocation-chain file reads.
+pub mod fs_fat;
 /// Indexed positional access to validated uncompressed file extents.
 pub mod fs_file;
 /// Bounded storage sessions and immutable filesystem read regions.

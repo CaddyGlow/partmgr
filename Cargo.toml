@@ -1,0 +1,23 @@
+[package]
+name = "partmgr"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+repository = "https://github.com/CaddyGlow/partmgr"
+description = "Strict read-only GPT and MBR partition table parsing over virtdisk readers"
+
+[dependencies]
+virtdisk = { version = "0.1.0", path = "../virtdisk" }
+
+[dev-dependencies]
+tempfile = "3.23"
+sha2 = "0.10"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+chunks_exact_to_as_chunks = "allow"
+
+[workspace]

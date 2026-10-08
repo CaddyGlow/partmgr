@@ -1,0 +1,143 @@
+//! Complete common native tree inventory for the explicitly audited classic HFS profiles.
+use crate::{
+    fs_core::*,
+    fs_hfs::{HfsVolume, bad, budget, vector},
+    fs_hfs_audit::{HfsAuditLimits, audit_hfs},
+};
+use std::sync::Arc;
+/// Complete native inventory. No system namespace or resource fork is silently excluded.
+pub struct HfsTreeSource {
+    volume: HfsVolume,
+}
+impl HfsTreeSource {
+    /// Require complete clean allocation/reference audit and caller-selected inventory caps.
+    pub fn inventory(volume: HfsVolume, limits: HfsAuditLimits, r: &Resources) -> Result<Self> {
+        let proof = audit_hfs(&volume, limits, r)?;
+        if !proof.is_clean() {
+            return Err(bad("HFS tree requires clean complete profile audit"));
+        }
+        Ok(Self { volume })
+    }
+    /// Indexed immutable source volume.
+    pub fn volume(&self) -> &HfsVolume {
+        &self.volume
+    }
+    fn token(&self, id: &ObjectId, index: usize) -> Result<Vec<u8>> {
+        let n: u64 = index.try_into().map_err(|_| budget("HFS page cursor"))?;
+        let mut v = vector(36)?;
+        v.extend_from_slice(&id.source.to_be_bytes());
+        v.extend_from_slice(&id.generation.to_be_bytes());
+        v.extend_from_slice(&id.native);
+        v.extend_from_slice(&n.to_be_bytes());
+        Ok(v)
+    }
+}
+impl TreeSource for HfsTreeSource {
+    fn root(&self) -> ObjectId {
+        self.volume.root_identity()
+    }
+    fn stability(&self) -> SourceStability {
+        SourceStability::CallerGuaranteedStable
+    }
+    fn metadata(&self, id: &ObjectId, r: &Resources) -> Result<Budgeted<Metadata>> {
+        self.volume.metadata(id, r)
+    }
+    fn directory_page(
+        &self,
+        id: &ObjectId,
+        continuation: Option<&[u8]>,
+        maximum: usize,
+        r: &Resources,
+    ) -> Result<DirectoryPage> {
+        if maximum == 0 {
+            return Err(budget("HFS zero page maximum"));
+        }
+        self.volume.revalidate(id, r)?;
+        let entries = self.volume.directory(id, r)?;
+        let start = if let Some(t) = continuation {
+            if t.len() != 36 || t[..28] != self.token(id, 0)?[..28] {
+                return Err(Error::new(
+                    ErrorKind::StalePlan,
+                    "foreign HFS page continuation",
+                ));
+            }
+            usize::try_from(u64::from_be_bytes(t[28..36].try_into().unwrap()))
+                .map_err(|_| bad("HFS cursor size"))?
+        } else {
+            0
+        };
+        if start > entries.get().len() {
+            return Err(bad("HFS page cursor bounds"));
+        }
+        let n = maximum.min(entries.get().len() - start);
+        let lease = r.memory.reserve(
+            (n as u64)
+                .checked_mul(768)
+                .and_then(|n| n.checked_add(256))
+                .ok_or_else(|| budget("HFS page charge"))?,
+        )?;
+        let mut out = vector(n)?;
+        for e in &entries.get()[start..start + n] {
+            r.cancellation.check()?;
+            let NativeName::Bytes(units) = &e.name else {
+                return Err(bad("HFS native name class"));
+            };
+            let mut name = vector(units.len())?;
+            name.extend_from_slice(units);
+            let mut native = vector(e.object.native.len())?;
+            native.extend_from_slice(&e.object.native);
+            out.push(DirectoryEntry {
+                name: NativeName::Bytes(name),
+                object: ObjectId {
+                    source: e.object.source,
+                    generation: e.object.generation,
+                    native,
+                },
+                kind: if e.kind == ObjectKind::Directory {
+                    ObjectKind::Directory
+                } else {
+                    ObjectKind::File
+                },
+            });
+        }
+        let next = if start + n < entries.get().len() {
+            Some(self.token(id, start + n)?)
+        } else {
+            None
+        };
+        Ok(DirectoryPage {
+            entries: out,
+            next,
+            reservation: lease,
+        })
+    }
+    fn streams(&self, id: &ObjectId, r: &Resources) -> Result<Budgeted<Vec<StreamInfo>>> {
+        self.volume.revalidate(id, r)?;
+        let node = self.volume.node(id)?;
+        Budgeted::try_new(&r.memory, 256, || {
+            let mut streams = vector(2)?;
+            if !node.directory {
+                streams.push(StreamInfo {
+                    kind: StreamKind::Data,
+                    length: node.forks[0].length,
+                });
+                streams.push(StreamInfo {
+                    kind: StreamKind::ResourceFork,
+                    length: node.forks[1].length,
+                });
+            }
+            Ok(streams)
+        })
+    }
+    fn open_stream(
+        &self,
+        id: &ObjectId,
+        kind: &StreamKind,
+        r: &Resources,
+    ) -> Result<Arc<dyn FileRead>> {
+        Ok(Arc::new(self.volume.open_fork(id, kind, r)?))
+    }
+    fn revalidate(&self, id: &ObjectId, r: &Resources) -> Result<()> {
+        self.volume.revalidate(id, r)
+    }
+}

@@ -8,6 +8,10 @@ permissions:
   contents: read
 jobs:
   ovmf:
+    strategy:
+      fail-fast: false
+      matrix:
+        fat-source: [native, framework]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -18,11 +22,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf dosfstools mtools fdisk
       - name: Observe GPT and MBR fallback EFI execution
-        run: python3 scripts/firmware-gate.py --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd --output target/firmware-evidence
+        run: python3 scripts/firmware-gate.py --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd --fat-source ${{ matrix.fat-source }} --output target/firmware-evidence-${{ matrix.fat-source }}
       - name: Preserve firmware integration evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-evidence
-          path: target/firmware-evidence
+          name: firmware-evidence-${{ matrix.fat-source }}
+          path: target/firmware-evidence-${{ matrix.fat-source }}
           if-no-files-found: error

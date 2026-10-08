@@ -1,0 +1,42 @@
+{
+  "profile": "partmgr external undo version1 independent wire fixtures",
+  "generator_archive": "fuzz/fixtures/undo-generator.rs.txt",
+  "generator_sha256": "5a50f5a380800862af498d75e759180c1b6e2263626089fa68296f7894703dff",
+  "production_codec_used": false,
+  "body": "one patch at byte13, 8 before bytes=1 and 8 after bytes=2; 64KiB target",
+  "header": "two512-byte slots, SHA256 over first480 bytes; saved body starts1024; independent sha2 integrity fields",
+  "states": [
+    "Prepared",
+    "Committed",
+    "empty",
+    "out-of-range",
+    "oversized count"
+  ],
+  "normalization": "only header/body digests recomputed; version/state/reserved/binding/length/count/offset remain mutated",
+  "seeds": {
+    "seed-0": {
+      "bytes": 1056,
+      "sha256": "a7d789c3f13aaab8b6e0f9bf0e0384a6020a56257a85e5cca959f2821f313cab"
+    },
+    "seed-1": {
+      "bytes": 1056,
+      "sha256": "d5ce431340761347a0df4b28c0492a8a709145497f6a7afa56a43d5a89719ce9"
+    },
+    "seed-2": {
+      "bytes": 1056,
+      "sha256": "7b0323bb0ea5e09170bd3e81c49514cc8090463de56e65f7c0d2b83390fe79f0"
+    },
+    "seed-3": {
+      "bytes": 1056,
+      "sha256": "e05b42e4a4d983486f8460d962f3e0ba33eeaee071f920b06ffbc20a7f180ab4"
+    },
+    "seed-4": {
+      "bytes": 1024,
+      "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+    },
+    "seed-5": {
+      "bytes": 8,
+      "sha256": "d6f3c13cd575c36c0dd6489a810b8bf159fb1253ffb0c98d25b952ce625b442e"
+    }
+  }
+}

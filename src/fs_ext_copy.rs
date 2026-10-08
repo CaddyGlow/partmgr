@@ -1,0 +1,456 @@
+//! Deferred common-tree capture into unpublished classic ext2 with preserved hardlinks.
+use crate::{
+    fs_copy::{CopyLimits, MetadataOutcome},
+    fs_core::*,
+    fs_ext_builder::{
+        ExtBuildLimits, ExtBuildLink, ExtBuildMetadata, ExtBuildObject, ExtBuildOptions,
+        ExtBuildPlan, ExtBuildReport, ExtBuildSource,
+    },
+    storage::Storage,
+};
+use std::{
+    collections::{HashMap, VecDeque},
+    io,
+    sync::Arc,
+};
+/// Explicit native name conversion policy.
+#[derive(Clone, Copy, Debug)]
+pub enum ExtCopyNamePolicy {
+    /// Keep byte names exactly; reject UTF16 names.
+    ExactBytes,
+    /// Keep byte names exactly; encode valid UTF16 names as UTF8, rejecting unpaired surrogates.
+    BytesAndUtf16ToUtf8,
+}
+/// Required metadata treatment; preservation is not implemented in this profile.
+#[derive(Clone, Copy, Debug)]
+pub enum ExtCopyMetadataPolicy {
+    /// Caller-selected global native defaults replace source metadata.
+    ContentOnlyDefaults(ExtBuildMetadata),
+    /// Reject before emission because arbitrary metadata preservation is unavailable.
+    RequirePreservation,
+}
+/// Geometry, conversion, metadata and independent inventory/build ceilings.
+pub struct ExtCopyOptions {
+    /// Exact unpublished destination length.
+    pub image_bytes: u64,
+    /// Classic ext2 geometry and UUID.
+    pub filesystem: ExtBuildOptions,
+    /// Explicit handling of native names.
+    pub names: ExtCopyNamePolicy,
+    /// Authorized source metadata treatment.
+    pub metadata: ExtCopyMetadataPolicy,
+    /// Unique objects including root and pagination bounds.
+    pub limits: CopyLimits,
+    /// Destination object/link/name/allocation/depth bounds.
+    pub build_limits: ExtBuildLimits,
+}
+/// Reviewed retained source inventory and deterministic unpublished destination.
+pub struct ExtCopyPlan {
+    source: Arc<dyn TreeSource>,
+    objects: Vec<ObjectId>,
+    files: Vec<Arc<FileInput>>,
+    build: ExtBuildPlan,
+    outcomes: Vec<MetadataOutcome>,
+    _reservation: Reservation,
+}
+struct FileInput {
+    source: Arc<dyn TreeSource>,
+    file: Arc<dyn FileRead>,
+    identity: ObjectId,
+    length: u64,
+    resources: Resources,
+}
+impl FileInput {
+    fn validate(&self, resources: &Resources) -> Result<()> {
+        resources.cancellation.check()?;
+        self.resources.cancellation.check()?;
+        self.source.revalidate(&self.identity, resources)?;
+        if self.file.identity() != &self.identity || self.file.len() != self.length {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "ext2 copy source stream identity/size changed",
+            ));
+        }
+        Ok(())
+    }
+}
+impl FileRead for FileInput {
+    fn identity(&self) -> &ObjectId {
+        &self.identity
+    }
+    fn len(&self) -> u64 {
+        self.file.len()
+    }
+    fn read_at(&self, offset: u64, out: &mut [u8], resources: &Resources) -> Result<usize> {
+        self.validate(resources)?;
+        let n = self.length.saturating_sub(offset).min(out.len() as u64) as usize;
+        let mut done = 0;
+        while done < n {
+            resources.cancellation.check()?;
+            let count = self
+                .file
+                .read_at(offset + done as u64, &mut out[done..n], resources)?;
+            if count == 0 || count > n - done {
+                return Err(Error::io(
+                    "ext2 copy source invalid count",
+                    io::ErrorKind::UnexpectedEof.into(),
+                ));
+            }
+            done += count;
+        }
+        self.validate(resources)?;
+        Ok(n)
+    }
+    fn visit_extents(
+        &self,
+        resources: &Resources,
+        visitor: &mut dyn FnMut(LogicalExtent) -> Result<()>,
+    ) -> Result<()> {
+        self.validate(resources)?;
+        self.file.visit_extents(resources, visitor)?;
+        self.validate(resources)
+    }
+}
+fn outcome<T>(
+    object: &ObjectId,
+    class: &'static str,
+    field: &MetadataField<T>,
+    out: &mut Vec<MetadataOutcome>,
+) {
+    let decision = match field {
+        MetadataField::Absent => Preservation::Transform {
+            policy: "content-only deterministic defaults".into(),
+            report: "source class absent; destination defaults or omission applied".into(),
+        },
+        MetadataField::Uninspectable { .. } => Preservation::Transform {
+            policy: "content-only deterministic defaults".into(),
+            report: "source class uninspectable; preservation is unverified and not claimed".into(),
+        },
+        MetadataField::Known(_) | MetadataField::Opaque { .. } => Preservation::Transform {
+            policy: "content-only deterministic defaults".into(),
+            report: "source metadata omitted; deterministic ext2 defaults applied".into(),
+        },
+    };
+    out.push(MetadataOutcome {
+        object: object.clone(),
+        class,
+        decision,
+    });
+}
+
+fn invalid(message: &str) -> Error {
+    Error::new(ErrorKind::InvalidData, message)
+}
+fn unsupported(message: &str) -> Error {
+    Error::new(ErrorKind::Unsupported, message)
+}
+fn budget(message: &str) -> Error {
+    Error::new(ErrorKind::BudgetExhausted, message)
+}
+fn convert(name: &NativeName, policy: ExtCopyNamePolicy) -> Result<Vec<u8>> {
+    if matches!(name, NativeName::Bytes(bytes) if bytes.len() > 255)
+        || matches!(name, NativeName::Utf16(units) if units.len() > 255)
+    {
+        return Err(invalid("ext2 copy native name exceeds bounded profile"));
+    }
+    let bytes = match name {
+        NativeName::Bytes(bytes) => bytes.clone(),
+        NativeName::Utf16(units) if matches!(policy, ExtCopyNamePolicy::BytesAndUtf16ToUtf8) => {
+            String::from_utf16(units)
+                .map_err(|_| unsupported("ext2 copy UTF16 name has unpaired surrogates"))?
+                .into_bytes()
+        }
+        _ => return Err(unsupported("ext2 copy requires explicit UTF16 conversion")),
+    };
+    if bytes.is_empty()
+        || bytes.len() > 255
+        || bytes.contains(&0)
+        || bytes.contains(&b'/')
+        || bytes == b"."
+        || bytes == b".."
+    {
+        return Err(invalid("ext2 copy invalid native name"));
+    }
+    Ok(bytes)
+}
+impl ExtCopyPlan {
+    /// Preflight a stable deferred inventory. Regular hardlinks are preserved;
+    /// directory aliases, symlinks, special objects and additional streams reject.
+    pub fn new(
+        source: Arc<dyn TreeSource>,
+        options: ExtCopyOptions,
+        r: &Resources,
+    ) -> Result<Self> {
+        r.cancellation.check()?;
+        let defaults = match options.metadata {
+            ExtCopyMetadataPolicy::ContentOnlyDefaults(defaults) => defaults,
+            ExtCopyMetadataPolicy::RequirePreservation => {
+                return Err(unsupported("ext2 copy metadata preservation unavailable"));
+            }
+        };
+        let limits = options.limits;
+        if limits.objects == 0 || limits.pages == 0 || limits.page_entries == 0 {
+            return Err(invalid("ext2 copy inventory limits must be positive"));
+        }
+        if source.stability() == SourceStability::ChangeDetectionOnly {
+            return Err(unsupported(
+                "ext2 copy requires stable input or immutable snapshot",
+            ));
+        }
+        let charge = (limits.objects as u128)
+            .checked_mul(16384)
+            .and_then(|n| n.checked_add(options.build_limits.links as u128 * 1024))
+            .and_then(|n| u64::try_from(n).ok())
+            .ok_or_else(|| budget("ext2 copy reservation overflow"))?;
+        let reservation = r.memory.reserve(charge)?;
+        let root = source.root();
+        if root.native.len() > 256 {
+            return Err(unsupported(
+                "ext2 copy source identity exceeds bounded profile",
+            ));
+        }
+        let mut objects = Vec::new();
+        objects
+            .try_reserve_exact(limits.objects)
+            .map_err(|_| budget("ext2 copy objects"))?;
+        objects.push(root.clone());
+        let mut definitions = Vec::new();
+        definitions
+            .try_reserve_exact(limits.objects)
+            .map_err(|_| budget("ext2 copy definitions"))?;
+        let mut links = Vec::new();
+        links
+            .try_reserve_exact(options.build_limits.links)
+            .map_err(|_| budget("ext2 copy links"))?;
+        let mut files = Vec::new();
+        files
+            .try_reserve_exact(limits.objects)
+            .map_err(|_| budget("ext2 copy files"))?;
+        let mut kinds = HashMap::new();
+        kinds
+            .try_reserve(limits.objects)
+            .map_err(|_| budget("ext2 copy identities"))?;
+        kinds.insert(root.clone(), ObjectKind::Directory);
+        let mut directories = VecDeque::new();
+        directories
+            .try_reserve(limits.objects)
+            .map_err(|_| budget("ext2 copy directory queue"))?;
+        directories.push_back(root.clone());
+        let mut pages = 0usize;
+        while let Some(directory) = directories.pop_front() {
+            source.revalidate(&directory, r)?;
+            if !source.streams(&directory, r)?.is_empty() {
+                return Err(unsupported("ext2 copy cannot represent directory streams"));
+            }
+            let mut continuation = None;
+            loop {
+                r.cancellation.check()?;
+                if pages == limits.pages {
+                    return Err(budget("ext2 copy page limit"));
+                }
+                pages += 1;
+                let page = source.directory_page(
+                    &directory,
+                    continuation.as_deref(),
+                    limits.page_entries,
+                    r,
+                )?;
+                if page.entries.len() > limits.page_entries {
+                    return Err(invalid("ext2 copy oversized source page"));
+                }
+                for entry in &page.entries {
+                    if entry.object.source != root.source || entry.object.native.len() > 256 {
+                        return Err(invalid("ext2 copy foreign or oversized identity"));
+                    }
+                    if !matches!(entry.kind, ObjectKind::File | ObjectKind::Directory) {
+                        return Err(unsupported(
+                            "ext2 copy symlinks and special objects unavailable",
+                        ));
+                    }
+                    if links.len() == options.build_limits.links {
+                        return Err(budget("ext2 copy link limit"));
+                    }
+                    let name = convert(&entry.name, options.names)?;
+                    if let Some(kind) = kinds.get(&entry.object) {
+                        if *kind != entry.kind || entry.kind == ObjectKind::Directory {
+                            return Err(invalid(
+                                "ext2 copy directory alias or inconsistent object kind",
+                            ));
+                        }
+                    } else {
+                        if objects.len() == limits.objects {
+                            return Err(budget("ext2 copy unique object limit"));
+                        }
+                        source.revalidate(&entry.object, r)?;
+                        kinds.insert(entry.object.clone(), entry.kind.clone());
+                        objects.push(entry.object.clone());
+                        let input = if entry.kind == ObjectKind::Directory {
+                            directories.push_back(entry.object.clone());
+                            None
+                        } else {
+                            let streams = source.streams(&entry.object, r)?;
+                            if streams.len() != 1 || streams[0].kind != StreamKind::Data {
+                                return Err(unsupported(
+                                    "ext2 copy requires one unnamed data stream",
+                                ));
+                            }
+                            let file = source.open_stream(&entry.object, &StreamKind::Data, r)?;
+                            if file.identity() != &entry.object || file.len() != streams[0].length {
+                                return Err(invalid(
+                                    "ext2 copy source stream identity/length mismatch",
+                                ));
+                            }
+                            let input = Arc::new(FileInput {
+                                source: source.clone(),
+                                length: file.len(),
+                                identity: entry.object.clone(),
+                                file,
+                                resources: r.clone(),
+                            });
+                            input.validate(r)?;
+                            files.push(input.clone());
+                            Some(ExtBuildSource::File(input))
+                        };
+                        definitions.push(ExtBuildObject {
+                            identity: entry.object.clone(),
+                            source: input,
+                        });
+                    }
+                    links.push(ExtBuildLink {
+                        object: entry.object.clone(),
+                        parent: if directory == root {
+                            None
+                        } else {
+                            Some(directory.clone())
+                        },
+                        name,
+                    });
+                }
+                continuation = page.next.clone();
+                if continuation
+                    .as_ref()
+                    .is_some_and(|token| token.len() > 1024)
+                {
+                    return Err(unsupported("ext2 copy oversized continuation token"));
+                }
+                if continuation.is_none() {
+                    break;
+                }
+            }
+        }
+        let mut outcomes = Vec::new();
+        outcomes
+            .try_reserve_exact(
+                objects
+                    .len()
+                    .checked_mul(12)
+                    .ok_or_else(|| budget("ext2 copy outcomes overflow"))?,
+            )
+            .map_err(|_| budget("ext2 copy outcomes"))?;
+        for object in &objects {
+            source.revalidate(object, r)?;
+            let metadata = source.metadata(object, r)?;
+            outcome(object, "created", &metadata.created, &mut outcomes);
+            outcome(object, "modified", &metadata.modified, &mut outcomes);
+            outcome(object, "accessed", &metadata.accessed, &mut outcomes);
+            outcome(object, "owner", &metadata.owner, &mut outcomes);
+            outcome(object, "mode", &metadata.mode, &mut outcomes);
+            outcome(object, "security", &metadata.security, &mut outcomes);
+            outcome(
+                object,
+                "native_flags",
+                &metadata.native_flags,
+                &mut outcomes,
+            );
+            outcome(
+                object,
+                "symlink_target",
+                &metadata.symlink_target,
+                &mut outcomes,
+            );
+            outcome(
+                object,
+                "reparse_data",
+                &metadata.reparse_data,
+                &mut outcomes,
+            );
+            outcomes.push(MetadataOutcome {
+                object: object.clone(),
+                class: "attributes",
+                decision: Preservation::Transform {
+                    policy: "content-only caller defaults".into(),
+                    report: "source extended attributes omitted".into(),
+                },
+            });
+            outcomes.push(MetadataOutcome {
+                object: object.clone(),
+                class: "names",
+                decision: Preservation::Transform {
+                    policy: format!("{policy:?}", policy = options.names),
+                    report: "byte names exact; UTF16 conversion only when explicitly selected"
+                        .into(),
+                },
+            });
+            outcomes.push(MetadataOutcome {
+                object: object.clone(),
+                class: "hardlinks",
+                decision: Preservation::Preserve,
+            });
+        }
+        let build = ExtBuildPlan::new(
+            options.image_bytes,
+            options.filesystem,
+            definitions,
+            links,
+            defaults,
+            options.build_limits,
+            r,
+        )?;
+        Ok(Self {
+            source,
+            objects,
+            files,
+            build,
+            outcomes,
+            _reservation: reservation,
+        })
+    }
+    /// Per-object metadata, name and hardlink decisions before mutation.
+    pub fn outcomes(&self) -> &[MetadataOutcome] {
+        &self.outcomes
+    }
+    /// Emit, flush and fully verify an unpublished image; no output publication.
+    pub fn emit(
+        &self,
+        storage: &mut (impl Storage + ?Sized),
+        r: &Resources,
+    ) -> Result<ExtBuildReport> {
+        for object in &self.objects {
+            r.cancellation.check()?;
+            self.source.revalidate(object, r)?;
+        }
+        for file in &self.files {
+            file.validate(r)?;
+        }
+        let report = self.build.emit(storage, r)?;
+        let post: Result<()> = (|| {
+            for file in &self.files {
+                file.validate(r)?;
+            }
+            for object in &self.objects {
+                r.cancellation.check()?;
+                self.source.revalidate(object, r)?;
+            }
+            Ok(())
+        })();
+        if let Err(mut error) = post {
+            error.kind = ErrorKind::InterruptedWrite;
+            error.context = format!(
+                "ext2 copy source validation after staged emission: {}",
+                error.context
+            );
+            return Err(error);
+        }
+        Ok(report)
+    }
+}

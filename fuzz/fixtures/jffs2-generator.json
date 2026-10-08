@@ -1,0 +1,17 @@
+{
+  "profile": "jffs2-logical-nor-none-zero-history-v1",
+  "generator": "jffs2-generator.rs.txt",
+  "source": "tests/fixtures/jffs2_clean.rs",
+  "source_sha256": "594690d43ad585339cab11aad014e4e6e851d078ba5693c6439696847251dc23",
+  "independent_of_production_codec": true,
+  "geometry": {
+    "erase_bytes": 4096,
+    "program_bytes": 4,
+    "erased_byte": 255
+  },
+  "seed_bytes": 8192,
+  "little_endian_payload_hex": "616258590000",
+  "big_endian_seed": "jffs2_seed(true)",
+  "scope": "Specification constructor; native mtd-utils/Jefferson evidence remains separate",
+  "seed_sha256": "dc7654b10fdaa42f47f40f4fa724bc70d021207086dbc813fb8cb32e701fad51"
+}

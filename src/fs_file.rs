@@ -36,18 +36,23 @@ pub struct FileExtent {
 #[derive(Clone)]
 pub struct ExtentFile {
     source: Arc<dyn ReadAt>,
+    map: ExtentMap,
+}
+
+/// Source-independent checked index. Wrappers establish source stability and ownership.
+#[derive(Clone)]
+pub(crate) struct ExtentMap {
     length: u64,
     extents: Arc<[FileExtent]>,
 }
-
-impl ExtentFile {
+impl ExtentMap {
     /// Validate a complete ordered map and coalesce physically adjacent ranges.
     ///
     /// `max_extents` bounds the input index, including ranges later coalesced.
     /// Gaps must be declared explicitly as holes. The caller's input allocation
     /// precedes this check; engines must enforce the budget while decoding too.
     pub fn new(
-        source: Arc<dyn ReadAt>,
+        source_length: u64,
         length: u64,
         extents: Vec<FileExtent>,
         max_extents: usize,
@@ -57,7 +62,10 @@ impl ExtentFile {
         }
         let invalid = || io::Error::new(io::ErrorKind::InvalidData, "invalid file extent map");
         let mut position = 0u64;
-        let mut index: Vec<FileExtent> = Vec::with_capacity(extents.len());
+        let mut index: Vec<FileExtent> = Vec::new();
+        index
+            .try_reserve_exact(extents.len())
+            .map_err(io::Error::other)?;
         for extent in extents {
             if extent.offset != position || extent.length == 0 {
                 return Err(invalid());
@@ -69,7 +77,7 @@ impl ExtentFile {
             if let ExtentKind::Data(offset) = extent.kind
                 && offset
                     .checked_add(extent.length)
-                    .is_none_or(|end| end > source.len())
+                    .is_none_or(|end| end > source_length)
             {
                 return Err(invalid());
             }
@@ -93,7 +101,6 @@ impl ExtentFile {
             return Err(invalid());
         }
         Ok(Self {
-            source,
             length,
             extents: index.into(),
         })
@@ -119,7 +126,12 @@ impl ExtentFile {
     /// Offset beyond EOF is rejected, even with an empty buffer. On backend
     /// failure the buffer may have been partly modified and must be discarded.
     /// Reads issue no host calls for holes and no payload-sized allocations.
-    pub fn read_at(&self, offset: u64, out: &mut [u8]) -> io::Result<usize> {
+    pub fn read_at_with(
+        &self,
+        offset: u64,
+        out: &mut [u8],
+        mut read: impl FnMut(u64, &mut [u8]) -> io::Result<()>,
+    ) -> io::Result<usize> {
         if offset > self.length {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
@@ -138,14 +150,42 @@ impl ExtentFile {
             let n = (extent.length - within).min((count - done) as u64) as usize;
             let chunk = &mut out[done..done + n];
             match extent.kind {
-                ExtentKind::Data(physical) => {
-                    self.source.read_exact_at(physical + within, chunk)?
-                }
+                ExtentKind::Data(physical) => read(physical + within, chunk)?,
                 ExtentKind::Hole | ExtentKind::Unwritten => chunk.fill(0),
             }
             done += n;
             i += 1;
         }
         Ok(done)
+    }
+}
+
+impl ExtentFile {
+    /// Validate complete ordered mapping for an immutable source.
+    pub fn new(
+        source: Arc<dyn ReadAt>,
+        length: u64,
+        extents: Vec<FileExtent>,
+        max_extents: usize,
+    ) -> io::Result<Self> {
+        let map = ExtentMap::new(source.len(), length, extents, max_extents)?;
+        Ok(Self { source, map })
+    }
+    /// Logical file size.
+    pub fn len(&self) -> u64 {
+        self.map.len()
+    }
+    /// Whether the file is empty.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+    /// Validated ordered extents.
+    pub fn extents(&self) -> &[FileExtent] {
+        self.map.extents()
+    }
+    /// Positional read; backend errors may leave partial bytes in the caller buffer.
+    pub fn read_at(&self, offset: u64, out: &mut [u8]) -> io::Result<usize> {
+        self.map
+            .read_at_with(offset, out, |at, buf| self.source.read_exact_at(at, buf))
     }
 }

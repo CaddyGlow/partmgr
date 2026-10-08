@@ -1,0 +1,114 @@
+//! Independent logical NOR JFFS2 fixture; no production codec imports.
+// Independent raw node constructor, with explicit byte order and bitwise CRCs.
+pub(crate) fn crc(b: &[u8]) -> u32 {
+    let mut c = 0;
+    for &x in b {
+        c ^= u32::from(x);
+        for _ in 0..8 {
+            c = if c & 1 == 0 {
+                c >> 1
+            } else {
+                (c >> 1) ^ 0xedb88320
+            };
+        }
+    }
+    c
+}
+fn word(b: &mut [u8], p: usize, n: u16, big: bool) {
+    b[p..p + 2].copy_from_slice(&if big {
+        n.to_be_bytes()
+    } else {
+        n.to_le_bytes()
+    });
+}
+pub(crate) fn dword(b: &mut [u8], p: usize, n: u32, big: bool) {
+    b[p..p + 4].copy_from_slice(&if big {
+        n.to_be_bytes()
+    } else {
+        n.to_le_bytes()
+    });
+}
+fn finish(mut b: Vec<u8>, typ: u16, big: bool) -> Vec<u8> {
+    word(&mut b, 0, 0x1985, big);
+    word(&mut b, 2, typ, big);
+    let len = b.len() as u32;
+    dword(&mut b, 4, len, big);
+    let c = crc(&b[..8]);
+    dword(&mut b, 8, c, big);
+    if typ == 0xe002 {
+        let c = crc(&b[..60]);
+        dword(&mut b, 64, c, big);
+    } else if typ == 0xe001 {
+        let c = crc(&b[..32]);
+        dword(&mut b, 32, c, big);
+    }
+    b.resize(b.len().next_multiple_of(4), 255);
+    b
+}
+pub(crate) fn inode(
+    identity: (u32, u32),
+    shape: (u32, u32),
+    offset: u32,
+    data: &[u8],
+    zero: u32,
+    big: bool,
+) -> Vec<u8> {
+    let (n, ver) = identity;
+    let (mode, size) = shape;
+    let mut b = vec![0; 68];
+    dword(&mut b, 12, n, big);
+    dword(&mut b, 16, ver, big);
+    dword(&mut b, 20, mode, big);
+    word(&mut b, 24, 123, big);
+    word(&mut b, 26, 456, big);
+    dword(&mut b, 28, size, big);
+    dword(&mut b, 32, 7, big);
+    dword(&mut b, 36, 8, big);
+    dword(&mut b, 40, 9, big);
+    dword(&mut b, 44, offset, big);
+    dword(&mut b, 48, data.len() as u32, big);
+    dword(
+        &mut b,
+        52,
+        if zero > 0 { zero } else { data.len() as u32 },
+        big,
+    );
+    b[56] = u8::from(zero > 0);
+    dword(&mut b, 60, crc(data), big);
+    b.extend_from_slice(data);
+    finish(b, 0xe002, big)
+}
+pub(crate) fn dir(p: u32, v: u32, n: u32, name: &[u8], kind: u8, big: bool) -> Vec<u8> {
+    let mut b = vec![0; 40];
+    dword(&mut b, 12, p, big);
+    dword(&mut b, 16, v, big);
+    dword(&mut b, 20, n, big);
+    dword(&mut b, 24, 11, big);
+    b[28] = name.len() as u8;
+    b[29] = kind;
+    dword(&mut b, 36, crc(name), big);
+    b.extend_from_slice(name);
+    finish(b, 0xe001, big)
+}
+pub fn jffs2_seed(big: bool) -> Vec<u8> {
+    let mut b = Vec::new();
+    for node in [
+        inode((1, 1), (0x41ed, 0), 0, b"", 0, big),
+        inode((2, 1), (0x81a0, 8), 0, b"abcdefgh", 0, big),
+        inode((2, 2), (0x81a0, 8), 2, b"XY", 0, big),
+        inode((2, 3), (0x81a0, 6), 4, b"", 2, big),
+        inode((3, 1), (0x41ed, 0), 0, b"", 0, big),
+        inode((4, 1), (0xa1ff, 7), 0, b"../file", 0, big),
+        inode((5, 1), (0x81a0, 3), 0, b"old", 0, big),
+        dir(1, 1, 2, b"file", 8, big),
+        dir(1, 2, 3, b"nested", 4, big),
+        dir(1, 3, 5, b"deleted", 8, big),
+        dir(1, 4, 0, b"deleted", 8, big),
+        dir(3, 1, 2, &[b'x', 255], 8, big),
+        dir(3, 2, 4, b"link", 10, big),
+    ] {
+        b.extend(node);
+    }
+    b.resize(8192, 255);
+    b
+}

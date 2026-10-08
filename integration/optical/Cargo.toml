@@ -1,0 +1,22 @@
+[package]
+name = "partmgr-optical"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = []
+native-writer = ["libmkiso/native-writer", "dep:tempfile", "dep:anyhow"]
+
+[dependencies]
+partmgr = "0.1.0"
+libmkiso = { version = "0.1.4", default-features = false }
+virtdisk = "0.2.0"
+tempfile = { version = "3", optional = true }
+anyhow = { version = "1", optional = true }
+
+[dev-dependencies]
+libmkiso = { version = "0.1.4", default-features = false, features = ["native-writer"] }
+tempfile = "3"

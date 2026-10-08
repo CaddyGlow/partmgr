@@ -192,3 +192,169 @@ impl<S: Storage> Storage for BoundedSession<S> {
 /// This is separate from editor sessions. The caller must keep the backing
 /// source stable for every deferred read; a read-only handle alone is insufficient.
 pub use virtdisk::DiskView as ImmutableRegion;
+
+use virtdisk::{Capability, ImageOperation, ImageWriter, InspectImage, WriteAt};
+
+struct WriterStorage(ImageWriter);
+impl Storage for WriterStorage {
+    fn len(&self) -> io::Result<u64> {
+        Ok(WriteAt::len(&self.0))
+    }
+    fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+        self.0.read_exact_at(at, out)
+    }
+    fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+        self.0.write_all_at(at, bytes)?;
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        WriteAt::flush(&self.0)
+    }
+}
+/// Owns a writer and fixed bounded region without exposing management or writer aliases.
+///
+/// Locks may be advisory. Callers must exclude mounted access and external writers,
+/// keep every backing parent immutable, and own later publication/directory sync.
+/// This mutable session does not implement immutable ReadAt.
+pub struct ImageWriterSession {
+    region: BoundedSession<WriterStorage>,
+}
+impl ImageWriterSession {
+    /// Consume an already explicitly opened writer and inspect actual handle capabilities.
+    /// Supplied sector facts fill unknown values; conflicting known facts reject.
+    /// Construction validates bounds but does not authorize filesystem mutation.
+    pub fn new(
+        writer: ImageWriter,
+        start: u64,
+        length: u64,
+        supplied: SectorGeometry,
+    ) -> io::Result<Self> {
+        let facts = writer.inspection();
+        for operation in [
+            ImageOperation::Read,
+            ImageOperation::Write,
+            ImageOperation::Flush,
+        ] {
+            if facts.capabilities.get(operation) != Capability::Supported {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "writer handle lacks a required session operation",
+                ));
+            }
+        }
+        let supplied = SectorGeometry::new(supplied.logical, supplied.physical)?;
+        fn fact(known: Option<u32>, supplied: Option<u32>) -> io::Result<Option<u32>> {
+            if let (Some(known), Some(supplied)) = (known, supplied)
+                && known != supplied
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "supplied sector geometry conflicts with writer inspection",
+                ));
+            }
+            Ok(known.or(supplied))
+        }
+        let geometry = SectorGeometry::new(
+            fact(facts.geometry.logical_sector_size, supplied.logical)?,
+            fact(facts.geometry.physical_sector_size, supplied.physical)?,
+        )?;
+        Ok(Self {
+            region: BoundedSession::new(WriterStorage(writer), start, length, geometry)?,
+        })
+    }
+    /// Actual or explicitly supplied sector facts; no atomic-write promise is inferred.
+    pub fn geometry(&self) -> SectorGeometry {
+        self.region.geometry()
+    }
+    /// Sticky uncertainty after a write or durability barrier error.
+    pub fn mutation_uncertain(&self) -> bool {
+        self.region.mutation_uncertain()
+    }
+    /// Zero a fully prevalidated range with bounded scratch, without implicit flush.
+    pub fn zero(&mut self, at: u64, length: u64) -> io::Result<()> {
+        self.region.zero_at(at, length)
+    }
+}
+impl Storage for ImageWriterSession {
+    fn len(&self) -> io::Result<u64> {
+        self.region.len()
+    }
+    fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+        self.region.read_exact_at(at, out)
+    }
+    fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+        self.region.write_at(at, bytes)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.region.flush()
+    }
+}
+
+#[cfg(test)]
+mod faults {
+    use super::*;
+    use virtdisk::{Image, ImageFormat, ReadAt};
+    struct FaultWriter {
+        inner: WriterStorage,
+        partial: bool,
+        fail_flush: bool,
+    }
+    impl Storage for FaultWriter {
+        fn len(&self) -> io::Result<u64> {
+            self.inner.len()
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            self.inner.read_exact_at(at, out)
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            if self.partial {
+                self.inner.write_at(at, &bytes[..bytes.len() / 2])?;
+                return Err(io::Error::other(
+                    "injected error after partial real writer mutation",
+                ));
+            }
+            self.inner.write_at(at, bytes)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            if self.fail_flush {
+                return Err(io::Error::other("injected durability barrier failure"));
+            }
+            self.inner.flush()
+        }
+    }
+    #[test]
+    fn partial_mutation_and_flush_failure_retain_actual_writer_and_sticky_uncertainty() {
+        for partial in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("fault.raw");
+            let writer = ImageWriter::create(&path, ImageFormat::Raw, 8192).unwrap();
+            let fault = FaultWriter {
+                inner: WriterStorage(writer),
+                partial,
+                fail_flush: !partial,
+            };
+            let mut session =
+                BoundedSession::new(fault, 4096, 512, SectorGeometry::default()).unwrap();
+            if partial {
+                assert!(session.write_at(0, &[7; 100]).is_err());
+            } else {
+                assert_eq!(session.write_at(0, &[7; 100]).unwrap(), 100);
+                assert!(session.flush().is_err());
+            }
+            assert!(session.mutation_uncertain());
+            assert!(ImageWriter::open(&path, ImageFormat::Raw).is_err());
+            let mut bytes = [0; 100];
+            session.read_exact_at(0, &mut bytes).unwrap();
+            assert_eq!(&bytes[..50], &[7; 50]);
+            assert_eq!(&bytes[50..], if partial { &[0; 50] } else { &[7; 50] });
+            if partial {
+                session.flush().unwrap();
+                assert!(session.mutation_uncertain());
+            }
+            drop(session);
+            let reopened = Image::open(&path, Some(ImageFormat::Raw)).unwrap();
+            reopened.read_exact_at(4096, &mut bytes).unwrap();
+            assert_eq!(&bytes[..50], &[7; 50]);
+        }
+    }
+}

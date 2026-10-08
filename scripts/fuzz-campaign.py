@@ -6,18 +6,30 @@ ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--iterations", type=int, default=10000)
 parser.add_argument("--output", type=Path)
+parser.add_argument("--target", action="append", help="Run a named target; repeat to select several. Default: all targets.")
 args = parser.parse_args()
 if args.iterations < 1:
     parser.error("iterations must be positive")
 config = json.loads((ROOT / "fuzz/targets.json").read_text())
+if args.target:
+    unknown = set(args.target) - config.keys()
+    if unknown:
+        parser.error("unknown targets: " + ", ".join(sorted(unknown)))
+    config = {name: limit for name, limit in config.items() if name in args.target}
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 output = (args.output or ROOT / "target/fuzz-runs" / f"{stamp}-{os.getpid()}").resolve()
 output.mkdir(parents=True, exist_ok=False)
 env = dict(os.environ, RUSTC_WRAPPER="", CARGO_INCREMENTAL="0", CC="gcc", NIX_HARDENING_ENABLE="", HFUZZ_BUILD_ARGS="--locked", HFUZZ_WORKSPACE=str(output / "workspace"), CARGO_TARGET_DIR=str(ROOT / "target/honggfuzz"))
 receipt = {"iterations_requested": args.iterations, "targets": {}, "scope": "bounded coverage-guided smoke; not security qualification"}
+receipt["targets_requested"] = list(config)
 for tool in [["rustc", "--version"], ["cargo", "hfuzz", "version"]]:
     receipt[" ".join(tool)] = subprocess.check_output(tool, text=True).strip()
 source_paths = [p for directory in ["src", "tests", "fuzz/src"] for p in (ROOT / directory).rglob("*.rs")] + [ROOT / p for p in ["Cargo.toml", "Cargo.lock", "fuzz/Cargo.toml", "fuzz/Cargo.lock", "fuzz/targets.json"]]
+source_paths += [p for p in (ROOT / "fuzz/fixtures").rglob("*") if p.is_file()]
+toolchain = ROOT / "rust-toolchain.toml"
+if toolchain.is_file():
+    source_paths.append(toolchain)
+source_paths.append(Path(__file__).resolve())
 receipt["source_sha256"] = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(source_paths)}
 for target, limit in config.items():
     corpus = ROOT / "fuzz/corpus" / target
@@ -36,4 +48,12 @@ for target, limit in config.items():
     (output / "summary.json").write_text(json.dumps(receipt, indent=2) + "\n")
     if not row["passed"]:
         raise SystemExit(f"Fuzz campaign failed; retained evidence: {output}")
+receipt["source_sha256_end"] = {
+    str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+    for p in sorted(source_paths)
+}
+receipt["source_unchanged"] = receipt["source_sha256_end"] == receipt["source_sha256"]
+(output / "summary.json").write_text(json.dumps(receipt, indent=2) + "\n")
+if not receipt["source_unchanged"]:
+    raise SystemExit(f"Fuzz campaign source changed; retained evidence: {output}")
 print(output)

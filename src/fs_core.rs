@@ -320,10 +320,14 @@ impl Error {
             source: None,
         }
     }
-    /// Construct an I/O failure while retaining its original cause.
+    /// Retain an I/O cause and preserve an embedded framework failure category.
     pub fn io(context: impl Into<String>, source: io::Error) -> Self {
+        let kind = source
+            .get_ref()
+            .and_then(|cause| cause.downcast_ref::<Self>())
+            .map_or(ErrorKind::Io, |cause| cause.kind);
         Self {
-            kind: ErrorKind::Io,
+            kind,
             context: context.into(),
             source: Some(source),
         }

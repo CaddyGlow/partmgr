@@ -66,6 +66,11 @@ impl WriteRange {
     pub fn replacement(&self) -> &[u8] {
         &self.replacement
     }
+    /// Retained payload allocation, including spare vector capacity.
+    /// Use when charging ownership to a shared filesystem budget.
+    pub fn retained_payload_bytes(&self) -> u128 {
+        self.expected.capacity() as u128 + self.replacement.capacity() as u128
+    }
 }
 /// Ordered writes followed by a durable flush.
 #[derive(Clone, Debug)]

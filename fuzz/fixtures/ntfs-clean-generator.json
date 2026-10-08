@@ -1,0 +1,24 @@
+{
+  "scope": "independent hand-authored NTFS3.1 complete base-record allocation/index fixture; no production encoder",
+  "constructor": "fuzz/fixtures/ntfs-clean-generator.rs.txt",
+  "constructor_sha256": "e0037776ad286280904321516a7db6899d42a55be6df9e03cbc4a30cd25ef9d0",
+  "shared_fixture": "tests/fixtures/ntfs_clean.rs",
+  "shared_fixture_sha256": "8932a42ad57e20ab38298a9284accb18a28c77266dac9a32e43edcfc1314dc7b",
+  "seed_sha256": "3b787de24cfdda50c6b97e6f8b0c4fce1e0003bd27dbb6c64e4224e777ac222a",
+  "seed_bytes": 524800,
+  "layout": {
+    "clusters": 1024,
+    "owned_clusters": 335,
+    "allocated_records": 18,
+    "boot_backup_sector": 1024,
+    "mft_cluster": 4,
+    "mft_mirror_cluster": 500,
+    "index_allocation_cluster": 400,
+    "upcase_cluster": 128,
+    "hardlinks": [
+      "alpha",
+      "beta"
+    ],
+    "other_sparse_file": "gamma"
+  }
+}

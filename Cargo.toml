@@ -13,8 +13,9 @@ keywords = ["partition", "gpt", "mbr", "disk"]
 categories = ["filesystem", "parser-implementations"]
 
 [dependencies]
-virtdisk = { version = "0.1.0" }
+virtdisk = { version = "0.2.0" }
 sha2 = "0.10"
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 
 [dev-dependencies]
 tempfile = "3.23"
@@ -26,4 +27,4 @@ unsafe_op_in_unsafe_fn = "deny"
 chunks_exact_to_as_chunks = "allow"
 
 [workspace]
-exclude = ["fuzz"]
+exclude = ["fuzz", "integration/optical", "integration/storage"]

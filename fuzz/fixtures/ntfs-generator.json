@@ -1,0 +1,38 @@
+{
+  "profile": "NTFS3.1 independent 64KiB specification fixture",
+  "generator_archive": "fuzz/fixtures/ntfs-generator.rs.txt",
+  "generator_sha256": "bd4b973d86a117035c609b44cb1a70334142287a33255173ef90d1f50221f55e",
+  "derived_from": "tests/fs_ntfs.rs independently assembled test constructor",
+  "source_sha256": "eb95051ca010ebde6533562fc1b73389c7de7cb65c44ad34bfd11bb0ca1c626e",
+  "features": [
+    "boot/MFT bootstrap",
+    "FILE record USA fixups",
+    "resident metadata/name/data",
+    "signed allocation runs",
+    "sparse hole",
+    "uninitialized tail"
+  ],
+  "native_oracle_claim": false,
+  "seeds": {
+    "seed-0": {
+      "bytes": 65536,
+      "sha256": "618f650baada4c1f5d318c3c54d9f6836c7aef59388904b0ea87b30d453c9fee"
+    },
+    "seed-1": {
+      "bytes": 65536,
+      "sha256": "1dbe62d74447f09e70ffb02991dcfb2e23ca62429d2c0690ff07944fece43b15"
+    },
+    "seed-2": {
+      "bytes": 65536,
+      "sha256": "ff6fc5e7314df484b5912d15ec29b8f088fa8aad075dfde303e874d07919cbc3"
+    },
+    "seed-3": {
+      "bytes": 65536,
+      "sha256": "97d7da85a5d376a8bb3e614150fb0b53863ad6ed18a3f1a16ff3b8d57f7933d4"
+    },
+    "seed-4": {
+      "bytes": 512,
+      "sha256": "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560"
+    }
+  }
+}

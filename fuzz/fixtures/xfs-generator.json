@@ -1,0 +1,19 @@
+{
+  "scope": "hand-authored independent XFSv5 leaf AG/shortform/inline extent fixture; no production encoder",
+  "constructor_sha256": "1c1bf23a3fd83d59919abcd75cdbbb4d74575d90befe28399dc5eeee6ab7dd6a",
+  "shared_fixture_sha256": "7b8ead3d0f67c83260ebbebfb4423f8199edc268d7ec8c91b427080b8b52e73a",
+  "seed_sha256": "bcf5fe28c3b1a365cc8dd8f39ae5423246928cfbeb78c4cf67b6232ada2fde7d",
+  "seed_bytes": 1048576,
+  "layout": {
+    "block_bytes": 4096,
+    "blocks": 256,
+    "allocation_groups": 4,
+    "blocks_per_group": 64,
+    "root_inode": 64,
+    "hardlinked_file": 67,
+    "nested_directory": 68,
+    "log_block": 140,
+    "log_blocks": 8,
+    "sparse_file_bytes": 16384
+  }
+}

@@ -208,3 +208,34 @@ fn whole_file_rejects_identity_or_length_changes_and_refunds_memory() {
         assert_eq!(resources.memory.used(), 0);
     }
 }
+
+#[test]
+fn io_wrapping_retains_nested_framework_category_and_original_cause() {
+    for kind in [
+        ErrorKind::BudgetExhausted,
+        ErrorKind::Cancelled,
+        ErrorKind::StalePlan,
+        ErrorKind::Unsupported,
+    ] {
+        let outer = Error::io(
+            "decoder boundary",
+            std::io::Error::other(Error::new(kind, "original framework cause")),
+        );
+        assert_eq!(outer.kind, kind);
+        assert_eq!(outer.context, "decoder boundary");
+        assert_eq!(
+            outer
+                .source
+                .unwrap()
+                .get_ref()
+                .unwrap()
+                .downcast_ref::<Error>()
+                .unwrap()
+                .context,
+            "original framework cause"
+        );
+    }
+    let outer = Error::io("backend", std::io::Error::other("original backend cause"));
+    assert_eq!(outer.kind, ErrorKind::Io);
+    assert_eq!(outer.source.unwrap().to_string(), "original backend cause");
+}

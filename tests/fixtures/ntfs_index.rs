@@ -1,0 +1,282 @@
+//! Independently assembled NTFS index fixture; no production parser or writer.
+fn w(b: &mut [u8], p: usize, n: u16) {
+    b[p..p + 2].copy_from_slice(&n.to_le_bytes());
+}
+
+fn d(b: &mut [u8], p: usize, n: u32) {
+    b[p..p + 4].copy_from_slice(&n.to_le_bytes());
+}
+
+fn q(b: &mut [u8], p: usize, n: u64) {
+    b[p..p + 8].copy_from_slice(&n.to_le_bytes());
+}
+
+fn resident(kind: u32, value: &[u8], id: u16) -> Vec<u8> {
+    let mut a = vec![0; (24 + value.len()).next_multiple_of(8)];
+    let n = a.len();
+    d(&mut a, 0, kind);
+    d(&mut a, 4, n as u32);
+    w(&mut a, 14, id);
+    d(&mut a, 16, value.len() as u32);
+    w(&mut a, 20, 24);
+    a[24..24 + value.len()].copy_from_slice(value);
+    a
+}
+
+fn nonresident(
+    mapping: &[u8],
+    clusters: u64,
+    length: u64,
+    initialized: u64,
+    sparse: bool,
+) -> Vec<u8> {
+    let h = if sparse { 72 } else { 64 };
+    let mut a = vec![0; (h + mapping.len()).next_multiple_of(8)];
+    let n = a.len();
+    d(&mut a, 0, 0x80);
+    d(&mut a, 4, n as u32);
+    a[8] = 1;
+    w(&mut a, 12, if sparse { 0x8000 } else { 0 });
+    w(&mut a, 14, 3);
+    q(&mut a, 24, clusters - 1);
+    w(&mut a, 32, h as u16);
+    q(&mut a, 40, clusters * 512);
+    q(&mut a, 48, length);
+    q(&mut a, 56, initialized);
+    if sparse {
+        q(&mut a, 64, (clusters - 1) * 512);
+    }
+    a[h..h + mapping.len()].copy_from_slice(mapping);
+    a
+}
+
+fn record(number: u32, attrs: &[Vec<u8>]) -> Vec<u8> {
+    let mut b = vec![0; 1024];
+    b[..4].copy_from_slice(b"FILE");
+    w(&mut b, 4, 48);
+    w(&mut b, 6, 3);
+    w(&mut b, 16, 7);
+    w(&mut b, 18, 1);
+    w(&mut b, 20, 56);
+    w(&mut b, 22, 1);
+    d(&mut b, 28, 1024);
+    d(&mut b, 44, number);
+    let mut at = 56;
+    for a in attrs {
+        b[at..at + a.len()].copy_from_slice(a);
+        at += a.len();
+    }
+    d(&mut b, at, u32::MAX);
+    d(&mut b, 24, (at + 4) as u32);
+    w(&mut b, 48, 0xa55a);
+    for i in 1..=2 {
+        let p = i * 512 - 2;
+        let old = u16::from_le_bytes([b[p], b[p + 1]]);
+        w(&mut b, 48 + i * 2, old);
+        w(&mut b, p, 0xa55a);
+    }
+    b
+}
+
+fn base_fixture() -> Vec<u8> {
+    let mut b = vec![0; 128 * 512];
+    b[3..11].copy_from_slice(b"NTFS    ");
+    w(&mut b, 11, 512);
+    b[13] = 1;
+    q(&mut b, 40, 128);
+    q(&mut b, 48, 4);
+    q(&mut b, 56, 100);
+    b[64] = (-10i8) as u8;
+    b[68] = (-10i8) as u8;
+    w(&mut b, 510, 0xaa55);
+    let mft = nonresident(&[0x11, 64, 4, 0], 64, 32768, 32768, false);
+    let mut vol = vec![0; 12];
+    vol[8] = 3;
+    vol[9] = 1;
+    let mut name = vec![0; 70];
+    q(&mut name, 0, 5 | (7 << 48));
+    name[64] = 2;
+    name[65] = 1;
+    w(&mut name, 66, 0x65e5);
+    w(&mut name, 68, 0xd800);
+    let attrs = vec![
+        resident(0x10, &[0; 48], 1),
+        resident(0x30, &name, 2),
+        resident(0x80, b"hello", 3),
+    ];
+    for (n, a) in [
+        (0, vec![mft]),
+        (3, vec![resident(0x70, &vol, 1)]),
+        (24, attrs),
+        (
+            25,
+            vec![nonresident(
+                &[0x11, 1, 90, 0x01, 1, 0x11, 1, 1, 0],
+                3,
+                1536,
+                1280,
+                true,
+            )],
+        ),
+    ] {
+        let p = 2048 + n * 1024;
+        b[p..p + 1024].copy_from_slice(&record(n as u32, &a));
+    }
+    b[90 * 512..91 * 512].fill(0x31);
+    b[91 * 512..92 * 512].fill(0x72);
+    b
+}
+
+fn name_value(name: &str, parent: u64) -> Vec<u8> {
+    let units = name.encode_utf16().collect::<Vec<_>>();
+    let mut v = vec![0; 66 + 2 * units.len()];
+    q(&mut v, 0, parent | (7 << 48));
+    v[64] = units.len() as u8;
+    v[65] = 1;
+    for (i, c) in units.into_iter().enumerate() {
+        w(&mut v, 66 + 2 * i, c);
+    }
+    v
+}
+
+fn index_entry(number: u64, name: &str, child: Option<u64>) -> Vec<u8> {
+    let v = name_value(name, 5);
+    let n = (16 + v.len() + usize::from(child.is_some()) * 8).next_multiple_of(8);
+    let mut b = vec![0; n];
+    q(&mut b, 0, number | (7 << 48));
+    w(&mut b, 8, n as u16);
+    w(&mut b, 10, v.len() as u16);
+    w(&mut b, 12, u16::from(child.is_some()));
+    b[16..16 + v.len()].copy_from_slice(&v);
+    if let Some(c) = child {
+        q(&mut b, n - 8, c);
+    }
+    b
+}
+
+fn terminal(child: Option<u64>) -> Vec<u8> {
+    let n = if child.is_some() { 24 } else { 16 };
+    let mut b = vec![0; n];
+    w(&mut b, 8, n as u16);
+    w(&mut b, 12, 2 | u16::from(child.is_some()));
+    if let Some(c) = child {
+        q(&mut b, 16, c);
+    }
+    b
+}
+
+fn root_attribute(entries: &[Vec<u8>], large: bool) -> Vec<u8> {
+    let n = 32 + entries.iter().map(Vec::len).sum::<usize>();
+    let mut v = vec![0; n];
+    d(&mut v, 0, 0x30);
+    d(&mut v, 4, 1);
+    d(&mut v, 8, 1024);
+    v[12] = 2;
+    d(&mut v, 16, 16);
+    d(&mut v, 20, (n - 16) as u32);
+    d(&mut v, 24, (n - 16) as u32);
+    d(&mut v, 28, u32::from(large));
+    let mut at = 32;
+    for e in entries {
+        v[at..at + e.len()].copy_from_slice(e);
+        at += e.len();
+    }
+    named_resident(0x90, &v, 1)
+}
+
+fn named_resident(kind: u32, value: &[u8], id: u16) -> Vec<u8> {
+    let mut a = resident(kind, &[vec![0; 8], value.to_vec()].concat(), id);
+    a[9] = 4;
+    w(&mut a, 10, 24);
+    d(&mut a, 16, value.len() as u32);
+    w(&mut a, 20, 32);
+    a[24..32].copy_from_slice(&[36, 0, 73, 0, 51, 0, 48, 0]);
+    a
+}
+
+fn fixture() -> Vec<u8> {
+    let mut b = base_fixture();
+    b.resize(512 * 1024, 0);
+    q(&mut b, 40, 1024);
+    let up = nonresident(&[0x22, 0, 1, 0x80, 0, 0], 256, 131072, 131072, false);
+    let p = 2048 + 10 * 1024;
+    b[p..p + 1024].copy_from_slice(&record(10, &[up]));
+    for c in 0..65536u32 {
+        let upper = if (97..=122).contains(&c) { c - 32 } else { c };
+        w(&mut b, 128 * 512 + c as usize * 2, upper as u16);
+    }
+    let p = 2048 + 5 * 1024;
+    let mut root = record(
+        5,
+        &[root_attribute(
+            &[
+                index_entry(24, "alpha", None),
+                index_entry(24, "beta", None),
+                terminal(None),
+            ],
+            false,
+        )],
+    );
+    w(&mut root, 22, 3);
+    b[p..p + 1024].copy_from_slice(&root);
+    let attrs = [
+        resident(0x30, &name_value("alpha", 5), 1),
+        resident(0x30, &name_value("beta", 5), 2),
+        resident(0x80, b"hello", 3),
+    ];
+    let p = 2048 + 24 * 1024;
+    b[p..p + 1024].copy_from_slice(&record(24, &attrs));
+    b
+}
+
+fn allocation_fixture() -> Vec<u8> {
+    let mut b = fixture();
+    let mut alloc = nonresident(&[0x21, 2, 0x90, 1, 0], 2, 1024, 1024, false);
+    alloc.resize(80, 0);
+    alloc.copy_within(64..72, 72);
+    alloc[64..72].copy_from_slice(&[36, 0, 73, 0, 51, 0, 48, 0]);
+    d(&mut alloc, 0, 0xa0);
+    d(&mut alloc, 4, 80);
+    alloc[9] = 4;
+    w(&mut alloc, 10, 64);
+    w(&mut alloc, 32, 72);
+    w(&mut alloc, 14, 2);
+    let attrs = [
+        root_attribute(&[terminal(Some(0))], true),
+        alloc,
+        named_resident(0xb0, &[1, 0, 0, 0, 0, 0, 0, 0], 3),
+    ];
+    let mut root = record(5, &attrs);
+    w(&mut root, 22, 3);
+    let p = 2048 + 5 * 1024;
+    b[p..p + 1024].copy_from_slice(&root);
+    let mut index = vec![0; 1024];
+    index[..4].copy_from_slice(b"INDX");
+    w(&mut index, 4, 40);
+    w(&mut index, 6, 3);
+    d(&mut index, 24, 24);
+    d(&mut index, 32, 1000);
+    let mut at = 48;
+    for e in [
+        index_entry(24, "alpha", None),
+        index_entry(24, "beta", None),
+        terminal(None),
+    ] {
+        index[at..at + e.len()].copy_from_slice(&e);
+        at += e.len();
+    }
+    d(&mut index, 28, (at - 24) as u32);
+    w(&mut index, 40, 0xa55a);
+    for i in 1..=2 {
+        let p = i * 512 - 2;
+        let old = u16::from_le_bytes([index[p], index[p + 1]]);
+        w(&mut index, 40 + i * 2, old);
+        w(&mut index, p, 0xa55a);
+    }
+    b[400 * 512..402 * 512].copy_from_slice(&index);
+    b
+}
+
+pub(super) fn ntfs_index_seed() -> Vec<u8> {
+    allocation_fixture()
+}

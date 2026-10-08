@@ -16,6 +16,18 @@ Dependencies resolve from crates.io; no sibling checkout is required. CI checks
 formatting, Clippy and tests on Linux and Windows. Independent partition-tool and
 QEMU/OVMF jobs provide additional format and firmware evidence.
 
+The development filesystem framework provides lossless contracts, bounded
+storage sessions and indexed positional reads. Explicit read-profile dispatch
+covers conventional FAT, classic ext2, exFAT1.00, NTFS3.1 native indexes and an explicit XFS v5 baseline;
+allocation evidence and namespace omissions remain visible. Deterministic FAT
+classic ext2 and exFAT builders accept deferred trees, with explicit content-only copy
+policies and staged verification. Classic ext2 capture preserves regular hardlink identities. Owned FAT and exFAT editors replace, extend and truncate files through external undo recovery; FAT and exFAT namespace operations have independent recovery gates. A declared logical NOR emulator enforces flash transitions and erase geometry. The separate optical integration uses published libmkiso0.1.4 and
+virtdisk0.2.0. The new partmgr APIs and portable compatibility need further
+release gates. See [filesystem support](docs/filesystem-support.md),
+[read facade](docs/filesystem-image.md) and
+[native validation](docs/filesystem-native-validation.md) for exact profiles,
+evidence and remaining work. `FILESYSTEM_PLAN.md` remains ongoing.
+
 ```rust
 use partmgr::{guid::Guid, layout::{Geometry, GptLayout}};
 

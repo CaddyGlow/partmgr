@@ -8,6 +8,7 @@ use crate::{
     fs_file::{ExtentFile, ExtentKind, FileExtent},
 };
 use std::{
+    collections::HashSet,
     io,
     sync::{
         Arc,
@@ -15,6 +16,7 @@ use std::{
     },
 };
 static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
+use crate::storage::Storage;
 use virtdisk::{DiskView, ReadAt};
 
 /// FAT entry width selected solely from the data cluster count.
@@ -31,6 +33,7 @@ pub enum FatFamily {
 #[derive(Clone, Debug)]
 pub struct FatGeometry {
     family: FatFamily,
+    media_descriptor: u8,
     bytes_per_sector: u16,
     sectors_per_cluster: u8,
     cluster_count: u32,
@@ -50,6 +53,10 @@ impl FatGeometry {
     /// Decoded family; the label string is never used for this decision.
     pub fn family(&self) -> FatFamily {
         self.family
+    }
+    /// Validated BPB media descriptor used by reserved FAT entry zero.
+    pub fn media_descriptor(&self) -> u8 {
+        self.media_descriptor
     }
     /// Sector byte size recorded in the BPB, not backend physical geometry.
     pub fn bytes_per_sector(&self) -> u16 {
@@ -119,18 +126,38 @@ fn dword(b: &[u8], at: usize) -> u32 {
 }
 
 /// Immutable volume retained for deferred FAT and payload access.
-pub struct FatVolume {
-    source: Arc<dyn ReadAt>,
+pub(crate) trait FatDecodeRead {
+    fn len(&self) -> io::Result<u64>;
+    fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> io::Result<()>;
+}
+impl FatDecodeRead for Arc<dyn ReadAt> {
+    fn len(&self) -> io::Result<u64> {
+        Ok(ReadAt::len(self.as_ref()))
+    }
+    fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
+        self.as_ref().read_exact_at(offset, out)
+    }
+}
+impl FatDecodeRead for &dyn Storage {
+    fn len(&self) -> io::Result<u64> {
+        Storage::len(*self)
+    }
+    fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
+        Storage::read_exact_at(*self, offset, out)
+    }
+}
+pub(crate) struct FatDecoder<R> {
+    source: R,
     geometry: FatGeometry,
     identity: u128,
 }
-impl FatVolume {
+impl<R: FatDecodeRead> FatDecoder<R> {
     /// Inspect a bounded source without reading the entire FAT or any payload.
     ///
     /// Supports conventional 512/1024/2048/4096-byte sectors and clusters up to
     /// 32 KiB. FAT32 requires version 0:0 and in-reserved-area FSInfo/backup
     /// references. Other historical or vendor profiles are explicitly rejected.
-    pub fn open(source: Arc<dyn ReadAt>) -> io::Result<Self> {
+    fn open(source: R, identity: u128) -> io::Result<Self> {
         let mut b = [0; 512];
         source.read_exact_at(0, &mut b)?;
         if b[510..512] != [0x55, 0xaa] {
@@ -203,7 +230,7 @@ impl FatVolume {
             return Err(invalid("FAT capacity cannot describe data clusters"));
         }
         let volume_bytes = total * u64::from(bps);
-        if volume_bytes > source.len() {
+        if volume_bytes > source.len()? {
             return Err(invalid("FAT volume exceeds bounded source"));
         }
         let (root_cluster, active_fat, fsinfo_sector, backup_sector) = if family == FatFamily::Fat32
@@ -260,6 +287,7 @@ impl FatVolume {
         };
         let geometry = FatGeometry {
             family,
+            media_descriptor: b[21],
             bytes_per_sector: bps,
             sectors_per_cluster: spc,
             cluster_count: clusters as u32,
@@ -279,16 +307,24 @@ impl FatVolume {
             fsinfo_sector,
             backup_sector,
         };
-        let source = Arc::new(DiskView::new(source, 0, volume_bytes)?);
-        Ok(Self {
+        Ok(FatDecoder {
             source,
             geometry,
-            identity: u128::from(NEXT_SOURCE.fetch_add(1, Ordering::Relaxed)),
+            identity,
         })
     }
     /// Validated BPB facts; this is not an allocation or namespace audit.
     pub fn geometry(&self) -> &FatGeometry {
         &self.geometry
+    }
+    /// Read one explicitly selected FAT copy, including reserved entries zero and one.
+    /// FAT32 values retain only the twenty-eight defined bits. This validates bounds,
+    /// not allocation ownership or agreement with other copies.
+    pub fn read_fat_entry(&self, copy: u8, cluster: u32) -> io::Result<u32> {
+        if copy >= self.geometry.fat_count || cluster > self.geometry.cluster_count + 1 {
+            return Err(invalid("FAT copy or cluster index out of bounds"));
+        }
+        self.entry_from(copy, cluster)
     }
     fn entry_from(&self, copy: u8, cluster: u32) -> io::Result<u32> {
         let n = u64::from(cluster);
@@ -341,7 +377,7 @@ impl FatVolume {
         length: u32,
         max_clusters: usize,
         resources: &Resources,
-    ) -> io::Result<FatFile> {
+    ) -> io::Result<FatDecodedFileMap> {
         resources.cancellation.check().map_err(io::Error::other)?;
         let length = u64::from(length);
         let count = length.div_ceil(self.geometry.cluster_bytes());
@@ -395,9 +431,10 @@ impl FatVolume {
             }
             cluster = next;
         }
-        Ok(FatFile {
-            file: ExtentFile::new(self.source.clone(), length, extents, max_clusters)?,
-            _reservation: reservation,
+        Ok(FatDecodedFileMap {
+            extents,
+            length,
+            reservation,
         })
     }
 }
@@ -471,6 +508,12 @@ pub struct FatDirectory {
     _reservation: Reservation,
 }
 impl FatDirectory {
+    /// Rebind borrowed mutable-session inventory to the owning editor generation.
+    pub(crate) fn set_generation(&mut self, generation: u64) {
+        for entry in &mut self.entries {
+            entry.identity.generation = generation;
+        }
+    }
     /// Native entries; deleted slots, dot entries, and volume labels are excluded.
     pub fn entries(&self) -> &[FatEntry] {
         &self.entries
@@ -485,7 +528,15 @@ impl FatDirectory {
         Ok(first)
     }
 }
-impl FatVolume {
+impl<R: FatDecodeRead> FatDecoder<R> {
+    /// Source-scoped root identity, distinct from all directory slots.
+    pub fn root_identity(&self) -> ObjectId {
+        ObjectId {
+            source: self.identity,
+            generation: 0,
+            native: Vec::new(),
+        }
+    }
     /// Enumerate the root, bounding both chain traversal and scanned slots.
     pub fn root_directory(
         &self,
@@ -521,13 +572,12 @@ impl FatVolume {
         }
         Ok(())
     }
-    /// Open a validated namespace file, retaining its source-scoped identity.
-    pub fn open_entry(
+    pub(crate) fn file_map(
         &self,
         entry: &FatEntry,
         max_clusters: usize,
         resources: &Resources,
-    ) -> io::Result<FatNamespaceFile> {
+    ) -> io::Result<FatDecodedFileMap> {
         self.check_entry(entry)?;
         if entry.is_directory() {
             return Err(io::Error::new(
@@ -535,10 +585,7 @@ impl FatVolume {
                 "FAT directory is not a file",
             ));
         }
-        Ok(FatNamespaceFile {
-            identity: entry.identity.clone(),
-            file: self.open_file(entry.cluster, entry.len(), max_clusters, resources)?,
-        })
+        self.open_file(entry.cluster, entry.len(), max_clusters, resources)
     }
     fn directory(
         &self,
@@ -550,16 +597,16 @@ impl FatVolume {
         resources.cancellation.check().map_err(io::Error::other)?;
         let charge = (max_slots as u64)
             .checked_mul((std::mem::size_of::<FatEntry>() + 540) as u64)
-            .and_then(|v| v.checked_add((max_clusters as u64).checked_mul(4)?))
+            .and_then(|v| v.checked_add((max_clusters as u64).checked_mul(64)?))
+            .and_then(|v| v.checked_add(1100))
             .ok_or_else(|| io::Error::other("FAT directory budget overflow"))?;
         let reservation = resources.memory.reserve(charge).map_err(io::Error::other)?;
         let mut entries = Vec::new();
         entries
             .try_reserve_exact(max_slots)
             .map_err(io::Error::other)?;
-        let mut seen = Vec::new();
-        seen.try_reserve_exact(max_clusters)
-            .map_err(io::Error::other)?;
+        let mut seen = HashSet::new();
+        seen.try_reserve(max_clusters).map_err(io::Error::other)?;
         let mut current = cluster.or(self.geometry.root_cluster);
         let mut slots = 0usize;
         let mut lfn = Lfn::default();
@@ -574,7 +621,7 @@ impl FatVolume {
                 if seen.len() == max_clusters {
                     return Err(io::Error::other("FAT directory chain budget exhausted"));
                 }
-                seen.push(c);
+                seen.insert(c);
                 (
                     self.geometry.data_offset + u64::from(c - 2) * self.geometry.cluster_bytes(),
                     self.geometry.cluster_bytes(),
@@ -623,11 +670,36 @@ impl FatVolume {
                 if &short_name == b".          " || &short_name == b"..         " {
                     continue;
                 }
+                for range in [0..8, 8..11] {
+                    let mut padded = false;
+                    for index in range {
+                        let byte = short_name[index];
+                        if byte == b' ' {
+                            padded = true;
+                            continue;
+                        }
+                        if padded
+                            || (byte < 0x20 && !(index == 0 && byte == 0x05))
+                            || b"\"*+,/:;<=>?[\\]|".contains(&byte)
+                        {
+                            return Err(invalid("invalid FAT short name"));
+                        }
+                    }
+                }
+                if short_name[0] == b' ' {
+                    return Err(invalid("empty FAT short name"));
+                }
                 let high = word(&raw, 20);
                 if self.geometry.family != FatFamily::Fat32 && high != 0 {
                     return Err(invalid("legacy FAT entry has high cluster bits"));
                 }
                 let c = u32::from(word(&raw, 26)) | (u32::from(high) << 16);
+                if c > self.geometry.cluster_count + 1
+                    || (raw[11] & 0x10 == 0
+                        && ((dword(&raw, 28) == 0 && c != 0) || (dword(&raw, 28) != 0 && c < 2)))
+                {
+                    return Err(invalid("invalid FAT namespace file cluster"));
+                }
                 if raw[11] & 0x10 != 0 && (c < 2 || dword(&raw, 28) != 0) {
                     return Err(invalid("invalid FAT directory entry"));
                 }
@@ -778,5 +850,107 @@ impl crate::fs_core::FileRead for FatNamespaceFile {
             })?;
         }
         Ok(())
+    }
+}
+
+/// Immutable volume retained for deferred FAT and payload access.
+pub struct FatVolume {
+    pub(crate) decoder: FatDecoder<Arc<dyn ReadAt>>,
+}
+pub(crate) type FatStorageDecoder<'a> = FatDecoder<&'a dyn Storage>;
+pub(crate) struct FatDecodedFileMap {
+    pub(crate) extents: Vec<FileExtent>,
+    pub(crate) length: u64,
+    pub(crate) reservation: Reservation,
+}
+impl<'a> FatDecoder<&'a dyn Storage> {
+    pub(crate) fn open_storage(source: &'a dyn Storage, scope: u128) -> io::Result<Self> {
+        Self::open(source, scope)
+    }
+}
+impl FatVolume {
+    /// Inspect a bounded immutable source without reading payload or the whole FAT.
+    /// Supports conventional sectors and clusters up to 32 KiB; unknown historical
+    /// profiles and nonzero FAT32 versions are rejected.
+    pub fn open(source: Arc<dyn ReadAt>) -> io::Result<Self> {
+        let mut decoder = FatDecoder::open(
+            source.clone(),
+            u128::from(
+                NEXT_SOURCE
+                    .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
+                    .map_err(|_| io::Error::other("FAT source identity scope exhausted"))?,
+            ),
+        )?;
+        decoder.source = Arc::new(DiskView::new(source, 0, decoder.geometry.volume_bytes)?);
+        Ok(Self { decoder })
+    }
+    /// Validated BPB geometry.
+    pub fn geometry(&self) -> &FatGeometry {
+        self.decoder.geometry()
+    }
+    /// Read one selected FAT entry.
+    pub fn read_fat_entry(&self, copy: u8, cluster: u32) -> io::Result<u32> {
+        self.decoder.read_fat_entry(copy, cluster)
+    }
+    /// Source-scoped root identity.
+    pub fn root_identity(&self) -> ObjectId {
+        self.decoder.root_identity()
+    }
+    /// Enumerate bounded root entries.
+    pub fn root_directory(
+        &self,
+        max_clusters: usize,
+        max_slots: usize,
+        resources: &Resources,
+    ) -> io::Result<FatDirectory> {
+        self.decoder
+            .root_directory(max_clusters, max_slots, resources)
+    }
+    /// Enumerate a bounded native directory.
+    pub fn read_directory(
+        &self,
+        entry: &FatEntry,
+        max_clusters: usize,
+        max_slots: usize,
+        resources: &Resources,
+    ) -> io::Result<FatDirectory> {
+        self.decoder
+            .read_directory(entry, max_clusters, max_slots, resources)
+    }
+    /// Build a reusable checked file map from directory facts.
+    pub fn open_file(
+        &self,
+        first_cluster: u32,
+        length: u32,
+        max_clusters: usize,
+        resources: &Resources,
+    ) -> io::Result<FatFile> {
+        let map = self
+            .decoder
+            .open_file(first_cluster, length, max_clusters, resources)?;
+        let source = &self.decoder.source;
+        Ok(FatFile {
+            file: ExtentFile::new(source.clone(), map.length, map.extents, max_clusters)?,
+            _reservation: map.reservation,
+        })
+    }
+    /// Open a validated namespace file from this volume.
+    pub fn open_entry(
+        &self,
+        entry: &FatEntry,
+        max_clusters: usize,
+        resources: &Resources,
+    ) -> io::Result<FatNamespaceFile> {
+        self.decoder.check_entry(entry)?;
+        if entry.is_directory() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "FAT directory is not a file",
+            ));
+        }
+        Ok(FatNamespaceFile {
+            identity: entry.identity.clone(),
+            file: self.open_file(entry.cluster, entry.len(), max_clusters, resources)?,
+        })
     }
 }

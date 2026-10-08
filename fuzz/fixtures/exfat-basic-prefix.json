@@ -1,0 +1,13 @@
+{
+  "profile": "exfat-1.00-basic-native-accepted-prefix",
+  "logical_bytes": 2097152,
+  "prefix_bytes": 131072,
+  "source_sha256": "df62dae215a18532c55cfaf0e0ccca9b048d0d0d7830bb29b240b1ca8c38432f",
+  "prefix_sha256": "46e199f1405555527f4ccafa267cebf5ad5181000669122963733aa9c9b479e9",
+  "generator": "tests/fs_exfat_volume.rs independent specification constructor, native ASCII-name profile",
+  "generator_sha256": "f7c1d4a96d4ee0489599c6e0bfc13e2f025553cb4fee92bc565f9f5ea7dfe9b4",
+  "native_receipt": "/data/cache/partmgr-exfat-volume-20261007/exfat-volume-basic-v1.txt",
+  "oracles": "exfatprogs 1.3.2 nonrepair fsck; Sleuth Kit 4.14.0 initialized payloads; forensic VDL tail semantics explicitly not validated",
+  "padding": "remaining logical source bytes are deterministic zero; original image suffix confirmed zero",
+  "generator_archive": "fuzz/fixtures/exfat-basic-generator.rs.txt"
+}

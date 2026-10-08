@@ -1,7 +1,7 @@
 //! Inspect FAT geometry and optionally stream an explicitly identified file chain.
 //! This does not perform namespace decoding or a whole-volume ownership audit.
 use partmgr::{
-    fs_core::{Budget, Cancellation, Resources},
+    fs_core::{Budget, Cancellation, NativeName, Resources},
     fs_fat::FatVolume,
 };
 use sha2::{Digest, Sha256};
@@ -27,6 +27,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         geometry.volume_bytes()
     );
     if let Some(first) = args.next() {
+        if first == "--list" {
+            let resources = Resources {
+                memory: Budget::new(16 * 1024 * 1024),
+                cancellation: Cancellation::default(),
+            };
+            let directory = volume.root_directory(1000, 10000, &resources)?;
+            for entry in directory.entries() {
+                let (kind, bytes) = match entry.name() {
+                    NativeName::Bytes(bytes) => ("bytes", bytes.clone()),
+                    NativeName::Utf16(units) => (
+                        "utf16",
+                        units.iter().flat_map(|unit| unit.to_le_bytes()).collect(),
+                    ),
+                };
+                print!("native_name={kind} name_hex=");
+                for byte in bytes {
+                    print!("{byte:02x}");
+                }
+                println!(
+                    " file_bytes={} directory={}",
+                    entry.len(),
+                    entry.is_directory()
+                );
+            }
+            return Ok(());
+        }
         let first: u32 = first.parse()?;
         let size: u32 = args.next().ok_or("supply file size")?.parse()?;
         let output = args.next();

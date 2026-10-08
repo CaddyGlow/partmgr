@@ -1,0 +1,72 @@
+fn undo_binding() -> partmgr::fs_undo::UndoBinding {
+    partmgr::fs_undo::UndoBinding {
+        volume: [0x11; 32],
+        generation: 7,
+        transaction: [0x22; 16],
+    }
+}
+fn undo_limits() -> partmgr::fs_undo::UndoLimits {
+    partmgr::fs_undo::UndoLimits {
+        patches: 32,
+        body_bytes: 128 * 1024,
+    }
+}
+/// Independent v1 journal wire fixture; never produced by UndoPlan or its codec.
+fn undo_seeds() -> Vec<Vec<u8>> {
+    use sha2::{Digest, Sha256};
+    let mut bytes = vec![0; 1024 + 32];
+    bytes[..8].copy_from_slice(b"PMFSUNDO");
+    put32(&mut bytes, 8, 1);
+    bytes[12] = 1;
+    bytes[16..48].fill(0x11);
+    put64(&mut bytes, 48, 7);
+    bytes[56..72].fill(0x22);
+    put64(&mut bytes, 72, 65536);
+    put64(&mut bytes, 80, 32);
+    put32(&mut bytes, 88, 1);
+    put64(&mut bytes, 1024, 13);
+    put64(&mut bytes, 1032, 8);
+    bytes[1040..1048].fill(1);
+    bytes[1048..1056].fill(2);
+    let body = Sha256::digest(&bytes[1024..]);
+    bytes[96..128].copy_from_slice(&body);
+    let hash = Sha256::digest(&bytes[..480]);
+    bytes[480..512].copy_from_slice(&hash);
+    let mut committed = bytes.clone();
+    committed.copy_within(..512, 512);
+    committed[524] = 2;
+    let hash = Sha256::digest(&committed[512..992]);
+    committed[992..1024].copy_from_slice(&hash);
+    let mut invalid_range = bytes.clone();
+    put64(&mut invalid_range, 1024, u64::MAX);
+    let mut limits = bytes.clone();
+    put32(&mut limits, 88, u32::MAX);
+    vec![
+        bytes,
+        committed,
+        invalid_range,
+        limits,
+        vec![0; 1024],
+        b"PMFSUNDO".to_vec(),
+    ]
+}
+/// Recompute only integrity fields, retaining mutated version/state/binding/bounds.
+/// This reaches semantic preflight instead of ending every case at SHA validation.
+fn undo_rehash(bytes: &mut [u8]) {
+    use sha2::{Digest, Sha256};
+    for base in [0, 512] {
+        if bytes.len() < base + 512 || &bytes[base..base + 8] != b"PMFSUNDO" {
+            continue;
+        }
+        let body = u64::from_le_bytes(bytes[base + 80..base + 88].try_into().unwrap());
+        if let Ok(n) = usize::try_from(body)
+            && let Some(end) = 1024usize.checked_add(n)
+            && let Some(body) = bytes.get(1024..end)
+        {
+            let hash = Sha256::digest(body);
+            bytes[base + 96..base + 128].copy_from_slice(&hash);
+        }
+        let hash = Sha256::digest(&bytes[base..base + 480]);
+        bytes[base + 480..base + 512].copy_from_slice(&hash);
+    }
+}

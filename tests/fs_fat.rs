@@ -287,3 +287,119 @@ fn fat12_packed_entries_and_fat32_active_fat_masking() {
     assert_eq!(volume.geometry().active_fat(), Some(1));
     assert!(volume.open_file(2, 1, 1, &resources(4096)).is_ok());
 }
+
+#[test]
+fn namespace_short_alias_identity_and_positional_content() {
+    use partmgr::fs_core::{FileRead, NativeName};
+    let mut image = fat16_chain(3, 0xffff);
+    let mut slot = [0; 32];
+    slot[..11].copy_from_slice(b"PAYLOAD BIN");
+    slot[11] = 0x20;
+    slot[26..28].copy_from_slice(&2u16.to_le_bytes());
+    slot[28..32].copy_from_slice(&700u32.to_le_bytes());
+    put(&mut image, 81 * 512, &slot);
+    let volume = FatVolume::open(Arc::new(image)).unwrap();
+    let resources = resources(16384);
+    let directory = volume.root_directory(2, 4, &resources).unwrap();
+    let entry = directory
+        .lookup(&NativeName::Bytes(b"PAYLOAD BIN".to_vec()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.short_name(), b"PAYLOAD BIN");
+    let file = volume.open_entry(entry, 2, &resources).unwrap();
+    assert_eq!(file.identity(), entry.identity());
+    let mut out = [0; 8];
+    assert_eq!(file.read_at(508, &mut out, &resources).unwrap(), 8);
+    assert_eq!(out, [0x41, 0x41, 0x41, 0x41, 0x42, 0x42, 0x42, 0x42]);
+    let other = FatVolume::open(Arc::new(fixture(FatFamily::Fat16))).unwrap();
+    assert!(other.open_entry(entry, 2, &resources).is_err());
+    drop(file);
+    drop(directory);
+    assert_eq!(resources.memory.used(), 0);
+}
+fn lfn_fixture() -> Image {
+    let mut image = fixture(FatFamily::Fat16);
+    let alias = b"LONGNA~1TXT";
+    let checksum = alias
+        .iter()
+        .fold(0u8, |sum, byte| sum.rotate_right(1).wrapping_add(*byte));
+    let mut long = [0xff; 32];
+    long[0] = 0x41;
+    long[11] = 0x0f;
+    long[12] = 0;
+    long[13] = checksum;
+    long[26] = 0;
+    long[27] = 0;
+    let name = [b'N' as u16, 0xd800, b'x' as u16, 0];
+    for (i, at) in [1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30]
+        .into_iter()
+        .enumerate()
+    {
+        long[at..at + 2].copy_from_slice(&name.get(i).copied().unwrap_or(0xffff).to_le_bytes());
+    }
+    put(&mut image, 81 * 512, &long);
+    let mut short = [0; 32];
+    short[..11].copy_from_slice(alias);
+    short[11] = 0x20;
+    put(&mut image, 81 * 512 + 32, &short);
+    image
+}
+#[test]
+fn vfat_preserves_utf16_and_rejects_malformed_sequence() {
+    use partmgr::fs_core::NativeName;
+    let volume = FatVolume::open(Arc::new(lfn_fixture())).unwrap();
+    let directory = volume.root_directory(2, 4, &resources(16384)).unwrap();
+    assert_eq!(
+        directory.entries()[0].name(),
+        &NativeName::Utf16(vec![78, 0xd800, 120])
+    );
+    for (at, byte) in [(0, 0x42), (13, 0), (12, 1), (26, 1), (9, 0)] {
+        let mut image = lfn_fixture();
+        put(&mut image, 81 * 512 + at, &[byte]);
+        assert!(
+            FatVolume::open(Arc::new(image))
+                .unwrap()
+                .root_directory(2, 4, &resources(16384))
+                .is_err(),
+            "mutation {at}"
+        );
+    }
+    assert!(volume.root_directory(2, 1, &resources(16384)).is_err());
+    assert!(volume.root_directory(2, 4, &resources(0)).is_err());
+    let cancelled = resources(16384);
+    cancelled.cancellation.cancel();
+    assert!(volume.root_directory(2, 4, &cancelled).is_err());
+}
+
+#[test]
+fn directory_chain_cycles_limits_and_cross_source_entries() {
+    let mut image = fat16_chain(2, 0xffff);
+    let mut slot = [0; 32];
+    slot[..11].copy_from_slice(b"SUBDIR     ");
+    slot[11] = 0x10;
+    slot[26..28].copy_from_slice(&2u16.to_le_bytes());
+    put(&mut image, 81 * 512, &slot);
+    // Deleted slots prevent an early directory terminator so the FAT cycle is read.
+    for i in 0..16 {
+        put(&mut image, 113 * 512 + i * 32, &[0xe5]);
+    }
+    let volume = FatVolume::open(Arc::new(image)).unwrap();
+    let resources = resources(16384);
+    let root = volume.root_directory(2, 4, &resources).unwrap();
+    assert!(
+        volume
+            .read_directory(&root.entries()[0], 2, 32, &resources)
+            .is_err()
+    );
+    assert!(
+        volume
+            .read_directory(&root.entries()[0], 0, 32, &resources)
+            .is_err()
+    );
+    let other = FatVolume::open(Arc::new(fixture(FatFamily::Fat16))).unwrap();
+    assert!(
+        other
+            .read_directory(&root.entries()[0], 2, 32, &resources)
+            .is_err()
+    );
+}

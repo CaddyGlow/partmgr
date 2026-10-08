@@ -1,0 +1,28 @@
+{
+  "format": "ntfs3.1-index-independent-spec-fixture",
+  "generator": "ntfs-index-generator.rs.txt",
+  "generator_sha256": "7567b27e78245be0c9110a298a33606fc1951a26c5e46fd3559402b975d4f63a",
+  "image_bytes": 524288,
+  "image_sha256": "01f34554cf380382b05ada52e64996be90e500811b7e022f7fdefd1036bc87f3",
+  "layout": {
+    "sector_bytes": 512,
+    "mft_cluster": 4,
+    "root_record": 5,
+    "upcase_record": 10,
+    "upcase_cluster": 128,
+    "upcase_bytes": 131072,
+    "file_record": 24,
+    "file_names": [
+      "alpha",
+      "beta"
+    ],
+    "file_payload": "hello",
+    "index_allocation_cluster": 400,
+    "index_allocation_bytes": 1024,
+    "index_usa_offset": 40,
+    "index_usa_count": 3,
+    "index_child_vcn": 0,
+    "index_bitmap": "01"
+  },
+  "scope": "Independent byte fixture; native mkntfs gate separately validates codec interoperability. Not produced by a production filesystem writer."
+}

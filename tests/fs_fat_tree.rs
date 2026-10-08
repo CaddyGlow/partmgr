@@ -109,7 +109,10 @@ fn bounded_inventory_pages_nested_names_metadata_and_deferred_streams() {
     drop(page);
     drop(tree);
     assert_eq!(
-        read_all(file.as_ref(), 4, &resources).unwrap().bytes,
+        read_all(file.as_ref(), 4, &resources)
+            .unwrap()
+            .get()
+            .as_slice(),
         b"data"
     );
     drop(file);

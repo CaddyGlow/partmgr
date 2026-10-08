@@ -5,7 +5,10 @@ use crate::{
     storage::Storage,
 };
 use sha2::{Digest, Sha256};
-use std::{io, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use virtdisk::ReadAt;
 const SCRATCH: usize = 65536;
 
@@ -68,7 +71,7 @@ pub struct FatBuildPlan {
     files: Vec<PlannedFile>,
     directories: Vec<PlannedDirectory>,
     identities: Vec<ObjectId>,
-    _tree_reservation: Option<Reservation>,
+    _tree_reservations: Vec<Reservation>,
     _reservation: Reservation,
 }
 /// A staged image whose complete byte stream was read back after one durable flush.
@@ -138,15 +141,37 @@ impl FatBuildPlan {
                 .and_then(|n| sum.checked_add(n))
                 .ok_or_else(|| invalid("tree inventory charge overflow"))
         })?;
-        let path_charge = (entries.len() as u64)
-            .checked_mul(entries.len() as u64)
-            .and_then(|n| n.checked_mul(16))
-            .ok_or_else(|| invalid("tree path charge overflow"))?;
-        let reservation = resources.memory.reserve(
-            charge
-                .checked_add(path_charge)
-                .ok_or_else(|| invalid("tree charge overflow"))?,
-        )?;
+        let inventory_reservation = resources.memory.reserve(charge)?;
+        let mut identities = HashMap::new();
+        identities
+            .try_reserve(entries.len())
+            .map_err(|_| inventory_error())?;
+        for (index, entry) in entries.iter().enumerate() {
+            resources.cancellation.check()?;
+            if identities.insert(&entry.identity, index).is_some() {
+                return Err(invalid(
+                    "duplicate tree identity or hard link requires explicit transformation",
+                ));
+            }
+        }
+        let mut parents = inventory_vec(entries.len())?;
+        for entry in entries {
+            let parent = entry
+                .parent
+                .as_ref()
+                .map(|id| {
+                    let index = *identities
+                        .get(id)
+                        .ok_or_else(|| invalid("missing tree parent"))?;
+                    if entries[index].source.is_some() {
+                        return Err(invalid("tree parent is not a directory"));
+                    }
+                    Ok(index)
+                })
+                .transpose()?;
+            parents.push(parent);
+        }
+        let mut path_reservations = inventory_vec(entries.len().saturating_add(1))?;
         let mut paths = inventory_vec(entries.len())?;
         plan.files
             .try_reserve_exact(entries.len())
@@ -165,37 +190,29 @@ impl FatBuildPlan {
             {
                 return Err(invalid("invalid native VFAT component"));
             }
-            if entries[..index]
-                .iter()
-                .any(|e| e.identity == entry.identity)
-            {
-                return Err(invalid(
-                    "duplicate tree identity or hard link requires explicit transformation",
-                ));
-            }
-            let mut path = inventory_vec(entries.len().saturating_add(1))?;
-            path.push(index);
-            let mut parent = entry.parent.as_ref();
-            let mut depth = 0;
-            while let Some(id) = parent {
-                let ancestor = entries
-                    .iter()
-                    .find(|e| &e.identity == id)
-                    .ok_or_else(|| invalid("missing tree parent"))?;
-                if ancestor.source.is_some() {
-                    return Err(invalid("tree parent is not a directory"));
-                }
+            let mut depth = 1usize;
+            let mut parent = parents[index];
+            while let Some(ancestor) = parent {
+                resources.cancellation.check()?;
                 depth += 1;
                 if depth > entries.len() {
                     return Err(invalid("tree parent cycle"));
                 }
-                path.push(
-                    entries
-                        .iter()
-                        .position(|e| e.identity == ancestor.identity)
-                        .unwrap(),
-                );
-                parent = ancestor.parent.as_ref();
+                parent = parents[ancestor];
+            }
+            path_reservations.push(
+                resources.memory.reserve(
+                    (depth as u64)
+                        .checked_mul(std::mem::size_of::<usize>() as u64)
+                        .ok_or_else(|| invalid("tree path charge overflow"))?,
+                )?,
+            );
+            let mut path = inventory_vec(depth)?;
+            path.push(index);
+            let mut parent = parents[index];
+            while let Some(ancestor) = parent {
+                path.push(ancestor);
+                parent = parents[ancestor];
             }
             path.reverse();
             paths.push((path, index));
@@ -224,38 +241,56 @@ impl FatBuildPlan {
                 });
             }
         }
+        let mut directory_index = HashMap::new();
+        directory_index
+            .try_reserve(directory_ids.len())
+            .map_err(|_| inventory_error())?;
+        for (index, id) in directory_ids.iter().enumerate() {
+            directory_index.insert(id.as_ref(), index);
+        }
+        let mut children_by_directory = inventory_vec(directory_ids.len())?;
+        for _ in &directory_ids {
+            children_by_directory.push(Vec::new());
+        }
+        for (_, index) in &paths {
+            let directory = directory_index[&entries[*index].parent.as_ref()];
+            let children: &mut Vec<usize> = &mut children_by_directory[directory];
+            children.try_reserve(1).map_err(|_| inventory_error())?;
+            children.push(*index);
+        }
         // Determine aliases per directory, reserving canonical names before generated aliases.
         let mut aliases = inventory_vec(entries.len())?;
         aliases.resize(entries.len(), [0; 11]);
-        for id in &directory_ids {
-            let children: Vec<usize> = paths
-                .iter()
-                .map(|p| p.1)
-                .filter(|i| entries[*i].parent == *id)
-                .collect();
-            let fold = |name: &[u16]| {
-                name.iter()
-                    .map(|c| if (97..=122).contains(c) { c - 32 } else { *c })
-                    .collect::<Vec<_>>()
+        for children in &children_by_directory {
+            let fold = |name: &[u16]| -> Result<Vec<u16>> {
+                let mut folded = inventory_vec(name.len())?;
+                folded.extend(
+                    name.iter()
+                        .map(|c| if (97..=122).contains(c) { c - 32 } else { *c }),
+                );
+                Ok(folded)
             };
-            for (position, index) in children.iter().enumerate() {
-                if children[..position]
-                    .iter()
-                    .any(|previous| fold(&entries[*previous].name) == fold(&entries[*index].name))
-                {
+            let mut names = HashSet::new();
+            names
+                .try_reserve(children.len())
+                .map_err(|_| inventory_error())?;
+            for index in children {
+                if !names.insert(fold(&entries[*index].name)?) {
                     return Err(invalid("duplicate VFAT name under ASCII case comparison"));
                 }
             }
-            let mut used = inventory_vec(children.len())?;
-            for index in &children {
+            let mut used = HashSet::new();
+            used.try_reserve(children.len())
+                .map_err(|_| inventory_error())?;
+            for index in children {
                 if let Ok(text) = String::from_utf16(&entries[*index].name)
                     && let Ok(name) = short_name(&text)
                 {
                     aliases[*index] = name;
-                    used.push(name);
+                    used.insert(name);
                 }
             }
-            for index in children {
+            for &index in children {
                 if aliases[index] != [0; 11] {
                     continue;
                 }
@@ -297,27 +332,20 @@ impl FatBuildPlan {
                         display.extend_from_slice(&alias[8..8 + ext_len]);
                     }
                     let display: Vec<u16> = display.into_iter().map(u16::from).collect();
-                    let collides = paths
-                        .iter()
-                        .map(|p| p.1)
-                        .filter(|i| entries[*i].parent == *id)
-                        .any(|i| fold(&entries[i].name) == display);
+                    let collides = names.contains(&display);
                     if !used.contains(&alias) && !collides {
                         found = Some(alias);
                         break;
                     }
                 }
                 aliases[index] = found.ok_or_else(|| invalid("VFAT alias namespace exhausted"))?;
-                used.push(aliases[index]);
+                used.insert(aliases[index]);
             }
         }
         // Size directories before allocation, including canonical dot entries and terminator.
-        for (d, id) in directory_ids.iter().enumerate() {
+        for (d, _) in directory_ids.iter().enumerate() {
             let mut slots = usize::from(d != 0) * 2 + 1;
-            for (_, index) in &paths {
-                if entries[*index].parent != *id {
-                    continue;
-                }
+            for index in &children_by_directory[d] {
                 let canonical = String::from_utf16(&entries[*index].name)
                     .ok()
                     .and_then(|s| short_name(&s).ok())
@@ -373,10 +401,7 @@ impl FatBuildPlan {
                     clusters,
                 });
             } else {
-                let directory = directory_ids
-                    .iter()
-                    .position(|id| id.as_ref() == Some(&entry.identity))
-                    .unwrap();
+                let directory = directory_index[&Some(&entry.identity)];
                 firsts[*index] = directories[directory].first;
             }
         }
@@ -385,11 +410,10 @@ impl FatBuildPlan {
         }
         for (d, id) in directory_ids.iter().enumerate() {
             if d != 0 {
-                let own = entries
-                    .iter()
-                    .find(|e| Some(&e.identity) == id.as_ref())
-                    .unwrap();
-                let parent = directory_ids.iter().position(|p| *p == own.parent).unwrap();
+                let own = &entries[identities[&id
+                    .as_ref()
+                    .ok_or_else(|| invalid("missing directory identity"))?]];
+                let parent = directory_index[&own.parent.as_ref()];
                 let parent_cluster = if parent == 0 {
                     0
                 } else {
@@ -399,11 +423,8 @@ impl FatBuildPlan {
                 let dotdot = directory_entry(dot_name(true), true, parent_cluster, 0);
                 directories[d].entries.extend([dot, dotdot]);
             }
-            for (_, index) in &paths {
+            for index in &children_by_directory[d] {
                 let entry = &entries[*index];
-                if entry.parent != *id {
-                    continue;
-                }
                 let canonical = String::from_utf16(&entry.name)
                     .ok()
                     .and_then(|s| short_name(&s).ok())
@@ -450,7 +471,8 @@ impl FatBuildPlan {
         for entry in entries {
             plan.identities.push(copy_identity(&entry.identity)?);
         }
-        plan._tree_reservation = Some(reservation);
+        path_reservations.push(inventory_reservation);
+        plan._tree_reservations = path_reservations;
         drop(resources.memory.reserve((2 * SCRATCH) as u64)?);
         Ok(plan)
     }
@@ -566,7 +588,7 @@ impl FatBuildPlan {
             files: planned,
             directories: Vec::new(),
             identities: Vec::new(),
-            _tree_reservation: None,
+            _tree_reservations: Vec::new(),
             _reservation: reservation,
         })
     }
@@ -796,29 +818,17 @@ impl FatBuildPlan {
                 let n = (self.length - offset).min(SCRATCH as u64) as usize;
                 self.render(offset, &mut expected[..n], resources)?;
                 digest.update(&expected[..n]);
-                let mut done = 0;
-                while done < n {
-                    resources.cancellation.check()?;
-                    mutated = true;
-                    let count = storage
-                        .write_at(offset + done as u64, &expected[done..n])
-                        .map_err(|e| Error::io("FAT staged write", e))?;
-                    if count == 0 || count > n - done {
-                        return Err(Error::io(
-                            "FAT invalid write count",
-                            io::ErrorKind::WriteZero.into(),
-                        ));
-                    }
-                    done += count;
-                }
+                crate::fs_build_io::write_all(
+                    storage,
+                    offset,
+                    &expected[..n],
+                    resources,
+                    &mut mutated,
+                    "FAT staged write",
+                )?;
                 offset += n as u64;
             }
-            resources.cancellation.check()?;
-            storage.flush().map_err(|e| {
-                let mut error = Error::io("FAT flush failed", e);
-                error.kind = ErrorKind::UncertainDurability;
-                error
-            })?;
+            crate::fs_build_io::flush(storage, resources, "FAT staged flush")?;
             flushed = true;
             let emitted: [u8; 32] = digest.finalize().into();
             let mut verified = Sha256::new();
@@ -826,15 +836,15 @@ impl FatBuildPlan {
             while offset < self.length {
                 let n = (self.length - offset).min(SCRATCH as u64) as usize;
                 self.render(offset, &mut expected[..n], resources)?;
-                storage
-                    .read_exact_at(offset, &mut actual[..n])
-                    .map_err(|e| Error::io("FAT staged verification read", e))?;
-                if actual[..n] != expected[..n] {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "FAT staged byte verification mismatch",
-                    ));
-                }
+                crate::fs_build_io::verify(
+                    storage,
+                    offset,
+                    &expected[..n],
+                    &mut actual[..n],
+                    resources,
+                    "FAT staged byte verification",
+                    "FAT staged byte verification mismatch",
+                )?;
                 verified.update(&actual[..n]);
                 offset += n as u64;
             }

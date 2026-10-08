@@ -196,7 +196,7 @@ fn child(v: &ApfsVolume, parent: &ObjectId, name: &[u8], r: &Resources) -> Objec
 fn data(v: &ApfsVolume, id: &ObjectId, r: &Resources) -> Vec<u8> {
     read_all(&v.open_stream(id, &StreamKind::Data, r).unwrap(), 65536, r)
         .unwrap()
-        .bytes
+        .get()
         .clone()
 }
 #[test]
@@ -291,7 +291,8 @@ fn actual_native_create_replace_truncate_links_rename_move_unlink_project_and_re
                         &r
                     )
                     .unwrap()
-                    .bytes,
+                    .get()
+                    .as_slice(),
                     b"resource"
                 );
             }
@@ -411,7 +412,7 @@ fn signature(bytes: Vec<u8>, r: &Resources) -> Vec<Occurrence> {
             let (data, resource) = if entry.kind == ObjectKind::File {
                 let data = data(&v, &entry.object, r);
                 let resource = match v.open_stream(&entry.object, &StreamKind::ResourceFork, r) {
-                    Ok(f) => read_all(&f, 65536, r).unwrap().bytes.clone(),
+                    Ok(f) => read_all(&f, 65536, r).unwrap().get().clone(),
                     Err(e)
                         if e.kind == ErrorKind::Unsupported
                             && e.context == "APFS unavailable stream" =>
@@ -457,7 +458,7 @@ fn signature(bytes: Vec<u8>, r: &Resources) -> Vec<Occurrence> {
                                 r,
                             )
                             .unwrap()
-                            .bytes
+                            .get()
                             .clone(),
                         )
                     })
@@ -1033,7 +1034,8 @@ fn empty_data_creation_replacement_truncate_and_empty_directory_removal_are_real
                         &r
                     )
                     .unwrap()
-                    .bytes,
+                    .get()
+                    .as_slice(),
                     b"resource"
                 );
             }
@@ -1832,7 +1834,7 @@ fn resource_bytes(v: &ApfsVolume, id: &ObjectId, r: &Resources) -> Vec<u8> {
         r,
     )
     .unwrap()
-    .bytes
+    .get()
     .clone()
 }
 #[test]
@@ -2158,7 +2160,7 @@ fn external_resource_removal_keeps_other_physical_owner_and_both_data_streams() 
         for name in [b"A\xc3\xa9-file".as_slice(), b"Clone".as_slice()] {
             let object = v.lookup(&[NativeName::Bytes(name.to_vec())], &r).unwrap();
             let file = v.open_file(&object, &r).unwrap();
-            let actual = read_all(&file, 65536, &r).unwrap().bytes.clone();
+            let actual = read_all(&file, 65536, &r).unwrap().get().clone();
             let expected: Vec<u8> = (0..16397)
                 .map(|i| {
                     if (4096..8192).contains(&i) || (12288..16384).contains(&i) {
@@ -2174,7 +2176,7 @@ fn external_resource_removal_keeps_other_physical_owner_and_both_data_streams() 
                 assert!(fork.is_err());
             } else {
                 assert_eq!(
-                    read_all(&fork.unwrap(), 8, &r).unwrap().bytes.clone(),
+                    read_all(&fork.unwrap(), 8, &r).unwrap().get().clone(),
                     b"resource"
                 );
             }
@@ -2246,7 +2248,10 @@ fn external_resource_replace_range_truncate_and_inline_growth_preserve_both_fork
             let stream = v
                 .open_stream(&changed, &StreamKind::ResourceFork, &r)
                 .unwrap();
-            assert_eq!(read_all(&stream, 65536, &r).unwrap().bytes, expected);
+            assert_eq!(
+                read_all(&stream, 65536, &r).unwrap().get().as_slice(),
+                expected
+            );
             drop((stream, v));
             assert_eq!(r.memory.used(), 0);
         }
@@ -2780,7 +2785,8 @@ fn external_generic_xattr_cow_operations_preserve_other_inode_and_data() {
             assert_eq!(
                 read_all(&v.open_stream(&original, &kind, &r).unwrap(), 65536, &r)
                     .unwrap()
-                    .bytes,
+                    .get()
+                    .as_slice(),
                 b"resource"
             );
             if operation < 4 {
@@ -2800,7 +2806,7 @@ fn external_generic_xattr_cow_operations_preserve_other_inode_and_data() {
                     }
                     _ => b"res".to_vec(),
                 };
-                assert_eq!(actual.bytes, expected);
+                assert_eq!(actual.get().as_slice(), expected);
             } else {
                 assert!(v.open_stream(&changed, &kind, &r).is_err());
                 if operation == 4 {

@@ -208,6 +208,22 @@ impl FatEditBatch {
         &self.patches
     }
 }
+#[derive(Clone, Copy)]
+enum SessionState {
+    Ready,
+    NeedsRecovery {
+        binding: UndoBinding,
+        target_may_have_changed: bool,
+    },
+}
+impl SessionState {
+    fn public(self) -> FatEditState {
+        match self {
+            Self::Ready => FatEditState::Ready,
+            Self::NeedsRecovery { .. } => FatEditState::NeedsRecovery,
+        }
+    }
+}
 /// Owns exclusive target and disjoint independently persistent external journal.
 ///
 /// Storage implementors/callers must enforce exclusivity and journal disjointness.
@@ -219,9 +235,7 @@ pub struct FatEditor<S: Storage, J: Storage> {
     binding: FatEditBinding,
     scope: u128,
     generation: u64,
-    state: FatEditState,
-    pending: Option<UndoBinding>,
-    pending_target_write: bool,
+    state: SessionState,
     geometry: FatGeometry,
     audit: Option<FatAuditReport>,
 }
@@ -298,9 +312,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
             binding,
             scope,
             generation: 0,
-            state: FatEditState::Ready,
-            pending: None,
-            pending_target_write: false,
+            state: SessionState::Ready,
             geometry,
             audit: Some(audit),
         })
@@ -346,7 +358,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
     }
     /// Current operation gate.
     pub fn state(&self) -> FatEditState {
-        self.state
+        self.state.public()
     }
     /// Logical generation used by file handles and batches.
     pub fn generation(&self) -> u64 {
@@ -358,7 +370,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
     }
     fn ready(&self, resources: &Resources) -> Result<()> {
         resources.cancellation.check()?;
-        if self.state != FatEditState::Ready {
+        if self.state.public() != FatEditState::Ready {
             return Err(Error::new(
                 ErrorKind::InvalidOperation,
                 "FAT edit session requires recovery and reinspection",
@@ -638,13 +650,17 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
         }
         .map_err(failure)?;
         drop(batch._planning);
-        self.state = FatEditState::NeedsRecovery;
-        self.pending = Some(binding);
-        self.pending_target_write = true;
+        self.state = SessionState::NeedsRecovery {
+            binding,
+            target_may_have_changed: true,
+        };
         self.generation = next_generation;
         let result = plan.commit(&mut self.target, &mut self.journal, resources);
         if let Err(error) = &result {
-            self.pending_target_write = error.target_may_have_changed;
+            self.state = SessionState::NeedsRecovery {
+                binding,
+                target_may_have_changed: error.target_may_have_changed,
+            };
         }
         if result.is_ok() {
             if resize {
@@ -660,8 +676,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
                     })?,
                 );
             }
-            self.state = FatEditState::Ready;
-            self.pending = None;
+            self.state = SessionState::Ready;
         }
         result
     }
@@ -674,16 +689,17 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
         &mut self,
         resources: &Resources,
     ) -> std::result::Result<UndoStatus, UndoFailure> {
-        if self.state != FatEditState::NeedsRecovery {
+        let SessionState::NeedsRecovery {
+            binding,
+            target_may_have_changed,
+        } = self.state
+        else {
             return Err(failure(Error::new(
                 ErrorKind::InvalidOperation,
                 "FAT edit session has no pending recovery",
             )));
-        }
-        let binding = self
-            .pending
-            .expect("uncertain editor retains transaction binding");
-        let status = if self.pending_target_write {
+        };
+        let status = if target_may_have_changed {
             fs_undo::recover(
                 &mut self.target,
                 &mut self.journal,
@@ -729,13 +745,12 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
         self.audit = None;
         let audit = Self::clean_audit(&self.target, self.limits, resources).map_err(failure)?;
         self.audit = Some(audit);
-        self.state = FatEditState::Ready;
-        self.pending = None;
+        self.state = SessionState::Ready;
         Ok(status)
     }
     /// Release both exclusively owned stores and the explicit uncertainty state.
     /// Releasing a blocked session does not discharge its persisted recovery obligation.
     pub fn into_stores(self) -> (S, J, FatEditState) {
-        (self.target.storage, self.journal, self.state)
+        (self.target.storage, self.journal, self.state.public())
     }
 }

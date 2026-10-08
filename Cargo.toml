@@ -20,6 +20,13 @@ flate2 = { version = "1.1.10", default-features = false, features = ["rust_backe
 [dev-dependencies]
 tempfile = "3.23"
 
+# Exhaustive recovery-cut tests repeatedly decode and audit whole filesystems.
+# Optimize those loops while retaining the development profile's safety checks.
+[profile.test]
+opt-level = 2
+debug-assertions = true
+overflow-checks = true
+
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 

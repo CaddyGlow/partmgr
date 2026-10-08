@@ -254,6 +254,26 @@ fn copy_reports_unknown_metadata_and_streams_nested_payload_with_short_source_re
             .any(|outcome| outcome.class == "owner"
                 && matches!(outcome.decision, Preservation::Transform { .. }))
     );
+    for class in ["modified", "native_flags"] {
+        assert!(plan.outcomes().iter().filter(|outcome| outcome.class == class && outcome.object != id(0)).all(|outcome| matches!(&outcome.decision, Preservation::Transform { report, .. } if report.contains("synthesized"))));
+    }
+    for class in [
+        "accessed",
+        "mode",
+        "security",
+        "symlink_target",
+        "reparse_data",
+    ] {
+        assert!(
+            plan.outcomes()
+                .iter()
+                .filter(|outcome| outcome.class == class)
+                .all(|outcome| matches!(outcome.decision, Preservation::Preserve))
+        );
+    }
+    assert!(plan.outcomes().iter().any(|outcome| outcome.object == id(0)
+        && outcome.class == "modified"
+        && matches!(outcome.decision, Preservation::Preserve)));
     let mut output = Memory {
         bytes: vec![99; 2 << 20],
         writes: 0,
@@ -277,7 +297,7 @@ fn copy_reports_unknown_metadata_and_streams_nested_payload_with_short_source_re
         .unwrap();
     let content = read_all(&file, 513, &resources).unwrap();
     assert_eq!(
-        content.bytes,
+        *content.get(),
         (0..513).map(|n| (n % 251) as u8).collect::<Vec<_>>()
     );
     drop(content);

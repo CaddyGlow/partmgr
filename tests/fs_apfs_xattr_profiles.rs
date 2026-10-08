@@ -529,7 +529,10 @@ fn external_xattr_birth_on_files_and_directories_is_deferred_and_complete() {
         );
         let stream = tree.open_stream(&id, &kind, &r).unwrap();
         assert_eq!(
-            read_all(stream.as_ref(), 16397, &r).unwrap().bytes,
+            read_all(stream.as_ref(), 16397, &r)
+                .unwrap()
+                .get()
+                .as_slice(),
             (0u64..16397)
                 .map(|at| (at * 31 + 7) as u8)
                 .collect::<Vec<_>>()

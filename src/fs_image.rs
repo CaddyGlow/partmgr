@@ -297,18 +297,10 @@ fn malformed(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
 }
 fn fat_error(e: std::io::Error) -> Error {
-    match e.kind() {
-        std::io::ErrorKind::InvalidData => Error::new(ErrorKind::InvalidData, e.to_string()),
-        std::io::ErrorKind::Unsupported => Error::new(ErrorKind::Unsupported, e.to_string()),
-        _ => Error::io("FAT profile opening/audit", e),
-    }
+    Error::classified_io("FAT profile opening/audit", e)
 }
 fn ext_error(e: std::io::Error) -> Error {
-    match e.kind() {
-        std::io::ErrorKind::InvalidData => Error::new(ErrorKind::InvalidData, e.to_string()),
-        std::io::ErrorKind::Unsupported => Error::new(ErrorKind::Unsupported, e.to_string()),
-        _ => Error::io("ext2 profile opening/audit", e),
-    }
+    Error::classified_io("ext2 profile opening/audit", e)
 }
 struct SourceGuard {
     source: Arc<dyn ReadAt>,

@@ -13,16 +13,7 @@ fn allocation(error: impl std::fmt::Display) -> Error {
     Error::new(ErrorKind::BudgetExhausted, error.to_string())
 }
 fn native(error: io::Error) -> Error {
-    if let Some(cause) = error.get_ref().and_then(|e| e.downcast_ref::<Error>()) {
-        return Error::new(cause.kind, cause.context.clone());
-    }
-    if error.kind() == io::ErrorKind::Unsupported {
-        Error::new(ErrorKind::Unsupported, error.to_string())
-    } else if error.kind() == io::ErrorKind::InvalidData {
-        Error::new(ErrorKind::InvalidData, error.to_string())
-    } else {
-        Error::io("ext2 inventory access", error)
-    }
+    Error::classified_io("ext2 inventory access", error)
 }
 fn copy_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut result = Vec::new();

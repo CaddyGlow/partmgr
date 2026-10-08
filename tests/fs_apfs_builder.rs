@@ -208,12 +208,15 @@ fn fresh_native_construction_preserves_names_hardlinks_holes_and_forks() {
     assert_eq!(first, alias);
     let file = volume.open_file(&first, &r).unwrap();
     let data = read_all(&file, 32768, &r).unwrap();
-    assert_eq!(data.bytes.len(), 16397);
-    assert!(data.bytes[4096..8192].iter().all(|x| *x == 0));
+    assert_eq!(data.get().len(), 16397);
+    assert!(data.get()[4096..8192].iter().all(|x| *x == 0));
     let fork = volume
         .open_stream(&first, &StreamKind::ResourceFork, &r)
         .unwrap();
-    assert_eq!(read_all(&fork, 32, &r).unwrap().bytes, b"resource");
+    assert_eq!(
+        read_all(&fork, 32, &r).unwrap().get().as_slice(),
+        b"resource"
+    );
     drop(fork);
     drop(data);
     drop(file);
@@ -684,7 +687,7 @@ fn independent_common_tree_build_is_deterministic_and_constructs_multilevel_inde
         .lookup(&[NativeName::Bytes(b"File-0120".to_vec())], &r)
         .unwrap();
     let file = v.open_file(&id, &r).unwrap();
-    assert_eq!(read_all(&file, 1, &r).unwrap().bytes, vec![0]);
+    assert_eq!(read_all(&file, 1, &r).unwrap().get().as_slice(), vec![0]);
     drop(file);
     drop(v);
     drop(proof);
@@ -1048,7 +1051,10 @@ fn named_xattr_capture_requires_explicit_mapping_and_preserves_exact_deferred_va
                 &r,
             )
             .unwrap();
-        assert_eq!(read_all(&file, 8, &r).unwrap().bytes, b"resource");
+        assert_eq!(
+            read_all(&file, 8, &r).unwrap().get().as_slice(),
+            b"resource"
+        );
     }
     drop((v, plan));
     assert_eq!(r.memory.used(), baseline);
@@ -1131,7 +1137,7 @@ fn root_and_directory_named_values_are_deferred_and_stale_plans_do_not_write() {
             .unwrap();
         let actual = read_all(&file, 7001, &r).unwrap();
         let expected: Vec<u8> = (0..7001).map(|p| ((p * 13 + 7) % 251) as u8).collect();
-        assert_eq!(actual.bytes, expected);
+        assert_eq!(actual.get().as_slice(), expected);
     }
     tree.controls.stale.store(true, Ordering::Release);
     let mut refused = Target {

@@ -239,7 +239,7 @@ fn common_file_contract_and_source_scoped_identity() {
     let file = v.open_file(3, 20, &r).unwrap();
     assert_eq!(FileRead::identity(&file), &v.identity(3, &r).unwrap());
     let content = read_all(&file, 20 * 1024, &r).unwrap();
-    assert_eq!(&content.bytes[..4], &[42; 4]);
+    assert_eq!(&content.get()[..4], &[42; 4]);
     assert_eq!(
         FileRead::read_at(&file, u64::MAX, &mut [0; 1], &r).unwrap(),
         0

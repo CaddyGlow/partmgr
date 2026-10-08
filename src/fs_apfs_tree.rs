@@ -54,7 +54,7 @@ impl TreeSource for ApfsTreeSource {
             return Err(budget("APFS zero page maximum"));
         }
         self.volume.revalidate(id, r)?;
-        let entries = self.volume.directory(id, r)?;
+        let count = self.volume.directory_len(id)?;
         let start = if let Some(t) = continuation {
             if t.len() != 48 || t[..40] != self.token(id, 0)?[..40] {
                 return Err(Error::new(
@@ -67,41 +67,18 @@ impl TreeSource for ApfsTreeSource {
         } else {
             0
         };
-        if start > entries.get().len() {
+        if start > count {
             return Err(bad("APFS page cursor bounds"));
         }
-        let n = maximum.min(entries.get().len() - start);
+        let n = maximum.min(count - start);
         let lease = r.memory.reserve(
             (n as u64)
                 .checked_mul(2048)
                 .and_then(|n| n.checked_add(256))
                 .ok_or_else(|| budget("APFS page charge"))?,
         )?;
-        let mut out = vector(n)?;
-        for e in &entries.get()[start..start + n] {
-            r.cancellation.check()?;
-            let NativeName::Bytes(units) = &e.name else {
-                return Err(bad("APFS native name class"));
-            };
-            let mut name = vector(units.len())?;
-            name.extend_from_slice(units);
-            let mut native = vector(e.object.native.len())?;
-            native.extend_from_slice(&e.object.native);
-            out.push(DirectoryEntry {
-                name: NativeName::Bytes(name),
-                object: ObjectId {
-                    source: e.object.source,
-                    generation: e.object.generation,
-                    native,
-                },
-                kind: if e.kind == ObjectKind::Directory {
-                    ObjectKind::Directory
-                } else {
-                    ObjectKind::File
-                },
-            });
-        }
-        let next = if start + n < entries.get().len() {
+        let out = self.volume.directory_entries(id, start..start + n, r)?;
+        let next = if start + n < count {
             Some(self.token(id, start + n)?)
         } else {
             None

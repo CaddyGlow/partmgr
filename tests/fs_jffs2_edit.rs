@@ -236,7 +236,10 @@ fn assert_payload(bytes: &[u8], expected: &[u8], r: &Resources) {
         .find(|e| e.name == NativeName::Bytes(b"payload".to_vec()))
         .unwrap();
     let file = tree.open_stream(&p.object, &StreamKind::Data, r).unwrap();
-    assert_eq!(read_all(file.as_ref(), 2048, r).unwrap().bytes, expected);
+    assert_eq!(
+        read_all(file.as_ref(), 2048, r).unwrap().get().as_slice(),
+        expected
+    );
 }
 #[test]
 fn successful_append_and_gc_preserve_names_hardlinks_tombstones_and_outside_ranges() {
@@ -935,7 +938,7 @@ fn compressed_owned_range_truncate_create_replace_and_gc_both_endians_keep_nativ
             assert!(audit(&volume, limits().audit, &r).unwrap().is_clean());
             let created = volume.open_file(102, &r).unwrap();
             assert_eq!(
-                read_all(&created, 2048, &r).unwrap().bytes.as_slice(),
+                read_all(&created, 2048, &r).unwrap().get().as_slice(),
                 &[b'C'; 1024]
             );
             drop(created);
@@ -943,7 +946,7 @@ fn compressed_owned_range_truncate_create_replace_and_gc_both_endians_keep_nativ
             let mut expected = b"sh".to_vec();
             expected.resize(1500, b'A');
             assert_eq!(
-                read_all(&file, 4096, &r).unwrap().bytes.as_slice(),
+                read_all(&file, 4096, &r).unwrap().get().as_slice(),
                 expected
             );
             drop(file);
@@ -1135,7 +1138,7 @@ fn compressed_trial(
         expected.resize(600, 0);
     }
     assert_eq!(
-        read_all(&file, 1024, &r).unwrap().bytes.as_slice(),
+        read_all(&file, 1024, &r).unwrap().get().as_slice(),
         expected
     );
     drop(file);
@@ -1593,7 +1596,8 @@ fn big_endian_native_non_utf8_append_and_gc() {
     assert_eq!(
         read_all(&volume.open_file(101, &r).unwrap(), 2048, &r)
             .unwrap()
-            .bytes,
+            .get()
+            .as_slice(),
         payload
     );
     let tree =
@@ -2261,7 +2265,7 @@ fn complete_symlink_histories_select_latest_and_gc_both_endians_reject_partial_h
         assert_eq!(
             partmgr::fs_core::read_all(&file, 254, &r)
                 .unwrap()
-                .bytes
+                .get()
                 .as_slice(),
             b"../new-target"
         );
@@ -2449,7 +2453,8 @@ fn assert_inode_payload(
     assert_eq!(
         read_all(&v.open_file(number, r).unwrap(), expected.len() as u64, r)
             .unwrap()
-            .bytes,
+            .get()
+            .as_slice(),
         expected
     );
 }

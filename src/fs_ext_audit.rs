@@ -241,14 +241,7 @@ fn budget(message: &str) -> Error {
     Error::new(ErrorKind::BudgetExhausted, message)
 }
 fn convert(error: io::Error) -> Error {
-    if let Some(e) = error.get_ref().and_then(|e| e.downcast_ref::<Error>()) {
-        return Error::new(e.kind, e.context.clone());
-    }
-    match error.kind() {
-        io::ErrorKind::InvalidData => Error::new(ErrorKind::InvalidData, error.to_string()),
-        io::ErrorKind::Unsupported => Error::new(ErrorKind::Unsupported, error.to_string()),
-        _ => Error::io("ext2 audit input", error),
-    }
+    Error::classified_io("ext2 audit input", error)
 }
 fn zeros<T: Default + Clone>(count: usize) -> Result<Vec<T>> {
     let mut v = Vec::new();

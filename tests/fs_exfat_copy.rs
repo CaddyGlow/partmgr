@@ -32,6 +32,7 @@ struct State {
     length: AtomicU64,
     identity_changed: AtomicBool,
     reads: AtomicUsize,
+    cancel_after_read: AtomicBool,
 }
 impl Default for State {
     fn default() -> Self {
@@ -40,6 +41,7 @@ impl Default for State {
             length: AtomicU64::new(150001),
             identity_changed: AtomicBool::new(false),
             reads: AtomicUsize::new(0),
+            cancel_after_read: AtomicBool::new(false),
         }
     }
 }
@@ -86,6 +88,9 @@ impl FileRead for File {
             .min(137) as usize;
         for (i, b) in out[..n].iter_mut().enumerate() {
             *b = ((offset + i as u64) % 251) as u8
+        }
+        if self.state.cancel_after_read.load(Ordering::SeqCst) {
+            r.cancellation.cancel();
         }
         Ok(n)
     }
@@ -369,7 +374,7 @@ fn deferred_large_payload_and_explicit_metadata_outcomes_reopen_clean() {
     let file = v.open_file(&dir.entries()[0], &r).unwrap();
     let content = read_all(&file, 150001, &r).unwrap();
     assert_eq!(
-        content.bytes,
+        *content.get(),
         (0..150001).map(|i| (i % 251) as u8).collect::<Vec<_>>()
     );
     drop(content);
@@ -513,4 +518,26 @@ fn postmutation_source_and_target_failures_do_not_return_success() {
         error.source.unwrap().to_string(),
         "causal staged target failure"
     );
+}
+
+#[test]
+fn cancellation_in_source_callback_stops_staged_exfat_capture() {
+    let r = resources();
+    let state = Arc::new(State::default());
+    let plan = ExfatCopyPlan::new(
+        Arc::new(Source {
+            mode: Mode::Normal,
+            state: state.clone(),
+        }),
+        options(),
+        &r,
+    )
+    .unwrap();
+    state.cancel_after_read.store(true, Ordering::SeqCst);
+    let mut output = Image::new();
+    let error = plan.emit(&mut output, &r).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Cancelled);
+    assert_eq!(output.writes, 0);
+    assert_eq!(state.reads.load(Ordering::SeqCst), 1);
+    assert_eq!(output.flushes, 0);
 }

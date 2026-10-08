@@ -320,6 +320,23 @@ impl Error {
             source: None,
         }
     }
+    /// Classify native format errors while retaining their complete cause chain.
+    pub(crate) fn classified_io(context: impl Into<String>, source: io::Error) -> Self {
+        let kind = source
+            .get_ref()
+            .and_then(|cause| cause.downcast_ref::<Self>())
+            .map_or_else(
+                || match source.kind() {
+                    io::ErrorKind::InvalidData => ErrorKind::InvalidData,
+                    io::ErrorKind::Unsupported => ErrorKind::Unsupported,
+                    _ => ErrorKind::Io,
+                },
+                |cause| cause.kind,
+            );
+        let mut error = Self::io(context, source);
+        error.kind = kind;
+        error
+    }
     /// Retain an I/O cause and preserve an embedded framework failure category.
     pub fn io(context: impl Into<String>, source: io::Error) -> Self {
         let kind = source
@@ -521,12 +538,17 @@ pub trait FileRead: Send + Sync {
     ) -> Result<()>;
 }
 /// Size-bounded convenience access. Retains the allocation reservation with its bytes.
-#[derive(Debug)]
-pub struct BoundedContent {
-    /// Owned payload bytes, charged to the retained memory reservation.
-    pub bytes: Vec<u8>,
-    _reservation: Reservation,
-}
+///
+/// Bytes can only be borrowed; growing or extracting the vector is forbidden.
+/// ```compile_fail
+/// use partmgr::fs_core::BoundedContent;
+/// fn grow(content: &mut BoundedContent) { content.get().push(0); }
+/// ```
+/// ```compile_fail
+/// use partmgr::fs_core::BoundedContent;
+/// fn extract(content: BoundedContent) -> Vec<u8> { *content }
+/// ```
+pub type BoundedContent = Budgeted<Vec<u8>>;
 /// Read a size-bounded whole stream, handling short reads and rejecting observed
 /// identity or length changes. This check cannot establish snapshot isolation: a
 /// source must still uphold its declared stability assurance throughout reading.
@@ -546,33 +568,31 @@ pub fn read_all(
     }
     let size = usize::try_from(length)
         .map_err(|_| Error::new(ErrorKind::BudgetExhausted, "file exceeds address space"))?;
-    let reservation = resources.memory.reserve(length)?;
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(size)
-        .map_err(|_| Error::new(ErrorKind::BudgetExhausted, "payload allocation failed"))?;
-    bytes.resize(size, 0);
-    let mut done = 0;
-    while done < size {
-        resources.cancellation.check()?;
-        let count = file.read_at(done as u64, &mut bytes[done..], resources)?;
-        if count == 0 || count > size - done {
+    Budgeted::try_new(&resources.memory, length, || {
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| Error::new(ErrorKind::BudgetExhausted, "payload allocation failed"))?;
+        bytes.resize(size, 0);
+        let mut done = 0;
+        while done < size {
+            resources.cancellation.check()?;
+            let count = file.read_at(done as u64, &mut bytes[done..], resources)?;
+            if count == 0 || count > size - done {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "stream changed or returned invalid read length",
+                ));
+            }
+            done += count;
+        }
+        if file.len() != length || file.identity() != &identity {
             return Err(Error::new(
-                ErrorKind::InvalidData,
-                "stream changed or returned invalid read length",
+                ErrorKind::StalePlan,
+                "stream identity or length changed during read",
             ));
         }
-        done += count;
-    }
-    if file.len() != length || file.identity() != &identity {
-        return Err(Error::new(
-            ErrorKind::StalePlan,
-            "stream identity or length changed during read",
-        ));
-    }
-    Ok(BoundedContent {
-        bytes,
-        _reservation: reservation,
+        Ok(bytes)
     })
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -686,4 +706,35 @@ pub trait TreeSink {
         source: &dyn TreeSource,
         resources: &Resources,
     ) -> Result<Self::Report>;
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+    #[test]
+    fn classified_native_errors_retain_embedded_causes() {
+        let original = Error::io(
+            "device read",
+            io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
+        );
+        let mapped = Error::classified_io("inventory", io::Error::other(original));
+        assert_eq!(mapped.kind, ErrorKind::Io);
+        let embedded = mapped
+            .source
+            .unwrap()
+            .into_inner()
+            .unwrap()
+            .downcast::<Error>()
+            .unwrap();
+        assert_eq!(
+            embedded.source.unwrap().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let mapped = Error::classified_io(
+            "inventory",
+            io::Error::other(Error::new(ErrorKind::Cancelled, "cancelled")),
+        );
+        assert_eq!(mapped.kind, ErrorKind::Cancelled);
+        assert!(mapped.source.is_some());
+    }
 }

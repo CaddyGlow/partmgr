@@ -15,6 +15,9 @@ pub mod editor;
 pub mod error;
 /// Bounded extended-MBR traversal, editing, and EBR write plans.
 pub mod extended;
+mod fs_apfs_disk;
+mod fs_build_io;
+mod gpt;
 /// Typed partition identifiers, names, and attributes.
 pub mod guid;
 /// Owned partition layouts and lossless inspection.

@@ -78,6 +78,9 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-features --locked
 ```
 
+The test profile optimizes the exhaustive filesystem audit and recovery-cut loops.
+Debug assertions and integer overflow checks remain enabled.
+
 Host checks do not establish Windows servicing or capture correctness. See
 `scripts/firmware-gate.py` for the separate firmware run and its explicit tool
 dependencies. Tests requiring external tools must be run explicitly; a skipped

@@ -784,29 +784,17 @@ impl ExfatBuildPlan {
                 let n = (self.length - offset).min(SCRATCH as u64) as usize;
                 self.render(offset, &mut expected[..n], resources)?;
                 digest.update(&expected[..n]);
-                let mut done = 0;
-                while done < n {
-                    resources.cancellation.check()?;
-                    mutated = true;
-                    let count = storage
-                        .write_at(offset + done as u64, &expected[done..n])
-                        .map_err(|e| Error::io("exFAT staged write", e))?;
-                    if count == 0 || count > n - done {
-                        return Err(Error::io(
-                            "exFAT invalid staged write count",
-                            io::ErrorKind::WriteZero.into(),
-                        ));
-                    }
-                    done += count
-                }
+                crate::fs_build_io::write_all(
+                    storage,
+                    offset,
+                    &expected[..n],
+                    resources,
+                    &mut mutated,
+                    "exFAT staged write",
+                )?;
                 offset += n as u64
             }
-            resources.cancellation.check()?;
-            storage.flush().map_err(|e| {
-                let mut error = Error::io("exFAT staged flush", e);
-                error.kind = ErrorKind::UncertainDurability;
-                error
-            })?;
+            crate::fs_build_io::flush(storage, resources, "exFAT staged flush")?;
             let emitted: [u8; 32] = digest.finalize().into();
             let mut verified = Sha256::new();
             offset = 0;
@@ -814,15 +802,15 @@ impl ExfatBuildPlan {
                 resources.cancellation.check()?;
                 let n = (self.length - offset).min(SCRATCH as u64) as usize;
                 self.render(offset, &mut expected[..n], resources)?;
-                storage
-                    .read_exact_at(offset, &mut actual[..n])
-                    .map_err(|e| Error::io("exFAT verification read", e))?;
-                if actual[..n] != expected[..n] {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "exFAT verification byte mismatch",
-                    ));
-                }
+                crate::fs_build_io::verify(
+                    storage,
+                    offset,
+                    &expected[..n],
+                    &mut actual[..n],
+                    resources,
+                    "exFAT staged verification",
+                    "exFAT verification byte mismatch",
+                )?;
                 verified.update(&actual[..n]);
                 offset += n as u64
             }

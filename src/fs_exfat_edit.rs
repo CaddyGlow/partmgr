@@ -217,6 +217,22 @@ impl ExfatEditBatch {
         self.final_flags
     }
 }
+#[derive(Clone, Copy)]
+enum SessionState {
+    Ready,
+    NeedsRecovery {
+        binding: UndoBinding,
+        target_may_have_changed: bool,
+    },
+}
+impl SessionState {
+    fn public(self) -> ExfatEditState {
+        match self {
+            Self::Ready => ExfatEditState::Ready,
+            Self::NeedsRecovery { .. } => ExfatEditState::NeedsRecovery,
+        }
+    }
+}
 /// Owns both exclusive stores. Storage ownership alone cannot establish physical disjointness.
 pub struct ExfatEditor<S: Storage, J: Storage> {
     target: Region<S>,
@@ -225,9 +241,7 @@ pub struct ExfatEditor<S: Storage, J: Storage> {
     binding: ExfatEditBinding,
     scope: u128,
     generation: u64,
-    state: ExfatEditState,
-    pending: Option<UndoBinding>,
-    pending_write: bool,
+    state: SessionState,
     boot: ExfatBoot,
     audit: Option<ExfatAuditReport>,
 }
@@ -304,9 +318,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
             binding,
             scope,
             generation: 0,
-            state: ExfatEditState::Ready,
-            pending: None,
-            pending_write: false,
+            state: SessionState::Ready,
             boot,
             audit: Some(audit),
         })
@@ -327,7 +339,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
     fn ready(&self, r: &Resources) -> Result<()> {
         r.cancellation.check()?;
         self.target.len().map_err(native)?;
-        if self.state != ExfatEditState::Ready {
+        if self.state.public() != ExfatEditState::Ready {
             return Err(Error::new(
                 ErrorKind::InvalidOperation,
                 "exFAT session needs recovery",
@@ -357,7 +369,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
     }
     /// Current readiness or recovery obligation.
     pub fn state(&self) -> ExfatEditState {
-        self.state
+        self.state.public()
     }
     /// Caller-assigned exclusive session generation.
     pub fn generation(&self) -> u64 {
@@ -693,9 +705,10 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
         )
         .map_err(failure)?;
         drop(batch._lease);
-        self.state = ExfatEditState::NeedsRecovery;
-        self.pending = Some(binding);
-        self.pending_write = true;
+        self.state = SessionState::NeedsRecovery {
+            binding,
+            target_may_have_changed: true,
+        };
         self.generation = next;
         let (result, new_audit) = {
             let mut guarded = DirtyTarget {
@@ -710,7 +723,10 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
             (result, guarded.audit.take())
         };
         if let Err(e) = &result {
-            self.pending_write = e.target_may_have_changed;
+            self.state = SessionState::NeedsRecovery {
+                binding,
+                target_may_have_changed: e.target_may_have_changed,
+            };
         }
         if result.is_ok() {
             self.audit = new_audit;
@@ -730,8 +746,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
                     source,
                 })?;
             self.boot = decoder.boot().clone();
-            self.state = ExfatEditState::Ready;
-            self.pending = None;
+            self.state = SessionState::Ready;
         }
         result
     }
@@ -760,11 +775,14 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
     }
     /// Restore or verify the pending transaction before permitting further operations.
     pub fn recover(&mut self, r: &Resources) -> std::result::Result<UndoStatus, UndoFailure> {
-        if self.state != ExfatEditState::NeedsRecovery {
+        let SessionState::NeedsRecovery {
+            binding,
+            target_may_have_changed,
+        } = self.state
+        else {
             return Err(failure(bad("exFAT session has no recovery obligation")));
-        }
-        let binding = self.pending.unwrap();
-        let status = if self.pending_write {
+        };
+        let status = if target_may_have_changed {
             recover_guarded(&mut self.target, &mut self.journal, binding, self.limits, r)?
         } else {
             write_full(&mut self.journal, 0, &[0; 1024], r)
@@ -787,17 +805,16 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
             .map_err(|source| UndoFailure {
                 stage: "exFAT recovered decoder refresh",
                 recovery_required: true,
-                target_may_have_changed: self.pending_write,
+                target_may_have_changed,
                 source,
             })?;
         self.boot = decoder.boot().clone();
-        self.state = ExfatEditState::Ready;
-        self.pending = None;
+        self.state = SessionState::Ready;
         Ok(status)
     }
     /// Release both owned stores and the remaining explicit recovery obligation.
     pub fn into_stores(self) -> (S, J, ExfatEditState) {
-        (self.target.store, self.journal, self.state)
+        (self.target.store, self.journal, self.state.public())
     }
 }
 struct Planner<'a, S: Storage> {

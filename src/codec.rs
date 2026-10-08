@@ -1,4 +1,5 @@
 //! Deterministic supported metadata serialization and durability ordering.
+use crate::gpt::crc32;
 use crate::{
     layout::{DiskLayout, GptLayout},
     storage::{Barrier, WritePlan, WriteRange},
@@ -7,16 +8,7 @@ use std::io;
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut value = !0u32;
-    for byte in bytes {
-        value ^= u32::from(*byte);
-        for _ in 0..8 {
-            value = (value >> 1) ^ (0xedb8_8320 & 0u32.wrapping_sub(value & 1));
-        }
-    }
-    !value
-}
+
 fn header(raw: &[u8], array: &[u8]) -> io::Result<Vec<u8>> {
     let mut bytes = raw.to_vec();
     let length = u32::from_le_bytes(

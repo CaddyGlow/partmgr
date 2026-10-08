@@ -102,7 +102,7 @@ fn independent_both_endian_versions_deletion_sparse_native_tree_and_leases() {
         assert_eq!(report.free_ranges().len(), 1);
         drop(report);
         let f = v.open_file(2, &r).unwrap();
-        assert_eq!(read_all(&f, 16, &r).unwrap().bytes, b"abXY\0\0");
+        assert_eq!(read_all(&f, 16, &r).unwrap().get().as_slice(), b"abXY\0\0");
         let tree = Jffs2TreeSource::inventory(v, al(), &r).unwrap();
         let root = tree.root();
         assert_eq!(root.source >> 64, 10);
@@ -133,7 +133,7 @@ fn independent_both_endian_versions_deletion_sparse_native_tree_and_leases() {
         drop(entries);
         drop(tree);
         assert!(r.memory.used() > 0);
-        assert_eq!(read_all(&f, 16, &r).unwrap().bytes, b"abXY\0\0");
+        assert_eq!(read_all(&f, 16, &r).unwrap().get().as_slice(), b"abXY\0\0");
         drop(f);
         assert_eq!(r.memory.used(), 0);
     }

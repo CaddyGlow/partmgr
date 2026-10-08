@@ -660,6 +660,8 @@ pub(crate) struct Inner {
     source: Arc<Source>,
     pub(crate) geometry: HfsGeometry,
     pub(crate) nodes: BTreeMap<u32, Node>,
+    children: Vec<u32>,
+    _children_lease: Reservation,
     pub(crate) threads: BTreeMap<u32, Thread>,
     pub(crate) system: Vec<Fork>,
     pub(crate) bad_blocks: Vec<Allocation>,
@@ -927,11 +929,34 @@ impl HfsVolume {
                     .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
                     .map_err(|_| budget("HFS source scope exhausted"))?,
             );
+        // Retain only node IDs; native names stay owned by the catalog inventory.
+        let children_lease = r.memory.reserve(
+            (nodes.len() as u64)
+                .checked_mul(4)
+                .ok_or_else(|| budget("HFS child index charge"))?,
+        )?;
+        let mut children = vector(nodes.len())?;
+        for node in nodes.values() {
+            r.cancellation.check()?;
+            children.push(node.id);
+        }
+        children.sort_unstable_by(|a, b| {
+            let a = &nodes[a];
+            let b = &nodes[b];
+            a.parent.cmp(&b.parent).then_with(|| {
+                a.name
+                    .iter()
+                    .map(|u| fold(*u))
+                    .cmp(b.name.iter().map(|u| fold(*u)))
+            })
+        });
         Ok(Self {
             inner: Arc::new(Inner {
                 source,
                 geometry,
                 nodes,
+                children,
+                _children_lease: children_lease,
                 threads,
                 system,
                 bad_blocks,
@@ -986,47 +1011,47 @@ impl HfsVolume {
     /// Enumerate exact native children without host path reconstruction.
     pub fn directory(&self, id: &ObjectId, r: &Resources) -> Result<Budgeted<Vec<DirectoryEntry>>> {
         self.revalidate(id, r)?;
+        let n = self.directory_len(id)?;
+        let charge = (n as u64)
+            .checked_mul(768)
+            .ok_or_else(|| budget("HFS directory charge"))?;
+        Budgeted::try_new(&r.memory, charge, || self.directory_entries(id, 0..n, r))
+    }
+    fn child_ids(&self, id: &ObjectId) -> Result<&[u32]> {
         let node = self.node(id)?;
         if !node.directory {
             return Err(Error::new(ErrorKind::InvalidOperation, "HFS non-directory"));
         }
-        let n = self
-            .inner
-            .nodes
-            .values()
-            .filter(|e| e.parent == node.id)
-            .count();
-        Budgeted::try_new(
-            &r.memory,
-            (n as u64)
-                .checked_mul(768)
-                .ok_or_else(|| budget("HFS directory charge"))?,
-            || {
-                let mut out = vector(n)?;
-                for entry in self.inner.nodes.values().filter(|e| e.parent == node.id) {
-                    r.cancellation.check()?;
-                    out.push(DirectoryEntry {
-                        name: NativeName::Bytes(copied(&entry.name)?),
-                        object: self.identity(entry.id),
-                        kind: if entry.directory {
-                            ObjectKind::Directory
-                        } else {
-                            ObjectKind::File
-                        },
-                    });
-                }
-                out.sort_unstable_by(|a, b| {
-                    let NativeName::Bytes(a) = &a.name else {
-                        unreachable!()
-                    };
-                    let NativeName::Bytes(b) = &b.name else {
-                        unreachable!()
-                    };
-                    a.iter().map(|u| fold(*u)).cmp(b.iter().map(|u| fold(*u)))
-                });
-                Ok(out)
-            },
-        )
+        let ids = &self.inner.children;
+        let start = ids.partition_point(|id| self.inner.nodes[id].parent < node.id);
+        let end = ids.partition_point(|id| self.inner.nodes[id].parent <= node.id);
+        Ok(&ids[start..end])
+    }
+    pub(crate) fn directory_len(&self, id: &ObjectId) -> Result<usize> {
+        Ok(self.child_ids(id)?.len())
+    }
+    pub(crate) fn directory_entries(
+        &self,
+        id: &ObjectId,
+        range: std::ops::Range<usize>,
+        r: &Resources,
+    ) -> Result<Vec<DirectoryEntry>> {
+        let ids = self.child_ids(id)?;
+        let mut out = vector(range.len())?;
+        for id in &ids[range] {
+            r.cancellation.check()?;
+            let entry = &self.inner.nodes[id];
+            out.push(DirectoryEntry {
+                name: NativeName::Bytes(copied(&entry.name)?),
+                object: self.identity(entry.id),
+                kind: if entry.directory {
+                    ObjectKind::Directory
+                } else {
+                    ObjectKind::File
+                },
+            });
+        }
+        Ok(out)
     }
     /// Lookup native path components under the selected actual catalog comparator.
     pub fn lookup(&self, path: &[NativeName], r: &Resources) -> Result<ObjectId> {

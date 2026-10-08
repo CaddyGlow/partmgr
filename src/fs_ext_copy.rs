@@ -1,6 +1,6 @@
 //! Deferred common-tree capture into unpublished classic ext2 with preserved hardlinks.
 use crate::{
-    fs_copy::{CopyLimits, MetadataOutcome},
+    fs_copy::{CopyLimits, FileInput, MetadataOutcome},
     fs_core::*,
     fs_ext_builder::{
         ExtBuildLimits, ExtBuildLink, ExtBuildMetadata, ExtBuildObject, ExtBuildOptions,
@@ -10,7 +10,6 @@ use crate::{
 };
 use std::{
     collections::{HashMap, VecDeque},
-    io,
     sync::Arc,
 };
 /// Explicit native name conversion policy.
@@ -52,64 +51,6 @@ pub struct ExtCopyPlan {
     build: ExtBuildPlan,
     outcomes: Vec<MetadataOutcome>,
     _reservation: Reservation,
-}
-struct FileInput {
-    source: Arc<dyn TreeSource>,
-    file: Arc<dyn FileRead>,
-    identity: ObjectId,
-    length: u64,
-    resources: Resources,
-}
-impl FileInput {
-    fn validate(&self, resources: &Resources) -> Result<()> {
-        resources.cancellation.check()?;
-        self.resources.cancellation.check()?;
-        self.source.revalidate(&self.identity, resources)?;
-        if self.file.identity() != &self.identity || self.file.len() != self.length {
-            return Err(Error::new(
-                ErrorKind::StalePlan,
-                "ext2 copy source stream identity/size changed",
-            ));
-        }
-        Ok(())
-    }
-}
-impl FileRead for FileInput {
-    fn identity(&self) -> &ObjectId {
-        &self.identity
-    }
-    fn len(&self) -> u64 {
-        self.file.len()
-    }
-    fn read_at(&self, offset: u64, out: &mut [u8], resources: &Resources) -> Result<usize> {
-        self.validate(resources)?;
-        let n = self.length.saturating_sub(offset).min(out.len() as u64) as usize;
-        let mut done = 0;
-        while done < n {
-            resources.cancellation.check()?;
-            let count = self
-                .file
-                .read_at(offset + done as u64, &mut out[done..n], resources)?;
-            if count == 0 || count > n - done {
-                return Err(Error::io(
-                    "ext2 copy source invalid count",
-                    io::ErrorKind::UnexpectedEof.into(),
-                ));
-            }
-            done += count;
-        }
-        self.validate(resources)?;
-        Ok(n)
-    }
-    fn visit_extents(
-        &self,
-        resources: &Resources,
-        visitor: &mut dyn FnMut(LogicalExtent) -> Result<()>,
-    ) -> Result<()> {
-        self.validate(resources)?;
-        self.file.visit_extents(resources, visitor)?;
-        self.validate(resources)
-    }
 }
 fn outcome<T>(
     object: &ObjectId,

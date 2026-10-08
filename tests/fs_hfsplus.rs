@@ -288,6 +288,23 @@ fn indexed_overflow_and_resource_forks_common_native_tree_and_refunds() {
         assert_eq!(file.read_at(file.len(), &mut empty, &r).unwrap(), 0);
         assert!(file.read_at(file.len() + 1, &mut empty, &r).is_err());
         let tree = HfsPlusTreeSource::inventory(volume, audit_limits(), &r).unwrap();
+        // A one-entry page must fit without charging a complete directory inventory.
+        let page_resources = Resources {
+            memory: Budget::new(1024),
+            cancellation: r.cancellation.clone(),
+        };
+        let small_page = tree
+            .directory_page(&tree.root(), None, 1, &page_resources)
+            .unwrap();
+        assert_eq!(small_page.entries.len(), 1);
+        let cursor = small_page.next.clone().unwrap();
+        drop(small_page);
+        let small_next = tree
+            .directory_page(&tree.root(), Some(&cursor), 1, &page_resources)
+            .unwrap();
+        assert_eq!(small_next.entries.len(), 1);
+        drop(small_next);
+        assert_eq!(page_resources.memory.used(), 0);
         let page = tree.directory_page(&tree.root(), None, 1, &r).unwrap();
         let next = tree
             .directory_page(&tree.root(), page.next.as_deref(), 1, &r)

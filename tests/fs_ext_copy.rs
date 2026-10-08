@@ -1050,7 +1050,7 @@ fn compressed_jffs2_common_tree_capture_preserves_exact_names_hardlinks_and_payl
         drop(root);
         drop(image);
         assert_eq!(
-            read_all(file.as_ref(), 256, &r).unwrap().bytes,
+            *read_all(file.as_ref(), 256, &r).unwrap().get(),
             vec![b'A'; 256]
         );
         drop(file);

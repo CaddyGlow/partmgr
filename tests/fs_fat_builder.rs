@@ -513,6 +513,14 @@ fn fat32_tree_root_extends_and_tree_preflight_rejects_cycles_and_collisions() {
             tree_entry(2, None, &[97], true),
         ],
         vec![tree_entry(1, Some(2), &[65], true)],
+        vec![
+            tree_entry(1, None, &[65], true),
+            tree_entry(1, None, &[66], true),
+        ],
+        vec![
+            tree_entry(1, None, &[65], true),
+            tree_entry(2, Some(1), &[66], true),
+        ],
         vec![tree_entry(1, None, &[46, 46], false)],
     ] {
         assert!(
@@ -526,4 +534,40 @@ fn fat32_tree_root_extends_and_tree_preflight_rejects_cycles_and_collisions() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn flat_tree_planning_uses_linear_inventory_budget() {
+    use partmgr::{
+        fs_core::ObjectId,
+        fs_fat_builder::{FatBuildTreeEntry, FatTreeMetadataPolicy},
+    };
+    let r = Resources {
+        memory: Budget::new(24_000_000),
+        cancellation: Cancellation::default(),
+    };
+    let source: Arc<dyn ReadAt> = Arc::new(Bytes(Vec::new()));
+    let entries: Vec<_> = (0..10_000u32)
+        .map(|n| FatBuildTreeEntry {
+            identity: ObjectId {
+                source: 1,
+                generation: 0,
+                native: n.to_le_bytes().to_vec(),
+            },
+            parent: None,
+            name: format!("F{n:07}").encode_utf16().collect(),
+            source: Some(source.clone()),
+        })
+        .collect();
+    let plan = FatBuildPlan::new_tree(
+        64 * 1024 * 1024,
+        options(FatFamily::Fat32),
+        &entries,
+        FatTreeMetadataPolicy::DeterministicDefaults,
+        &r,
+    )
+    .unwrap();
+    assert!(r.memory.used() < 24_000_000);
+    drop(plan);
+    assert_eq!(r.memory.used(), 0);
 }

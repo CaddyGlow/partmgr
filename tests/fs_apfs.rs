@@ -370,6 +370,23 @@ fn tree_pages_bind_native_directory_and_source() {
     let c = ApfsContainer::open(Arc::new(Bytes(fixture::apfs_seed())), limits(), &r).unwrap();
     let v = ApfsVolume::open(c, 1026, &r).unwrap();
     let tree = ApfsTreeSource::inventory(v, audit_limits(), &r).unwrap();
+    // A one-entry page must fit without charging a complete directory inventory.
+    let page_resources = Resources {
+        memory: Budget::new(4096),
+        cancellation: r.cancellation.clone(),
+    };
+    let small_page = tree
+        .directory_page(&tree.root(), None, 1, &page_resources)
+        .unwrap();
+    assert_eq!(small_page.entries.len(), 1);
+    let cursor = small_page.next.clone().unwrap();
+    drop(small_page);
+    let small_next = tree
+        .directory_page(&tree.root(), Some(&cursor), 1, &page_resources)
+        .unwrap();
+    assert_eq!(small_next.entries.len(), 1);
+    drop(small_next);
+    assert_eq!(page_resources.memory.used(), 0);
     let first = tree.directory_page(&tree.root(), None, 1, &r).unwrap();
     let second = tree
         .directory_page(&tree.root(), first.next.as_deref(), 1, &r)

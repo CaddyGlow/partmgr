@@ -412,7 +412,8 @@ fn deterministic_both_endian_none_zero_streams_hardlinks_and_metadata() {
                         &r
                     )
                     .unwrap()
-                    .bytes,
+                    .get()
+                    .as_slice(),
                     tree.file.bytes
                 );
                 drop(p);

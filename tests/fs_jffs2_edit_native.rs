@@ -266,7 +266,10 @@ fn reopen(image: &Path, length: u64, expected: &[u8], r: &Resources) {
     let f = tree
         .open_stream(&entry.object, &StreamKind::Data, r)
         .unwrap();
-    assert_eq!(read_all(f.as_ref(), 32768, r).unwrap().bytes, expected);
+    assert_eq!(
+        read_all(f.as_ref(), 32768, r).unwrap().get().as_slice(),
+        expected
+    );
     assert!(
         page.entries
             .iter()
@@ -703,7 +706,8 @@ fn native_independent_incremental_history_append_shrink_restart_and_gc() {
     assert_eq!(
         read_all(&v.open_file(9, &r).unwrap(), 254, &r)
             .unwrap()
-            .bytes,
+            .get()
+            .as_slice(),
         b"alias"
     );
     drop(v);
@@ -808,7 +812,8 @@ fn native_independent_incremental_history_append_shrink_restart_and_gc() {
     assert_eq!(
         read_all(&v.open_file(8, &r).unwrap(), 5013, &r)
             .unwrap()
-            .bytes,
+            .get()
+            .as_slice(),
         expected
     );
     let victim = v.inode(8).unwrap().latest_header_offset().unwrap() / 65536 * 65536;

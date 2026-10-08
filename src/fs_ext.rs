@@ -670,18 +670,7 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
         Ok(inode)
     }
     fn symlink_error(error: io::Error) -> fs_core::Error {
-        if let Some(cause) = error
-            .get_ref()
-            .and_then(|e| e.downcast_ref::<fs_core::Error>())
-        {
-            return fs_core::Error::new(cause.kind, cause.context.clone());
-        }
-        let kind = match error.kind() {
-            io::ErrorKind::InvalidData => fs_core::ErrorKind::InvalidData,
-            io::ErrorKind::Unsupported => fs_core::ErrorKind::Unsupported,
-            _ => return fs_core::Error::io("ext symlink access", error),
-        };
-        fs_core::Error::new(kind, error.to_string())
+        fs_core::Error::classified_io("ext symlink access", error)
     }
     /// Read an unfollowed native symlink target under shared memory and block ceilings.
     /// Fast symlinks use i_block only when i_blocks is zero; external xattrs remain gated.

@@ -797,41 +797,32 @@ impl ExtBuildPlan {
                 let n = (self.length - at).min(65536) as usize;
                 self.render(at, &mut expected[..n], r)?;
                 hash.update(&expected[..n]);
-                let mut done = 0;
-                while done < n {
-                    r.cancellation.check()?;
-                    mutated = true;
-                    let count = storage
-                        .write_at(at + done as u64, &expected[done..n])
-                        .map_err(|e| Error::io("ext2 staged write", e))?;
-                    if count == 0 || count > n - done {
-                        return Err(Error::io(
-                            "ext2 invalid write count",
-                            io::ErrorKind::WriteZero.into(),
-                        ));
-                    }
-                    done += count;
-                }
+                crate::fs_build_io::write_all(
+                    storage,
+                    at,
+                    &expected[..n],
+                    r,
+                    &mut mutated,
+                    "ext2 staged write",
+                )?;
                 at += n as u64;
             }
-            r.cancellation.check()?;
-            storage.flush().map_err(|e| {
-                let mut e = Error::io("ext2 staged flush", e);
-                e.kind = ErrorKind::UncertainDurability;
-                e
-            })?;
+            crate::fs_build_io::flush(storage, r, "ext2 staged flush")?;
             let digest: [u8; 32] = hash.finalize().into();
             let mut verified = Sha256::new();
             at = 0;
             while at < self.length {
                 let n = (self.length - at).min(65536) as usize;
                 self.render(at, &mut expected[..n], r)?;
-                storage
-                    .read_exact_at(at, &mut actual[..n])
-                    .map_err(|e| Error::io("ext2 staged verification", e))?;
-                if expected[..n] != actual[..n] {
-                    return Err(Error::new(ErrorKind::InvalidData, "ext2 readback mismatch"));
-                }
+                crate::fs_build_io::verify(
+                    storage,
+                    at,
+                    &expected[..n],
+                    &mut actual[..n],
+                    r,
+                    "ext2 staged verification",
+                    "ext2 readback mismatch",
+                )?;
                 verified.update(&actual[..n]);
                 at += n as u64;
             }

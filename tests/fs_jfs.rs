@@ -253,6 +253,23 @@ fn directory_index_pages_native_cursor_binding_and_malformed_child_names() {
     assert!(report.is_clean(), "{:?}", report.findings());
     assert_eq!(report.allocated_blocks(), 72);
     let tree = JfsTreeSource::inventory(v.clone(), audit_limits(), &r).unwrap();
+    // A one-entry page must fit without charging a complete directory inventory.
+    let page_resources = Resources {
+        memory: Budget::new(1024),
+        cancellation: r.cancellation.clone(),
+    };
+    let small_page = tree
+        .directory_page(&tree.root(), None, 1, &page_resources)
+        .unwrap();
+    assert_eq!(small_page.entries.len(), 1);
+    let cursor = small_page.next.clone().unwrap();
+    drop(small_page);
+    let small_next = tree
+        .directory_page(&tree.root(), Some(&cursor), 1, &page_resources)
+        .unwrap();
+    assert_eq!(small_next.entries.len(), 1);
+    drop(small_next);
+    assert_eq!(page_resources.memory.used(), 0);
     let a = tree.directory_page(&tree.root(), None, 1, &r).unwrap();
     let b = tree
         .directory_page(&tree.root(), a.next.as_deref(), 8, &r)

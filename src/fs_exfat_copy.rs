@@ -4,7 +4,7 @@
 //! and deterministic metadata replacement before planning. Unsupported object
 //! kinds, hard links and additional streams fail before any destination writes.
 use crate::{
-    fs_copy::{CopyLimits, CopyNamePolicy, MetadataOutcome, native_name},
+    fs_copy::{CopyLimits, CopyNamePolicy, FileInput, MetadataOutcome, native_name},
     fs_core::*,
     fs_exfat_builder::{
         ExfatBuildEntry, ExfatBuildLimits, ExfatBuildMetadataPolicy, ExfatBuildOptions,
@@ -14,7 +14,6 @@ use crate::{
 };
 use std::{
     collections::{HashSet, VecDeque},
-    io,
     sync::Arc,
 };
 
@@ -49,77 +48,6 @@ pub struct ExfatCopyPlan {
     build: ExfatBuildPlan,
     outcomes: Vec<MetadataOutcome>,
     _reservation: Reservation,
-}
-struct FileInput {
-    source: Arc<dyn TreeSource>,
-    file: Arc<dyn FileRead>,
-    identity: ObjectId,
-    length: u64,
-    resources: Resources,
-}
-impl FileInput {
-    fn validate(&self, resources: &Resources) -> Result<()> {
-        resources.cancellation.check()?;
-        self.resources.cancellation.check()?;
-        self.source.revalidate(&self.identity, resources)?;
-        if self.file.identity() != &self.identity || self.file.len() != self.length {
-            return Err(Error::new(
-                ErrorKind::StalePlan,
-                "exFAT copy source stream identity/size changed",
-            ));
-        }
-        Ok(())
-    }
-}
-impl FileRead for FileInput {
-    fn identity(&self) -> &ObjectId {
-        &self.identity
-    }
-    fn len(&self) -> u64 {
-        self.file.len()
-    }
-    fn read_at(&self, offset: u64, out: &mut [u8], resources: &Resources) -> Result<usize> {
-        resources.cancellation.check()?;
-        self.resources.cancellation.check()?;
-        self.source.revalidate(&self.identity, resources)?;
-        if self.file.identity() != &self.identity || self.file.len() != self.length {
-            return Err(Error::new(
-                ErrorKind::StalePlan,
-                "exFAT copy stream changed",
-            ));
-        }
-        let n = self.length.saturating_sub(offset).min(out.len() as u64) as usize;
-        let mut done = 0;
-        while done < n {
-            resources.cancellation.check()?;
-            let count = self
-                .file
-                .read_at(offset + done as u64, &mut out[done..n], resources)?;
-            if count == 0 || count > n - done {
-                return Err(Error::io(
-                    "exFAT copy source invalid count",
-                    io::ErrorKind::UnexpectedEof.into(),
-                ));
-            }
-            done += count;
-        }
-        self.source.revalidate(&self.identity, resources)?;
-        if self.file.identity() != &self.identity || self.file.len() != self.length {
-            return Err(Error::new(
-                ErrorKind::StalePlan,
-                "exFAT copy source changed during read",
-            ));
-        }
-        Ok(n)
-    }
-    fn visit_extents(
-        &self,
-        resources: &Resources,
-        visitor: &mut dyn FnMut(LogicalExtent) -> Result<()>,
-    ) -> Result<()> {
-        self.source.revalidate(&self.identity, resources)?;
-        self.file.visit_extents(resources, visitor)
-    }
 }
 fn outcome<T>(
     object: &ObjectId,

@@ -134,7 +134,7 @@ fn whole_file_convenience_handles_short_reads_and_retains_memory_charge() {
         ErrorKind::BudgetExhausted
     );
     let payload = read_all(&file, 4, &resources).unwrap();
-    assert_eq!(payload.bytes, b"test");
+    assert_eq!(payload.get().as_slice(), b"test");
     assert_eq!(resources.memory.used(), 4);
     drop(payload);
     file.broken = true;

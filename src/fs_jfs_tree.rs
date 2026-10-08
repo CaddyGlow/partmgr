@@ -54,7 +54,7 @@ impl TreeSource for JfsTreeSource {
             return Err(budget("JFS zero page maximum"));
         }
         self.volume.revalidate(id, r)?;
-        let entries = self.volume.directory(id, r)?;
+        let count = self.volume.directory_len(id)?;
         let start = if let Some(t) = continuation {
             if t.len() != 40 || t[..32] != self.token(id, 0)?[..32] {
                 return Err(Error::new(
@@ -67,41 +67,18 @@ impl TreeSource for JfsTreeSource {
         } else {
             0
         };
-        if start > entries.get().len() {
+        if start > count {
             return Err(bad("JFS page cursor bounds"));
         }
-        let n = maximum.min(entries.get().len() - start);
+        let n = maximum.min(count - start);
         let lease = r.memory.reserve(
             (n as u64)
                 .checked_mul(768)
                 .and_then(|n| n.checked_add(256))
                 .ok_or_else(|| budget("JFS page charge"))?,
         )?;
-        let mut out = vector(n)?;
-        for e in &entries.get()[start..start + n] {
-            r.cancellation.check()?;
-            let NativeName::Utf16(units) = &e.name else {
-                return Err(bad("JFS native name class"));
-            };
-            let mut name = vector(units.len())?;
-            name.extend_from_slice(units);
-            let mut native = vector(e.object.native.len())?;
-            native.extend_from_slice(&e.object.native);
-            out.push(DirectoryEntry {
-                name: NativeName::Utf16(name),
-                object: ObjectId {
-                    source: e.object.source,
-                    generation: e.object.generation,
-                    native,
-                },
-                kind: if e.kind == ObjectKind::Directory {
-                    ObjectKind::Directory
-                } else {
-                    ObjectKind::File
-                },
-            });
-        }
-        let next = if start + n < entries.get().len() {
+        let out = self.volume.directory_entries(id, start..start + n, r)?;
+        let next = if start + n < count {
             Some(self.token(id, start + n)?)
         } else {
             None

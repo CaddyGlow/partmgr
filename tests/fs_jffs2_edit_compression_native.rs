@@ -577,7 +577,7 @@ fn native_compressed_owned_range_gc_recovery_crc_complete_payload_both_endians()
                 assert!(audit(&volume, limits().audit, &r).unwrap().is_clean());
                 let file = volume.open_file(number, &r).unwrap();
                 assert_eq!(
-                    read_all(&file, 100000, &r).unwrap().bytes.as_slice(),
+                    read_all(&file, 100000, &r).unwrap().get().as_slice(),
                     expected
                 );
                 drop((file, volume));

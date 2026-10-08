@@ -1,4 +1,5 @@
 //! Explicit GPT source selection and bounded repair/geometry planning.
+use crate::gpt::crc32 as crc;
 use crate::{
     layout::{DiskLayout, Geometry, GptLayout},
     storage::{Barrier, ReadCondition, WritePlan, WriteRange},
@@ -14,16 +15,7 @@ fn u64le(b: &[u8], o: usize) -> u64 {
 fn u32le(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes(b[o..o + 4].try_into().expect("header field"))
 }
-fn crc(b: &[u8]) -> u32 {
-    let mut c = !0u32;
-    for v in b {
-        c ^= u32::from(*v);
-        for _ in 0..8 {
-            c = (c >> 1) ^ (0xedb88320 & 0u32.wrapping_sub(c & 1));
-        }
-    }
-    !c
-}
+
 fn header(
     mut b: Vec<u8>,
     current: u64,

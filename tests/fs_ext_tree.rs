@@ -366,7 +366,7 @@ fn native_debugfs_hardlink_inventory() {
         .open_stream(&alias.object, &StreamKind::Data, &r)
         .unwrap();
     let actual = partmgr::fs_core::read_all(&*file, 200_000, &r).unwrap();
-    assert_eq!(actual.bytes, bytes);
+    assert_eq!(actual.get().as_slice(), bytes);
     receipt.push_str(&format!("argv e2fsck -fn {:?}\n", path));
     let out = Command::new("e2fsck")
         .args(["-fn"])

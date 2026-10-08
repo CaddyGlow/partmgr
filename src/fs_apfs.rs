@@ -1367,38 +1367,49 @@ impl ApfsVolume {
     /// Enumerate exact native UTF8 name bytes, without host-path reconstruction.
     pub fn directory(&self, id: &ObjectId, r: &Resources) -> Result<Budgeted<Vec<DirectoryEntry>>> {
         self.revalidate(id, r)?;
-        let n = self.node(id)?;
-        if !n.directory {
+        let n = self.directory_len(id)?;
+        let charge = (n as u64)
+            .checked_mul(2048)
+            .and_then(|n| n.checked_add(512))
+            .ok_or_else(|| budget("APFS directory charge"))?;
+        Budgeted::try_new(&r.memory, charge, || self.directory_entries(id, 0..n, r))
+    }
+    pub(crate) fn directory_len(&self, id: &ObjectId) -> Result<usize> {
+        let node = self.node(id)?;
+        if !node.directory {
             return Err(Error::new(
                 ErrorKind::InvalidOperation,
                 "APFS non-directory",
             ));
         }
-        let charge = (n.entries.len() as u64)
-            .checked_mul(2048)
-            .and_then(|v| v.checked_add(512))
-            .ok_or_else(|| budget("APFS directory charge"))?;
-        Budgeted::try_new(&r.memory, charge, || {
-            let mut out = vector(n.entries.len())?;
-            for e in &n.entries {
-                r.cancellation.check()?;
-                let child = self
-                    .inner
-                    .nodes
-                    .get(&e.inode)
-                    .ok_or_else(|| bad("APFS directory missing target"))?;
-                out.push(DirectoryEntry {
-                    name: NativeName::Bytes(copy(&e.name)?),
-                    object: self.identity(e.inode),
-                    kind: if child.directory {
-                        ObjectKind::Directory
-                    } else {
-                        ObjectKind::File
-                    },
-                });
-            }
-            Ok(out)
-        })
+        Ok(node.entries.len())
+    }
+    pub(crate) fn directory_entries(
+        &self,
+        id: &ObjectId,
+        range: std::ops::Range<usize>,
+        r: &Resources,
+    ) -> Result<Vec<DirectoryEntry>> {
+        let node = self.node(id)?;
+        let mut out = vector(range.len())?;
+        for entry in &node.entries[range] {
+            r.cancellation.check()?;
+            let child = self
+                .inner
+                .nodes
+                .get(&entry.inode)
+                .ok_or_else(|| bad("APFS directory missing target"))?;
+            out.push(DirectoryEntry {
+                name: NativeName::Bytes(copy(&entry.name)?),
+                object: self.identity(entry.inode),
+                kind: if child.directory {
+                    ObjectKind::Directory
+                } else {
+                    ObjectKind::File
+                },
+            });
+        }
+        Ok(out)
     }
     /// Exact native-name lookup in the supported case/normalization-sensitive profile.
     pub fn lookup(&self, path: &[NativeName], r: &Resources) -> Result<ObjectId> {

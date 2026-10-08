@@ -66,12 +66,73 @@ pub struct FatCopyPlan {
     outcomes: Vec<MetadataOutcome>,
     _reservation: Reservation,
 }
-struct FileInput {
-    source: Arc<dyn TreeSource>,
-    file: Arc<dyn FileRead>,
-    identity: ObjectId,
-    length: u64,
-    resources: Resources,
+/// A retained source binding shared by all content-only capture profiles.
+pub(crate) struct FileInput {
+    pub(crate) source: Arc<dyn TreeSource>,
+    pub(crate) file: Arc<dyn FileRead>,
+    pub(crate) identity: ObjectId,
+    pub(crate) length: u64,
+    pub(crate) resources: Resources,
+}
+impl FileInput {
+    pub(crate) fn validate(&self, resources: &Resources) -> Result<()> {
+        self.check_cancellation(resources)?;
+        self.source.revalidate(&self.identity, resources)?;
+        self.check_cancellation(resources)?;
+        if self.file.identity() != &self.identity || self.file.len() != self.length {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "copy source stream identity/size changed",
+            ));
+        }
+        Ok(())
+    }
+    fn check_cancellation(&self, resources: &Resources) -> Result<()> {
+        resources.cancellation.check()?;
+        self.resources.cancellation.check()
+    }
+}
+impl FileRead for FileInput {
+    fn identity(&self) -> &ObjectId {
+        &self.identity
+    }
+    fn len(&self) -> u64 {
+        self.file.len()
+    }
+    fn read_at(&self, offset: u64, out: &mut [u8], resources: &Resources) -> Result<usize> {
+        self.validate(resources)?;
+        let n = self.length.saturating_sub(offset).min(out.len() as u64) as usize;
+        let mut done = 0;
+        while done < n {
+            self.check_cancellation(resources)?;
+            let count = self
+                .file
+                .read_at(offset + done as u64, &mut out[done..n], resources)?;
+            self.check_cancellation(resources)?;
+            if count == 0 || count > n - done {
+                return Err(Error::io(
+                    "copy source invalid positional count",
+                    io::ErrorKind::UnexpectedEof.into(),
+                ));
+            }
+            done += count;
+        }
+        self.validate(resources)?;
+        Ok(n)
+    }
+    fn visit_extents(
+        &self,
+        resources: &Resources,
+        visitor: &mut dyn FnMut(LogicalExtent) -> Result<()>,
+    ) -> Result<()> {
+        self.validate(resources)?;
+        self.file.visit_extents(resources, &mut |extent| {
+            self.check_cancellation(resources)?;
+            visitor(extent)?;
+            self.check_cancellation(resources)
+        })?;
+        self.validate(resources)
+    }
 }
 impl ReadAt for FileInput {
     fn len(&self) -> u64 {
@@ -84,39 +145,7 @@ impl ReadAt for FileInput {
         {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
-        self.resources
-            .cancellation
-            .check()
-            .map_err(io::Error::other)?;
-        self.source
-            .revalidate(&self.identity, &self.resources)
-            .map_err(io::Error::other)?;
-        if self.file.identity() != &self.identity || self.file.len() != self.length {
-            return Err(io::Error::other("copy source stream changed"));
-        }
-        let mut done = 0;
-        while done < out.len() {
-            let n = self
-                .file
-                .read_at(offset + done as u64, &mut out[done..], &self.resources)
-                .map_err(io::Error::other)?;
-            if n == 0 || n > out.len() - done {
-                return Err(io::Error::other(
-                    "copy source returned invalid positional count",
-                ));
-            }
-            done += n;
-        }
-        if self.file.identity() != &self.identity || self.file.len() != self.length {
-            return Err(io::Error::other("copy source stream changed during read"));
-        }
-        self.resources
-            .cancellation
-            .check()
-            .map_err(io::Error::other)?;
-        self.source
-            .revalidate(&self.identity, &self.resources)
-            .map_err(io::Error::other)?;
+        FileRead::read_at(self, offset, out, &self.resources).map_err(io::Error::other)?;
         Ok(())
     }
 }
@@ -201,10 +230,17 @@ pub(crate) fn native_name(name: &NativeName, policy: CopyNamePolicy) -> Result<V
 fn outcome<T>(
     object: &ObjectId,
     class: &'static str,
+    has_destination_entry: bool,
     field: &MetadataField<T>,
     out: &mut Vec<MetadataOutcome>,
 ) {
+    let synthesized =
+        has_destination_entry && matches!(class, "created" | "modified" | "native_flags");
     let decision = match field {
+        MetadataField::Absent if synthesized => Preservation::Transform {
+            policy: "content-only deterministic defaults".into(),
+            report: "source class absent; deterministic FAT defaults synthesized".into(),
+        },
         MetadataField::Absent => Preservation::Preserve,
         MetadataField::Uninspectable { .. } => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
@@ -212,7 +248,12 @@ fn outcome<T>(
         },
         MetadataField::Known(_) | MetadataField::Opaque { .. } => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
-            report: "source metadata omitted; deterministic FAT defaults applied".into(),
+            report: if synthesized {
+                "source metadata omitted; deterministic FAT defaults applied"
+            } else {
+                "source metadata omitted; destination class absent"
+            }
+            .into(),
         },
     };
     out.push(MetadataOutcome {
@@ -413,27 +454,66 @@ impl FatCopyPlan {
             source.revalidate(object, resources)?;
             let metadata = source.metadata(object, resources)?;
             let metadata = metadata.get();
-            outcome(object, "created", &metadata.created, &mut outcomes);
-            outcome(object, "modified", &metadata.modified, &mut outcomes);
-            outcome(object, "accessed", &metadata.accessed, &mut outcomes);
-            outcome(object, "owner", &metadata.owner, &mut outcomes);
-            outcome(object, "mode", &metadata.mode, &mut outcomes);
-            outcome(object, "security", &metadata.security, &mut outcomes);
+            outcome(
+                object,
+                "created",
+                object != &root,
+                &metadata.created,
+                &mut outcomes,
+            );
+            outcome(
+                object,
+                "modified",
+                object != &root,
+                &metadata.modified,
+                &mut outcomes,
+            );
+            outcome(
+                object,
+                "accessed",
+                object != &root,
+                &metadata.accessed,
+                &mut outcomes,
+            );
+            outcome(
+                object,
+                "owner",
+                object != &root,
+                &metadata.owner,
+                &mut outcomes,
+            );
+            outcome(
+                object,
+                "mode",
+                object != &root,
+                &metadata.mode,
+                &mut outcomes,
+            );
+            outcome(
+                object,
+                "security",
+                object != &root,
+                &metadata.security,
+                &mut outcomes,
+            );
             outcome(
                 object,
                 "native_flags",
+                object != &root,
                 &metadata.native_flags,
                 &mut outcomes,
             );
             outcome(
                 object,
                 "symlink_target",
+                object != &root,
                 &metadata.symlink_target,
                 &mut outcomes,
             );
             outcome(
                 object,
                 "reparse_data",
+                object != &root,
                 &metadata.reparse_data,
                 &mut outcomes,
             );

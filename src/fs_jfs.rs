@@ -1445,37 +1445,45 @@ impl JfsVolume {
     /// Enumerate indexed native names without display-path reconstruction.
     pub fn directory(&self, id: &ObjectId, r: &Resources) -> Result<Budgeted<Vec<DirectoryEntry>>> {
         self.revalidate(id, r)?;
+        let n = self.directory_len(id)?;
+        let charge = (n as u64)
+            .checked_mul(1024)
+            .ok_or_else(|| budget("JFS directory charge"))?;
+        Budgeted::try_new(&r.memory, charge, || self.directory_entries(id, 0..n, r))
+    }
+    pub(crate) fn directory_len(&self, id: &ObjectId) -> Result<usize> {
         let node = self.node(id)?;
         if !node.directory {
             return Err(Error::new(ErrorKind::InvalidOperation, "JFS non-directory"));
         }
-        Budgeted::try_new(
-            &r.memory,
-            (node.entries.len() as u64)
-                .checked_mul(1024)
-                .ok_or_else(|| budget("JFS directory charge"))?,
-            || {
-                let mut out = vector(node.entries.len())?;
-                for e in &node.entries {
-                    r.cancellation.check()?;
-                    let n = self
-                        .inner
-                        .nodes
-                        .get(&e.ino)
-                        .ok_or_else(|| bad("JFS directory references unallocated inode"))?;
-                    out.push(DirectoryEntry {
-                        name: NativeName::Utf16(copied(&e.name)?),
-                        object: self.identity(e.ino),
-                        kind: if n.directory {
-                            ObjectKind::Directory
-                        } else {
-                            ObjectKind::File
-                        },
-                    });
-                }
-                Ok(out)
-            },
-        )
+        Ok(node.entries.len())
+    }
+    pub(crate) fn directory_entries(
+        &self,
+        id: &ObjectId,
+        range: std::ops::Range<usize>,
+        r: &Resources,
+    ) -> Result<Vec<DirectoryEntry>> {
+        let node = self.node(id)?;
+        let mut out = vector(range.len())?;
+        for entry in &node.entries[range] {
+            r.cancellation.check()?;
+            let child = self
+                .inner
+                .nodes
+                .get(&entry.ino)
+                .ok_or_else(|| bad("JFS directory missing target"))?;
+            out.push(DirectoryEntry {
+                name: NativeName::Utf16(copied(&entry.name)?),
+                object: self.identity(entry.ino),
+                kind: if child.directory {
+                    ObjectKind::Directory
+                } else {
+                    ObjectKind::File
+                },
+            });
+        }
+        Ok(out)
     }
     /// Lookup exact case-sensitive native UTF16 components.
     pub fn lookup(&self, path: &[NativeName], r: &Resources) -> Result<ObjectId> {

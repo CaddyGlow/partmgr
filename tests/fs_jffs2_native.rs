@@ -274,7 +274,10 @@ fn native_logical_nor_both_endian_payload_and_symlink_gate() {
             .open_stream(&payload, &StreamKind::Data, &resources)
             .unwrap();
         assert_eq!(
-            read_all(file.as_ref(), 100000, &resources).unwrap().bytes,
+            read_all(file.as_ref(), 100000, &resources)
+                .unwrap()
+                .get()
+                .as_slice(),
             expected
         );
         let mut small = [0; 113];

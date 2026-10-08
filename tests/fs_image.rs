@@ -681,7 +681,10 @@ fn jffs2_explicit_geometry_endian_native_history_and_retained_guards() {
                 .open_stream(&file_object, &StreamKind::Data, &r)
                 .unwrap();
             drop(image);
-            assert_eq!(read_all(file.as_ref(), 16, &r).unwrap().bytes, b"abXY\0\0");
+            assert_eq!(
+                read_all(file.as_ref(), 16, &r).unwrap().get().as_slice(),
+                b"abXY\0\0"
+            );
             source.length.store(4096, Ordering::Release);
             assert_eq!(
                 file.read_at(6, &mut [], &r).unwrap_err().kind,
@@ -1667,8 +1670,14 @@ fn apfs_facade_offline_reauthoring_preserves_sparse_data_fork_and_retained_guard
             }
         })
         .collect();
-    assert_eq!(read_all(file.as_ref(), 16397, &r).unwrap().bytes, expected);
-    assert_eq!(read_all(fork.as_ref(), 8, &r).unwrap().bytes, b"resource");
+    assert_eq!(
+        read_all(file.as_ref(), 16397, &r).unwrap().get().as_slice(),
+        expected
+    );
+    assert_eq!(
+        read_all(fork.as_ref(), 8, &r).unwrap().get().as_slice(),
+        b"resource"
+    );
     output.length.fetch_sub(1, Ordering::AcqRel);
     assert!(
         matches!(file.read_at(file.len(), &mut [], &r), Err(e) if e.kind == ErrorKind::StalePlan)

@@ -96,10 +96,10 @@ impl TreeSource for Jffs2TreeSource {
             let symlink_target = if mode & 0xf000 == 0xa000 {
                 let f = self.volume.open_file(i.number, r)?;
                 let bytes = read_all(&f, 254, r)?;
-                if bytes.bytes.contains(&0) {
+                if bytes.get().contains(&0) {
                     return Err(invalid("JFFS2 symlink embedded NUL"));
                 }
-                MetadataField::Known(NativeName::Bytes(copy(&bytes.bytes)?))
+                MetadataField::Known(NativeName::Bytes(copy(bytes.get())?))
             } else {
                 MetadataField::Absent
             };

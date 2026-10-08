@@ -54,7 +54,8 @@ pub(crate) struct PlanningContext<'a> {
     pub(super) geometry: &'a ExtGeometry,
     pub(super) limits: ExtEditLimits,
     audit: &'a ExtAuditReport,
-    decoder_open: for<'b> fn(&'b dyn Storage, u128, &Resources) -> io::Result<ExtStorageDecoder<'b>>,
+    decoder_open:
+        for<'b> fn(&'b dyn Storage, u128, &Resources) -> io::Result<ExtStorageDecoder<'b>>,
     audit_projected: fn(&dyn Storage, u128, ExtAuditLimits, &Resources) -> Result<ExtAuditReport>,
     pub(super) scope: u128,
     pub(super) generation: u64,
@@ -202,7 +203,7 @@ impl<'a> Planner<'a> {
         }
         let d = self.descriptor((number - 1) / self.g.inodes_per_group)?;
         Ok(u64::from(d[2]) * u64::from(self.g.block_size)
-            + u64::from((number - 1) % self.g.inodes_per_group) * 128)
+            + u64::from((number - 1) % self.g.inodes_per_group) * u64::from(self.g.inode_size))
     }
     pub(super) fn counter(
         &mut self,
@@ -976,6 +977,30 @@ impl PlanningContext<'_> {
         }
         Ok(())
     }
+    #[cfg(test)]
+    pub(crate) fn file_handle(&self, number: u32, r: &Resources) -> Result<ExtEditFile> {
+        self.ready(r)?;
+        let metadata = r.memory.reserve(512)?;
+        let decoder = self.decoder(r)?;
+        let inode = decoder.inode(number, r).map_err(native)?;
+        if number < 11 || inode.mode() & 0xf000 != 0x8000 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "native planning requires ordinary regular file",
+            ));
+        }
+        let map = decoder
+            .file_map(number, self.limits.file_blocks, r, false)
+            .map_err(native)?;
+        let mut identity = decoder.identity(number, r).map_err(native)?;
+        identity.generation = self.generation;
+        Ok(ExtEditFile {
+            identity,
+            inode,
+            map,
+            _metadata: metadata,
+        })
+    }
     pub(super) fn decoder<'a>(&'a self, r: &Resources) -> Result<ExtStorageDecoder<'a>> {
         (self.decoder_open)(self.target, self.scope, r).map_err(native)
     }
@@ -994,25 +1019,38 @@ impl<'a> PlanningContext<'a> {
         r: &Resources,
     ) -> Result<Self> {
         r.cancellation.check()?;
-        if !geometry.has_journal || geometry.inode_size != 128
-            || geometry.extent_profile || geometry.modern.is_some() {
-            return Err(Error::new(ErrorKind::Unsupported,
-                "native borrowed allocation planner currently requires classic 128-byte journaled inodes"));
+        if !geometry.has_journal
+            || !matches!(geometry.inode_size, 128 | 256)
+            || geometry.extent_profile
+            || geometry.modern.is_some()
+        {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "native borrowed allocation planner requires checked classic-map 128/256-byte journaled inodes",
+            ));
         }
         if !audit.is_clean() {
-            return Err(Error::new(ErrorKind::InvalidData,
-                "native borrowed allocation planner requires complete same-owner clean audit"));
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "native borrowed allocation planner requires complete same-owner clean audit",
+            ));
         }
         target.len().map_err(native)?;
         Ok(Self {
-            target, geometry, audit, limits, scope: owner.0, generation: owner.1,
+            target,
+            geometry,
+            audit,
+            limits,
+            scope: owner.0,
+            generation: owner.1,
             decoder_open: |target, scope, r| {
                 let (decoder, proof) = ExtStorageDecoder::open_native_clean(target, scope, r)?;
                 drop(proof);
                 Ok(decoder)
             },
             audit_projected: |target, scope, limits, r| {
-                let (decoder, proof) = ExtStorageDecoder::open_native_clean(target, scope, r).map_err(native)?;
+                let (decoder, proof) =
+                    ExtStorageDecoder::open_native_clean(target, scope, r).map_err(native)?;
                 let audit = crate::fs_ext_audit::audit_decoder(&decoder, limits, r)?;
                 drop(proof);
                 Ok(audit)

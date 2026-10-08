@@ -713,3 +713,280 @@ fn special_directory_streams_and_index_io_budget_fail_explicitly() {
     assert!(error.source.is_some());
     assert_eq!(r.memory.used(), baseline);
 }
+
+#[test]
+fn security_capture_preserves_root_and_hardlinked_file_descriptors() {
+    use partmgr::{fs_core::MetadataField, fs_ntfs_security::*};
+    let r = r();
+    let mut bytes = fixture();
+    let mut sd = vec![0; 40];
+    sd[0] = 1;
+    w(&mut sd, 2, 0x8004);
+    d(&mut sd, 4, 20);
+    d(&mut sd, 8, 20);
+    d(&mut sd, 16, 32);
+    sd[20..32].copy_from_slice(&[1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0]);
+    sd[32..40].copy_from_slice(&[2, 0, 8, 0, 0, 0, 0, 0]);
+    let mut root = record(
+        5,
+        &[
+            resident(0x50, &sd, 2),
+            root_attribute(
+                &[
+                    index_entry(24, "alpha", None),
+                    index_entry(24, "beta", None),
+                    terminal(None),
+                ],
+                false,
+            ),
+        ],
+    );
+    w(&mut root, 22, 3);
+    bytes[2048 + 5 * 1024..2048 + 6 * 1024].copy_from_slice(&root);
+    let file = record(
+        24,
+        &[
+            resident(0x30, &name_value("alpha", 5), 1),
+            resident(0x30, &name_value("beta", 5), 2),
+            resident(0x50, &sd, 3),
+            resident(0x80, b"hello", 4),
+        ],
+    );
+    bytes[2048 + 24 * 1024..2048 + 25 * 1024].copy_from_slice(&file);
+    let volume = NtfsVolume::open(Arc::new(Image::new(bytes)), limits(), &r).unwrap();
+    let tree = NtfsTreeSource::inventory(volume, 8, 8, index_limits(), &r)
+        .unwrap()
+        .with_security_capture(
+            NtfsSecureLimits {
+                descriptor: NtfsSecurityLimits {
+                    bytes: 8192,
+                    aces: 32,
+                    work: 256,
+                },
+                blocks: 8,
+                entries: 64,
+                depth: 8,
+                work: 100000,
+            },
+            &r,
+        )
+        .unwrap();
+    let page = tree.directory_page(&tree.root(), None, 8, &r).unwrap();
+    assert_eq!(page.entries[0].object, page.entries[1].object);
+    for id in [&tree.root(), &page.entries[0].object] {
+        let baseline = r.memory.used();
+        let metadata = tree.metadata(id, &r).unwrap();
+        assert_eq!(metadata.get().security, MetadataField::Known(sd.clone()));
+        assert_eq!(
+            metadata.get().owner,
+            MetadataField::Known(sd[20..32].to_vec())
+        );
+        drop(metadata);
+        assert_eq!(r.memory.used(), baseline);
+    }
+    drop((page, tree));
+    assert_eq!(r.memory.used(), 0);
+}
+
+#[test]
+fn security_capture_refuses_unknown_security_and_cancellation_without_leaks() {
+    use partmgr::fs_ntfs_security::*;
+    for cancelled in [false, true] {
+        let r = r();
+        let volume = NtfsVolume::open(Arc::new(Image::new(fixture())), limits(), &r).unwrap();
+        let tree = NtfsTreeSource::inventory(volume, 8, 8, index_limits(), &r).unwrap();
+        if cancelled {
+            r.cancellation.cancel();
+        }
+        let error = tree
+            .with_security_capture(
+                NtfsSecureLimits {
+                    descriptor: NtfsSecurityLimits {
+                        bytes: 8192,
+                        aces: 32,
+                        work: 256,
+                    },
+                    blocks: 8,
+                    entries: 64,
+                    depth: 8,
+                    work: 100000,
+                },
+                &r,
+            )
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.kind,
+            if cancelled {
+                ErrorKind::Cancelled
+            } else {
+                ErrorKind::Unsupported
+            }
+        );
+        assert_eq!(r.memory.used(), 0);
+    }
+}
+
+#[test]
+#[ignore = "explicit native ACL tree capture gate requires image, tools and fresh evidence"]
+fn native_security_tree_capture_exact_descriptor_oracle() {
+    use partmgr::{fs_core::MetadataField, fs_ntfs_security::*};
+    use sha2::{Digest, Sha256};
+    use std::{fs, process::Command};
+    let image = std::path::PathBuf::from(
+        std::env::var_os("PARTMGR_NTFS_ACL_TREE_IMAGE").expect("image required"),
+    );
+    let out = std::path::PathBuf::from(
+        std::env::var_os("PARTMGR_NTFS_ACL_TREE_EVIDENCE").expect("fresh evidence required"),
+    );
+    assert!(!out.exists());
+    fs::create_dir(&out).unwrap();
+    let tool = std::path::PathBuf::from(
+        std::env::var_os("PARTMGR_NTFSCAT").expect("pinned ntfscat required"),
+    );
+    let sources: &[(&str, &[u8])] = &[
+        ("Cargo.toml", include_bytes!("../Cargo.toml")),
+        ("Cargo.lock", include_bytes!("../Cargo.lock")),
+        ("src/lib.rs", include_bytes!("../src/lib.rs")),
+        ("src/fs_core.rs", include_bytes!("../src/fs_core.rs")),
+        ("src/fs_file.rs", include_bytes!("../src/fs_file.rs")),
+        ("src/storage.rs", include_bytes!("../src/storage.rs")),
+        ("src/fs_ntfs.rs", include_bytes!("../src/fs_ntfs.rs")),
+        (
+            "src/fs_ntfs_stream.rs",
+            include_bytes!("../src/fs_ntfs_stream.rs"),
+        ),
+        (
+            "src/fs_ntfs_tree.rs",
+            include_bytes!("../src/fs_ntfs_tree.rs"),
+        ),
+        (
+            "src/fs_ntfs_security.rs",
+            include_bytes!("../src/fs_ntfs_security.rs"),
+        ),
+        (
+            "src/fs_ntfs_secure.rs",
+            include_bytes!("../src/fs_ntfs_secure.rs"),
+        ),
+        (
+            "src/fs_ntfs_metadata.rs",
+            include_bytes!("../src/fs_ntfs_metadata.rs"),
+        ),
+        (
+            "tests/fs_ntfs_tree.rs",
+            include_bytes!("../tests/fs_ntfs_tree.rs"),
+        ),
+    ];
+    let archive = out.join("compiled-source");
+    fs::create_dir(&archive).unwrap();
+    let source_guard = |save: bool| {
+        let mut bindings = String::new();
+        for &(name, baked) in sources {
+            assert_eq!(
+                fs::read(name).unwrap(),
+                baked,
+                "compiled source mismatch: {name}"
+            );
+            bindings.push_str(&format!("{name} {:x}\n", Sha256::digest(baked)));
+            if save {
+                let path = archive.join(name);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, baked).unwrap();
+            }
+        }
+        bindings
+    };
+    let bindings = source_guard(true);
+    fs::write(out.join("source-start.sha256"), &bindings).unwrap();
+    let binary = fs::read(std::env::current_exe().unwrap()).unwrap();
+    fs::write(out.join("compiled-test"), &binary).unwrap();
+    fs::write(
+        out.join("binary.sha256"),
+        format!("{:x}", Sha256::digest(&binary)),
+    )
+    .unwrap();
+    let tool_bytes = fs::read(&tool).unwrap();
+    fs::write(
+        out.join("tool.sha256"),
+        format!("{} {:x}", tool.display(), Sha256::digest(&tool_bytes)),
+    )
+    .unwrap();
+    let original = fs::read(&image).unwrap();
+    let source_hash = format!("{:x}", Sha256::digest(&original));
+    fs::write(out.join("image-start.sha256"), &source_hash).unwrap();
+    let r = Resources {
+        memory: Budget::new(64 << 20),
+        cancellation: Cancellation::default(),
+    };
+    let volume = NtfsVolume::open(Arc::new(Image::new(original)), limits(), &r).unwrap();
+    let tree = NtfsTreeSource::inventory_with_policy(
+        volume,
+        128,
+        16,
+        index_limits(),
+        NtfsTreePolicy::UserNamespace,
+        &r,
+    )
+    .unwrap()
+    .with_security_capture(
+        NtfsSecureLimits {
+            descriptor: NtfsSecurityLimits {
+                bytes: 65536,
+                aces: 1024,
+                work: 100000,
+            },
+            blocks: 128,
+            entries: 4096,
+            depth: 16,
+            work: 1 << 26,
+        },
+        &r,
+    )
+    .unwrap();
+    let page = tree.directory_page(&tree.root(), None, 128, &r).unwrap();
+    assert!(page.next.is_none());
+    assert!(!page.entries.is_empty());
+    let mut ids = vec![tree.root()];
+    ids.extend(page.entries.iter().map(|e| e.object.clone()));
+    for id in &ids {
+        let n = u64::from_le_bytes(id.native.as_slice().try_into().unwrap());
+        let result = Command::new(&tool)
+            .args(["-i", &n.to_string(), "-a", "0x50"])
+            .arg(&image)
+            .output()
+            .unwrap();
+        fs::write(out.join(format!("{n}.stdout")), &result.stdout).unwrap();
+        fs::write(out.join(format!("{n}.stderr")), &result.stderr).unwrap();
+        assert!(result.status.success());
+        let baseline = r.memory.used();
+        let metadata = tree.metadata(id, &r).unwrap();
+        assert_eq!(
+            metadata.get().security,
+            MetadataField::Known(result.stdout.clone())
+        );
+        let owner = u32::from_le_bytes(result.stdout[4..8].try_into().unwrap()) as usize;
+        if owner != 0 {
+            let size = 8 + usize::from(result.stdout[owner + 1]) * 4;
+            assert_eq!(
+                metadata.get().owner,
+                MetadataField::Known(result.stdout[owner..owner + size].to_vec())
+            );
+        } else {
+            assert_eq!(metadata.get().owner, MetadataField::Absent);
+        }
+        drop(metadata);
+        assert_eq!(r.memory.used(), baseline);
+    }
+    let count = ids.len();
+    drop((ids, page, tree));
+    assert_eq!(r.memory.used(), 0);
+    assert_eq!(
+        format!("{:x}", Sha256::digest(fs::read(&image).unwrap())),
+        source_hash
+    );
+    assert_eq!(source_guard(false), bindings);
+    fs::write(out.join("source-end.sha256"), &bindings).unwrap();
+    assert_eq!(fs::read(&tool).unwrap(), tool_bytes);
+    assert_eq!(fs::read(std::env::current_exe().unwrap()).unwrap(), binary);
+    fs::write(out.join("receipt.txt"),format!("status=passed\nobjects={count}\nsource_sha256={source_hash}\nprofile=explicit user namespace; native per-record ACL bytes; no complete volume or restore claim\n")).unwrap();
+}

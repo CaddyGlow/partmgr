@@ -75,12 +75,33 @@ fn native_jbd2_codec_e2fsck_replay_and_payload() {
     let source_names = [
         "src/fs_ext.rs",
         "src/fs_ext_jbd.rs",
+        "src/fs_ext_jbd_legacy.rs",
         "src/fs_ext_jbd_native.rs",
         "src/fs_ext_jbd_overlay.rs",
         "src/fs_ext_jbd_bootstrap.rs",
         "src/fs_ext_jbd_recovery.rs",
         "src/fs_ext_jbd_transaction.rs",
         "src/fs_ext_jbd_session.rs",
+        "src/fs_ext_jbd_modern_plan.rs",
+        "src/fs_ext_jbd_modern_extent.rs",
+        "src/fs_ext_jbd_modern_htree.rs",
+        "src/fs_ext_jbd_modern_indirect.rs",
+        "src/fs_ext_jbd_modern_indirect_tests.rs",
+        "src/fs_ext_jbd_modern_namespace.rs",
+        "src/fs_ext_jbd_modern_inode.rs",
+        "src/fs_ext_jbd_modern_namespace_tests.rs",
+        "src/fs_ext_jbd_native_namespace.rs",
+        "src/fs_ext_jbd_native_indirect.rs",
+        "src/fs_ext_jbd_native_legacy.rs",
+        "src/fs_ext_integrity.rs",
+        "tests/fixtures/fs_ext_legacy_integrity.rs",
+        "src/fs_ext_jbd_native_inode.rs",
+        "src/fs_ext_jbd_modern_tests.rs",
+        "src/fs_ext_edit.rs",
+        "src/fs_ext_edit_allocation.rs",
+        "src/fs_ext_edit_namespace.rs",
+        "src/fs_ext_edit_transaction.rs",
+        "src/fs_undo.rs",
         "src/fs_ext_journal.rs",
         "src/fs_ext_extent.rs",
         "src/fs_ext_checksum.rs",
@@ -143,7 +164,7 @@ fn native_jbd2_codec_e2fsck_replay_and_payload() {
     fs::write(out.join("new-payload.bin"), &expected).unwrap();
     for bs in [1024usize, 2048, 4096] {
         for family in ["ext3", "ext4"] {
-            for version in [2, 3] {
+            for version in [0, 2, 3] {
                 let stem = format!("{family}-b{bs}-v{version}");
                 let image = out.join(format!("{stem}.img"));
                 fs::File::create(&image).unwrap().set_len(16 << 20).unwrap();
@@ -209,11 +230,16 @@ fn native_jbd2_codec_e2fsck_replay_and_payload() {
                     .read_exact_at(journal_physical, &mut journal)
                     .unwrap();
                 assert_eq!(be32(&journal, 28), 0);
-                put32(&mut journal, 40, 1 | if version == 2 { 8 } else { 16 });
-                journal[80] = 4;
-                put32(&mut journal, 252, 0);
-                let sum = crc(!0, &journal);
-                put32(&mut journal, 252, sum);
+                if version != 0 {
+                    put32(&mut journal, 40, 1 | if version == 2 { 8 } else { 16 });
+                    journal[80] = 4;
+                    put32(&mut journal, 252, 0);
+                    let sum = crc(!0, &journal);
+                    put32(&mut journal, 252, sum);
+                } else {
+                    assert_eq!(be32(&journal, 40) & 0x18, 0);
+                    assert_eq!(journal[80], 0);
+                }
                 write_exact(&mut storage, journal_physical, &journal);
                 storage.flush().unwrap();
                 drop(storage);
@@ -298,9 +324,11 @@ fn native_jbd2_codec_e2fsck_replay_and_payload() {
                 // Native committed log is activated, then the ext RECOVER bit is set.
                 // Ordered dirty-bootstrap/fault publication is a later session layer.
                 put32(&mut journal, 28, preparation_geometry.first);
-                put32(&mut journal, 252, 0);
-                let sum = crc(!0, &journal);
-                put32(&mut journal, 252, sum);
+                if version != 0 {
+                    put32(&mut journal, 252, 0);
+                    let sum = crc(!0, &journal);
+                    put32(&mut journal, 252, sum);
+                }
                 write_exact(&mut storage, journal_physical, &journal);
                 storage.flush().unwrap();
                 let mut superblock = [0u8; 1024];
@@ -518,11 +546,29 @@ fn native_jbd2_codec_e2fsck_replay_and_payload() {
                     &session_payload,
                 )
                 .unwrap();
+                let recovered_bytes = fs::read(&recovered_image).unwrap();
+                let native_header =
+                    &recovered_bytes[journal_physical as usize..journal_physical as usize + 1024];
+                assert_eq!(&native_header[40..44], &journal[40..44]);
+                assert_eq!(native_header[80], journal[80]);
+                if version == 0 {
+                    assert_eq!(&native_header[252..256], &journal[252..256]);
+                }
+                receipt.push_str(&format!("validated_journal_profile={stem} physical_bytes={journal_physical} flags={} checksum_type={} legacy_reserved_checksum={}\n",be32(native_header,40),native_header[80],be32(native_header,252)));
                 receipt.push_str(&format!(
                     "validated_owned_session={stem} payload_sha256={:x} image_sha256={:x}\n",
                     Sha256::digest(&session_payload),
                     Sha256::digest(fs::read(&recovered_image).unwrap())
                 ));
+                if family == "ext4" {
+                    modern_truncate(&out, &stem, &tools, &mut receipt, &mut commands);
+                }
+                if family == "ext3" {
+                    classic_operations(&out, &stem, bs, &tools, &mut receipt, &mut commands);
+                }
+                if family == "ext3" && version == 2 {
+                    classic_delete_controls(&out, bs, &tools, &mut receipt, &mut commands);
+                }
                 run(
                     &tools[2],
                     &["-fy".into(), image.display().to_string()],
@@ -573,3 +619,774 @@ fn native_jbd2_codec_e2fsck_replay_and_payload() {
     receipt.push_str("source_end_matches_start=true\nresult=pass\n");
     fs::write(out.join("receipt.txt"), receipt).unwrap();
 }
+
+struct NativeInput {
+    identity: crate::fs_core::ObjectId,
+    bytes: Vec<u8>,
+}
+impl crate::fs_core::FileRead for NativeInput {
+    fn identity(&self) -> &crate::fs_core::ObjectId {
+        &self.identity
+    }
+    fn len(&self) -> u64 {
+        self.bytes.len() as u64
+    }
+    fn read_at(&self, offset: u64, out: &mut [u8], r: &Resources) -> crate::fs_core::Result<usize> {
+        r.cancellation.check()?;
+        let at = usize::try_from(offset).unwrap_or(usize::MAX);
+        let count = out.len().min(37).min(self.bytes.len().saturating_sub(at));
+        if count > 0 {
+            out[..count].copy_from_slice(&self.bytes[at..at + count]);
+        }
+        Ok(count)
+    }
+    fn visit_extents(
+        &self,
+        r: &Resources,
+        visitor: &mut dyn FnMut(crate::fs_core::LogicalExtent) -> crate::fs_core::Result<()>,
+    ) -> crate::fs_core::Result<()> {
+        r.cancellation.check()?;
+        visitor(crate::fs_core::LogicalExtent {
+            offset: 0,
+            length: self.len(),
+            kind: crate::fs_core::ExtentKind::Data,
+        })
+    }
+}
+fn classic_operations(
+    out: &Path,
+    stem: &str,
+    bs: usize,
+    tools: &[PathBuf],
+    receipt: &mut String,
+    commands: &mut usize,
+) {
+    use crate::{
+        fs_core::{NativeName, ObjectId},
+        fs_ext_edit::{ExtCreateMetadata, ExtEditLimits},
+        fs_undo::UndoLimits,
+    };
+    let image = out.join(format!("{stem}-operations.img"));
+    fs::copy(out.join(format!("{stem}-owned-recovered.img")), &image).unwrap();
+    let r = Resources {
+        memory: Budget::new(128 << 20),
+        cancellation: Cancellation::default(),
+    };
+    let limits = session::Limits {
+        audit: crate::fs_ext_audit::ExtAuditLimits {
+            blocks: 16384,
+            inodes: 8192,
+            work: 8_000_000,
+            directory_blocks: 128,
+            directory_entries: 2048,
+            findings: 64,
+        },
+        file_blocks: 512,
+        affected_blocks: 512,
+        affected_bytes: 4 << 20,
+    };
+    let planning = ExtEditLimits {
+        audit: limits.audit,
+        file_blocks: 512,
+        directory_entries: 2048,
+        affected_bytes: 4 << 20,
+        work: 100000,
+        undo: UndoLimits {
+            patches: 4096,
+            body_bytes: 16 << 20,
+        },
+    };
+    let mut session =
+        session::Session::open(FileStorage::open(&image).unwrap(), limits, &r).unwrap();
+    let mut metadata = ExtCreateMetadata::zeroed(0o100640);
+    metadata.raw[2..4].copy_from_slice(&123u16.to_le_bytes());
+    metadata.raw[24..26].copy_from_slice(&456u16.to_le_bytes());
+    for offset in [8, 12, 16] {
+        metadata.raw[offset..offset + 4].copy_from_slice(&1234567u32.to_le_bytes());
+    }
+    let directory_metadata = ExtCreateMetadata::zeroed(0o40750);
+    let payload: Vec<u8> = (0..8193)
+        .map(|at| ((at * 19 + at / 31) % 256) as u8)
+        .collect();
+    let input = NativeInput {
+        identity: ObjectId {
+            source: 123,
+            generation: 17,
+            native: vec![1],
+        },
+        bytes: (0..131089)
+            .map(|at| ((at * 23 + at / 37) % 256) as u8)
+            .collect(),
+    };
+    let dir = [NativeName::Bytes(b"native-dir".to_vec())];
+    let unrelated = fs::read(out.join(format!("{stem}-owned-session-expected.bin"))).unwrap();
+    let mut number = 0;
+    let mut expected = payload.clone();
+    for step in 0..7 {
+        let file = if step == 1 || step == 2 {
+            Some(session.file(number, &r.cancellation).unwrap())
+        } else {
+            None
+        };
+        let operation = match step {
+            0 => session::Operation::CreateFile {
+                parent: &[],
+                name: b"native-new\xff",
+                metadata: &metadata,
+                payload: &payload,
+            },
+            1 => session::Operation::Extend {
+                file: file.as_ref().unwrap(),
+                input: &input,
+            },
+            2 => session::Operation::Truncate {
+                file: file.as_ref().unwrap(),
+                length: 513,
+            },
+            3 => session::Operation::CreateDirectory {
+                parent: &[],
+                name: b"native-dir",
+                metadata: &directory_metadata,
+            },
+            4 => session::Operation::Rename {
+                source: &[],
+                name: b"native-new\xff",
+                destination: &dir,
+                new_name: b"native-moved\xfe",
+            },
+            5 => session::Operation::Delete {
+                parent: &dir,
+                name: b"native-moved\xfe",
+                deletion_time: 1234567,
+            },
+            6 => session::Operation::Delete {
+                parent: &[],
+                name: b"native-dir",
+                deletion_time: 1234568,
+            },
+            _ => unreachable!(),
+        };
+        session
+            .operate(operation, planning, &r.cancellation)
+            .unwrap();
+        if let Some(file) = &file {
+            assert!(
+                session
+                    .read_at(file, 0, &mut [0; 1], &r.cancellation)
+                    .is_err()
+            );
+        }
+        drop(file);
+        if step == 0 {
+            let file = session
+                .file_at(
+                    &[NativeName::Bytes(b"native-new\xff".to_vec())],
+                    &r.cancellation,
+                )
+                .unwrap();
+            number = file.inode_number();
+            drop(file);
+        }
+        if step == 1 {
+            expected.extend_from_slice(&input.bytes);
+        }
+        if step == 2 {
+            expected.truncate(513);
+        }
+        let saved = out.join(format!("{stem}-operation-{step}.img"));
+        fs::copy(&image, &saved).unwrap();
+        run(
+            &tools[2],
+            &["-fn".into(), saved.display().to_string()],
+            out,
+            receipt,
+            commands,
+            false,
+        );
+        let old_dump = out.join(format!("{stem}-operation-{step}-unrelated.bin"));
+        run(
+            &tools[1],
+            &[
+                "-R".into(),
+                format!("dump /payload {}", old_dump.display()),
+                saved.display().to_string(),
+            ],
+            out,
+            receipt,
+            commands,
+            false,
+        );
+        assert_eq!(fs::read(&old_dump).unwrap(), unrelated);
+        if step < 5 {
+            let dump = out.join(format!("{stem}-operation-{step}-payload.bin"));
+            run(
+                &tools[1],
+                &[
+                    "-R".into(),
+                    format!("dump <{number}> {}", dump.display()),
+                    saved.display().to_string(),
+                ],
+                out,
+                receipt,
+                commands,
+                false,
+            );
+            assert_eq!(fs::read(&dump).unwrap(), expected);
+            fs::write(
+                out.join(format!("{stem}-operation-{step}-expected.bin")),
+                &expected,
+            )
+            .unwrap();
+            let stat = run(
+                &tools[1],
+                &[
+                    "-R".into(),
+                    format!("stat <{number}>"),
+                    saved.display().to_string(),
+                ],
+                out,
+                receipt,
+                commands,
+                false,
+            );
+            let text = String::from_utf8(stat).unwrap();
+            let words: Vec<_> = text.split_whitespace().collect();
+            assert!(words.windows(2).any(|pair| pair == ["User:", "123"]));
+            assert!(words.windows(2).any(|pair| pair == ["Group:", "456"]));
+        }
+        receipt.push_str(&format!("validated_native_operation={stem} step={step} block_bytes={bs} image_sha256={:x} unrelated_sha256={:x} payload_sha256={:x}\n",
+            Sha256::digest(fs::read(saved).unwrap()), Sha256::digest(&unrelated), Sha256::digest(if step < 5 { &expected[..] } else { &[] })));
+    }
+    drop(session);
+    assert_eq!(r.memory.used(), 0);
+}
+
+fn classic_delete_controls(
+    out: &Path,
+    bs: usize,
+    tools: &[PathBuf],
+    receipt: &mut String,
+    commands: &mut usize,
+) {
+    use crate::fs_ext_edit::{
+        ExtEditBinding, ExtEditLimits, ExtEditRegion, ExtEditState, ExtEditor,
+    };
+    use crate::fs_undo::UndoLimits;
+    let seed = out.join(format!("classic-delete-b{bs}-seed.img"));
+    fs::File::create(&seed).unwrap().set_len(16 << 20).unwrap();
+    run(
+        &tools[0],
+        &[
+            "-q".into(),
+            "-F".into(),
+            "-t".into(),
+            "ext2".into(),
+            "-b".into(),
+            bs.to_string(),
+            "-I".into(),
+            "128".into(),
+            "-O".into(),
+            "none,filetype,sparse_super".into(),
+            seed.display().to_string(),
+        ],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    run(
+        &tools[1],
+        &[
+            "-w".into(),
+            "-R".into(),
+            format!("write {} /victim", out.join("old-payload.bin").display()),
+            seed.display().to_string(),
+        ],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    let before = fs::read(&seed).unwrap();
+    let boundary = u32::from_le_bytes(before[1024..1028].try_into().unwrap());
+    let r = Resources {
+        memory: Budget::new(128 << 20),
+        cancellation: Cancellation::default(),
+    };
+    let limits = ExtEditLimits {
+        audit: crate::fs_ext_audit::ExtAuditLimits {
+            blocks: 16384,
+            inodes: 8192,
+            work: 8_000_000,
+            directory_blocks: 128,
+            directory_entries: 2048,
+            findings: 64,
+        },
+        file_blocks: 512,
+        directory_entries: 2048,
+        affected_bytes: 1 << 20,
+        work: 100000,
+        undo: UndoLimits {
+            patches: 4096,
+            body_bytes: 4 << 20,
+        },
+    };
+    for time in [boundary, 1234567] {
+        let image = out.join(format!("classic-delete-b{bs}-t{time}.img"));
+        fs::copy(&seed, &image).unwrap();
+        let journal = out.join(format!("classic-delete-b{bs}-t{time}.undo"));
+        fs::File::create(&journal)
+            .unwrap()
+            .set_len(4 << 20)
+            .unwrap();
+        let mut editor = ExtEditor::open(
+            FileStorage::open(&image).unwrap(),
+            FileStorage::open(&journal).unwrap(),
+            ExtEditRegion {
+                offset: 0,
+                length: 16 << 20,
+            },
+            ExtEditBinding {
+                volume: [0x59; 32],
+                generation: 1,
+            },
+            limits,
+            &r,
+        )
+        .unwrap();
+        let root = editor.open_directory(&[], &r).unwrap();
+        let file = editor
+            .open_file(&[crate::fs_core::NativeName::Bytes(b"victim".to_vec())], &r)
+            .unwrap();
+        let number = file.inode().number();
+        let original_journal = fs::read(&journal).unwrap();
+        for invalid_time in [1, boundary - 1] {
+            let error = match editor.plan_delete(&root, b"victim", invalid_time, &r) {
+                Err(error) => error,
+                Ok(_) => panic!("ambiguous native deletion time accepted"),
+            };
+            assert_eq!(error.kind, ErrorKind::Unsupported);
+            assert_eq!(fs::read(&image).unwrap(), before);
+            assert_eq!(fs::read(&journal).unwrap(), original_journal);
+        }
+        let batch = editor.plan_delete(&root, b"victim", time, &r).unwrap();
+        assert_eq!(batch.namespace_report().unwrap().deletion_time, Some(time));
+        editor.commit(batch, [0x61; 16], &r).unwrap();
+        drop((root, file));
+        let (target, undo, state) = editor.into_stores();
+        assert_eq!(state, ExtEditState::Ready);
+        drop((target, undo));
+        assert_eq!(r.memory.used(), 0);
+        run(
+            &tools[2],
+            &["-fn".into(), image.display().to_string()],
+            out,
+            receipt,
+            commands,
+            false,
+        );
+        let stat = run(
+            &tools[1],
+            &[
+                "-R".into(),
+                format!("stat <{number}>"),
+                image.display().to_string(),
+            ],
+            out,
+            receipt,
+            commands,
+            false,
+        );
+        let text = String::from_utf8(stat).unwrap();
+        assert!(text.contains(&format!("dtime: 0x{time:08x}")), "{text}");
+        receipt.push_str(&format!("validated_classic_deletion_boundary=block{bs} time={time} inode_count={boundary} rejected_lower=true image_sha256={:x} journal_sha256={:x}\n", Sha256::digest(fs::read(image).unwrap()), Sha256::digest(fs::read(journal).unwrap())));
+    }
+}
+
+fn modern_truncate(
+    out: &Path,
+    stem: &str,
+    tools: &[PathBuf],
+    receipt: &mut String,
+    commands: &mut usize,
+) {
+    let image = out.join(format!("{stem}-modern-truncate.img"));
+    fs::copy(out.join(format!("{stem}-owned-recovered.img")), &image).unwrap();
+    let setup = out.join(format!("{stem}-modern-fragment.cmds"));
+    let mut script = String::new();
+    for index in 0..24 {
+        script.push_str(&format!(
+            "write {} /fragment{index}\n",
+            out.join("old-payload.bin").display()
+        ));
+    }
+    for index in (0..24).step_by(2) {
+        script.push_str(&format!("rm /fragment{index}\n"));
+    }
+    let xattr = vec![b'z'; 600];
+    script.push_str(&format!(
+        "ea_set /payload user.partmgr {}\n",
+        String::from_utf8(xattr.clone()).unwrap()
+    ));
+    script.push_str("mkdir /destination\n");
+    fs::write(&setup, script).unwrap();
+    run(
+        &tools[1],
+        &[
+            "-w".into(),
+            "-f".into(),
+            setup.display().to_string(),
+            image.display().to_string(),
+        ],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    run(
+        &tools[2],
+        &["-fn".into(), image.display().to_string()],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    let before = out.join(format!("{stem}-modern-truncate-before.bin"));
+    run(
+        &tools[1],
+        &[
+            "-R".into(),
+            format!("dump /payload {}", before.display()),
+            image.display().to_string(),
+        ],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    let mut original = fs::read(before).unwrap();
+    let r = Resources {
+        memory: Budget::new(128 << 20),
+        cancellation: Cancellation::default(),
+    };
+    let limits = session::Limits {
+        audit: crate::fs_ext_audit::ExtAuditLimits {
+            blocks: 16384,
+            inodes: 8192,
+            work: 8_000_000,
+            directory_blocks: 128,
+            directory_entries: 2048,
+            findings: 64,
+        },
+        file_blocks: 1024,
+        affected_blocks: 1024,
+        affected_bytes: 4 << 20,
+    };
+    let planning = crate::fs_ext_edit::ExtEditLimits {
+        audit: limits.audit,
+        file_blocks: 1024,
+        directory_entries: 2048,
+        affected_bytes: 4 << 20,
+        work: 1000000,
+        undo: crate::fs_undo::UndoLimits {
+            patches: 4096,
+            body_bytes: 16 << 20,
+        },
+    };
+    let mut owner = session::Session::open(FileStorage::open(&image).unwrap(), limits, &r).unwrap();
+    let input = NativeInput {
+        identity: crate::fs_core::ObjectId {
+            source: 99,
+            generation: 1,
+            native: vec![7],
+        },
+        bytes: (0..655445).map(|n| (n * 23 + n / 41) as u8).collect(),
+    };
+    let file = owner
+        .file_at(
+            &[crate::fs_core::NativeName::Bytes(b"payload".to_vec())],
+            &r.cancellation,
+        )
+        .unwrap();
+    owner
+        .operate(
+            session::Operation::Extend {
+                file: &file,
+                input: &input,
+            },
+            planning,
+            &r.cancellation,
+        )
+        .unwrap();
+    drop(file);
+    original.extend_from_slice(&input.bytes);
+    let stat = run(
+        &tools[1],
+        &[
+            "-R".into(),
+            "stat /payload".into(),
+            image.display().to_string(),
+        ],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    assert!(
+        String::from_utf8(stat).unwrap().contains("ETB0"),
+        "native fragmented extension must create indexed extent metadata"
+    );
+
+    let saved = out.join(format!("{stem}-modern-extend.img"));
+    fs::copy(&image, &saved).unwrap();
+    run(
+        &tools[2],
+        &["-fn".into(), saved.display().to_string()],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    let dump = out.join(format!("{stem}-modern-extend.bin"));
+    run(
+        &tools[1],
+        &[
+            "-R".into(),
+            format!("dump /payload {}", dump.display()),
+            saved.display().to_string(),
+        ],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    assert_eq!(fs::read(&dump).unwrap(), original);
+    let ea = out.join(format!("{stem}-modern-extend-xattr.bin"));
+    run(
+        &tools[1],
+        &[
+            "-R".into(),
+            format!("ea_get -f {} /payload user.partmgr", ea.display()),
+            image.display().to_string(),
+        ],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    assert_eq!(fs::read(&ea).unwrap(), xattr);
+
+    fs::write(
+        out.join(format!("{stem}-modern-extend-expected.bin")),
+        &original,
+    )
+    .unwrap();
+    receipt.push_str(&format!(
+        "validated_modern_extend={stem} image_sha256={:x} payload_sha256={:x}\n",
+        Sha256::digest(fs::read(saved).unwrap()),
+        Sha256::digest(fs::read(dump).unwrap())
+    ));
+    for (step, length) in [513u64, 0].into_iter().enumerate() {
+        let file = owner
+            .file_at(
+                &[crate::fs_core::NativeName::Bytes(b"payload".to_vec())],
+                &r.cancellation,
+            )
+            .unwrap();
+        owner
+            .operate(
+                session::Operation::Truncate {
+                    file: &file,
+                    length,
+                },
+                planning,
+                &r.cancellation,
+            )
+            .unwrap();
+        assert!(
+            owner
+                .read_at(&file, 0, &mut [0; 1], &r.cancellation)
+                .is_err()
+        );
+        drop(file);
+        let saved = out.join(format!("{stem}-modern-truncate-{step}.img"));
+        fs::copy(&image, &saved).unwrap();
+        run(
+            &tools[2],
+            &["-fn".into(), saved.display().to_string()],
+            out,
+            receipt,
+            commands,
+            false,
+        );
+        let dump = out.join(format!("{stem}-modern-truncate-{step}.bin"));
+        run(
+            &tools[1],
+            &[
+                "-R".into(),
+                format!("dump /payload {}", dump.display()),
+                saved.display().to_string(),
+            ],
+            out,
+            receipt,
+            commands,
+            false,
+        );
+        assert_eq!(fs::read(&dump).unwrap(), original[..length as usize]);
+        let ea = out.join(format!("{stem}-modern-truncate-{step}-xattr.bin"));
+        run(
+            &tools[1],
+            &[
+                "-R".into(),
+                format!("ea_get -f {} /payload user.partmgr", ea.display()),
+                saved.display().to_string(),
+            ],
+            out,
+            receipt,
+            commands,
+            false,
+        );
+        assert_eq!(fs::read(ea).unwrap(), xattr);
+        for index in (1..24).step_by(2) {
+            let other = out.join(format!("{stem}-modern-truncate-{step}-fragment{index}.bin"));
+            run(
+                &tools[1],
+                &[
+                    "-R".into(),
+                    format!("dump /fragment{index} {}", other.display()),
+                    saved.display().to_string(),
+                ],
+                out,
+                receipt,
+                commands,
+                false,
+            );
+            assert_eq!(
+                fs::read(other).unwrap(),
+                fs::read(out.join("old-payload.bin")).unwrap()
+            );
+        }
+
+        fs::write(
+            out.join(format!("{stem}-modern-truncate-{step}-expected.bin")),
+            &original[..length as usize],
+        )
+        .unwrap();
+        receipt.push_str(&format!("validated_modern_truncate={stem} step={step} length={length} image_sha256={:x} payload_sha256={:x}\n", Sha256::digest(fs::read(saved).unwrap()), Sha256::digest(fs::read(dump).unwrap())));
+    }
+    let stale = owner
+        .file_at(
+            &[crate::fs_core::NativeName::Bytes(b"payload".to_vec())],
+            &r.cancellation,
+        )
+        .unwrap();
+    let number = stale.inode_number();
+    let before = fs::read(&image).unwrap();
+    let bs = 1024u32 << u32::from_le_bytes(before[1048..1052].try_into().unwrap());
+    let ipg = u32::from_le_bytes(before[1064..1068].try_into().unwrap());
+    let first = u32::from_le_bytes(before[1044..1048].try_into().unwrap());
+    let inode_size = u16::from_le_bytes(before[1112..1114].try_into().unwrap()) as usize;
+    let descriptor_size = u16::from_le_bytes(before[1278..1280].try_into().unwrap()) as usize;
+    let descriptor =
+        (first as usize + 1) * bs as usize + ((number - 1) / ipg) as usize * descriptor_size;
+    let table = u32::from_le_bytes(before[descriptor + 8..descriptor + 12].try_into().unwrap());
+    let inode_at = table as usize * bs as usize + ((number - 1) % ipg) as usize * inode_size;
+    owner
+        .operate(
+            session::Operation::Rename {
+                source: &[],
+                name: b"payload",
+                destination: &[],
+                new_name: b"renamed",
+            },
+            planning,
+            &r.cancellation,
+        )
+        .unwrap();
+    assert!(
+        owner
+            .read_at(&stale, 0, &mut [0; 1], &r.cancellation)
+            .is_err()
+    );
+    drop(stale);
+    let renamed = owner
+        .file_at(
+            &[crate::fs_core::NativeName::Bytes(b"renamed".to_vec())],
+            &r.cancellation,
+        )
+        .unwrap();
+    assert_eq!(renamed.inode_number(), number);
+    drop(renamed);
+    let after = fs::read(&image).unwrap();
+    assert_eq!(
+        &before[inode_at..inode_at + inode_size],
+        &after[inode_at..inode_at + inode_size]
+    );
+    let saved = out.join(format!("{stem}-modern-rename.img"));
+    fs::write(&saved, &after).unwrap();
+    run(
+        &tools[2],
+        &["-fn".into(), saved.display().to_string()],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    let dump = out.join(format!("{stem}-modern-rename.bin"));
+    run(
+        &tools[1],
+        &[
+            "-R".into(),
+            format!("dump /renamed {}", dump.display()),
+            saved.display().to_string(),
+        ],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    assert!(fs::read(&dump).unwrap().is_empty());
+    let ea = out.join(format!("{stem}-modern-rename-xattr.bin"));
+    run(
+        &tools[1],
+        &[
+            "-R".into(),
+            format!("ea_get -f {} /renamed user.partmgr", ea.display()),
+            saved.display().to_string(),
+        ],
+        out,
+        receipt,
+        commands,
+        false,
+    );
+    assert_eq!(fs::read(&ea).unwrap(), xattr);
+    fs::write(
+        out.join(format!("{stem}-modern-rename-inode.bin")),
+        &after[inode_at..inode_at + inode_size],
+    )
+    .unwrap();
+    receipt.push_str(&format!("validated_modern_rename={stem} inode={number} inode_offset={inode_at} inode_size={inode_size} image_sha256={:x} inode_sha256={:x} payload_sha256={:x}\n",Sha256::digest(&after),Sha256::digest(&after[inode_at..inode_at+inode_size]),Sha256::digest(fs::read(dump).unwrap())));
+    drop(owner);
+    assert_eq!(r.memory.used(), 0);
+    namespace_oracle::operations(out, stem, tools, receipt, commands);
+    if stem == "ext4-b1024-v3" {
+        namespace_oracle::interruption(out, stem, tools, receipt, commands);
+        namespace_oracle::indexed_operations(out, stem, tools, receipt, commands);
+        namespace_oracle::shared_ea_hardlinks(out, stem, tools, receipt, commands);
+        indirect_oracle::operations(out, tools, receipt, commands);
+        inode_oracle::operations(out, tools, receipt, commands);
+        indirect_oracle::legacy256(out, tools, receipt, commands);
+        legacy_integrity_oracle::read_audit(out, tools, receipt, commands);
+    }
+}
+
+#[path = "fs_ext_jbd_native_namespace.rs"]
+mod namespace_oracle;
+
+#[path = "fs_ext_jbd_native_indirect.rs"]
+mod indirect_oracle;
+#[path = "fs_ext_jbd_native_legacy.rs"]
+mod legacy_integrity_oracle;
+
+#[path = "fs_ext_jbd_native_inode.rs"]
+mod inode_oracle;

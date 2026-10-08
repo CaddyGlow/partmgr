@@ -1823,3 +1823,52 @@ fn full_owned_allocation_rejects_extension_before_journal_or_target_writes() {
     assert_eq!(journal.writes, 0);
     assert_eq!(r.memory.used(), 0);
 }
+
+#[test]
+fn deletion_time_orphan_domain_boundary_rejects_before_publication() {
+    let r = big_r();
+    let before = namespace_fixture();
+    let inode_count = u32::from_le_bytes(before[BASE + 1024..BASE + 1028].try_into().unwrap());
+    for time in [inode_count, 1_700_000_000] {
+        let mut editor = ExtEditor::open(
+            Memory {
+                bytes: before.clone(),
+                writes: 0,
+            },
+            Memory {
+                bytes: vec![0; 131072],
+                writes: 0,
+            },
+            region(),
+            binding(),
+            larger_limits(),
+            &r,
+        )
+        .unwrap();
+        let root = editor.open_directory(&[], &r).unwrap();
+        for ambiguous in [1, inode_count - 1] {
+            let error = match editor.plan_delete(&root, b"single", ambiguous, &r) {
+                Err(error) => error,
+                Ok(_) => panic!("accepted ambiguous orphan-domain deletion time"),
+            };
+            assert_eq!(error.kind, ErrorKind::Unsupported);
+        }
+        let file = editor
+            .open_file(&[NativeName::Bytes(b"single".to_vec())], &r)
+            .unwrap();
+        let number = file.inode().number();
+        let batch = editor.plan_delete(&root, b"single", time, &r).unwrap();
+        assert_eq!(batch.namespace_report().unwrap().deletion_time, Some(time));
+        editor.commit(batch, [0x61; 16], &r).unwrap();
+        drop((file, root));
+        let (target, journal, state) = editor.into_stores();
+        assert_eq!(state, ExtEditState::Ready);
+        let at = BASE + 5 * 1024 + (number as usize - 1) * 128 + 20;
+        assert_eq!(
+            u32::from_le_bytes(target.bytes[at..at + 4].try_into().unwrap()),
+            time
+        );
+        assert!(target.writes > 0 && journal.writes > 0);
+        assert_eq!(r.memory.used(), 0);
+    }
+}

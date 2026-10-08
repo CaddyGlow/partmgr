@@ -9,6 +9,14 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 use virtdisk::{DiskView, ReadAt};
+#[path = "fs_ntfs_bootstrap.rs"]
+mod bootstrap;
+#[path = "fs_ntfs_stream.rs"]
+mod stream;
+pub use stream::{
+    NtfsDataStream, NtfsNativeAttribute, NtfsNativeFileName, NtfsNativeStandardInformation,
+    NtfsStreamLimits,
+};
 static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
 fn bad(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
@@ -58,6 +66,10 @@ impl NtfsGeometry {
     /// Cluster size, independent of container allocation geometry.
     pub fn cluster_bytes(&self) -> u64 {
         self.cluster_bytes
+    }
+    /// Validated native index block byte size.
+    pub fn index_bytes(&self) -> usize {
+        self.index_bytes
     }
     /// FILE record byte size.
     pub fn record_bytes(&self) -> usize {
@@ -146,9 +158,19 @@ impl NtfsRecord {
         self.flags & 2 != 0
     }
     /// Inspect verified standard-information ticks/flags, leaving other classes unknown.
+    /// The MFT-change FILETIME is retained as a native eight-byte metadata attribute.
     pub fn metadata(&self, r: &Resources) -> Result<Budgeted<Metadata>> {
         r.cancellation.check()?;
         Budgeted::try_new(&r.memory, 4096, || {
+            let mut attributes = vector(1)?;
+            if let Some(standard) = self.standard {
+                let label = b"ntfs.STANDARD_INFORMATION.mft_changed.FILETIME";
+                let mut name = vector(label.len())?;
+                name.extend_from_slice(label);
+                let mut ticks = vector(8)?;
+                ticks.extend_from_slice(&standard[2].to_le_bytes());
+                attributes.push((NativeName::Bytes(name), MetadataField::Known(ticks)));
+            }
             let stamp = |n: usize| {
                 self.standard.map_or_else(
                     || MetadataField::Uninspectable {
@@ -174,7 +196,7 @@ impl NtfsRecord {
                 security: MetadataField::Uninspectable {
                     reason: "NTFS security descriptor lookup not implemented".into(),
                 },
-                attributes: Vec::new(),
+                attributes,
                 native_flags: self.file_flags.map_or(
                     MetadataField::Uninspectable {
                         reason: "NTFS file attributes not inspected".into(),
@@ -242,20 +264,31 @@ impl NtfsVolume {
     /// 512-byte sectors and at most 64-KiB clusters/records are this initial profile.
     /// Attribute-list-dependent MFT layouts fail closed rather than guessed continuation.
     pub fn open(source: Arc<dyn ReadAt>, limits: NtfsReadLimits, r: &Resources) -> Result<Self> {
-        Self::open_inner(source, limits, r, false)
+        Self::open_inner(source, limits, r, false, None)
+    }
+    /// Explicit readonly stream profile with bounded attribute-list MFT bootstrap.
+    /// Does not admit extension ownership audits, complete tree capture or snapshots.
+    pub fn open_stream_profile(
+        source: Arc<dyn ReadAt>,
+        read: NtfsReadLimits,
+        streams: NtfsStreamLimits,
+        r: &Resources,
+    ) -> Result<Self> {
+        Self::open_inner(source, read, r, false, Some(streams))
     }
     pub(crate) fn open_for_audit(
         source: Arc<dyn ReadAt>,
         limits: NtfsReadLimits,
         r: &Resources,
     ) -> Result<Self> {
-        Self::open_inner(source, limits, r, true)
+        Self::open_inner(source, limits, r, true, None)
     }
     fn open_inner(
         source: Arc<dyn ReadAt>,
         limits: NtfsReadLimits,
         r: &Resources,
         audit: bool,
+        expanded: Option<NtfsStreamLimits>,
     ) -> Result<Self> {
         r.cancellation.check()?;
         if source.len() < 512 {
@@ -332,39 +365,55 @@ impl NtfsVolume {
             .source
             .read_exact_at(mft_offset, &mut bytes)
             .map_err(|e| Error::io("NTFS bootstrap FILE read", e))?;
-        let record = parse_record(bytes, 0, &context, &geometry, limits, r)?;
-        let data = unnamed_data(&record)?;
-        if !data.nonresident || data.flags != 0 {
-            return Err(unsupported(
-                "NTFS MFT must be ordinary nonresident unnamed data",
-            ));
-        }
-        let reservation = r.memory.reserve(map_charge(limits.runs)?)?;
-        let (length, extents) = runs(
-            &record.bytes[data.start..data.start + data.length],
-            &geometry,
-            limits,
-            r,
-        )?;
-        if length < 4 * record_bytes as u64
-            || !length.is_multiple_of(record_bytes as u64)
-            || extents.iter().any(|e| !matches!(e.kind, MapKind::Data(_)))
-        {
-            return Err(bad("NTFS MFT length or sparse/uninitialized mapping"));
-        }
-        if extents
-            .first()
-            .is_none_or(|e| e.kind != MapKind::Data(mft_offset) || e.length < record_bytes as u64)
-        {
-            return Err(bad("NTFS bootstrap and MFT mapping disagree"));
-        }
-        let mft = ExtentFile::new(
-            context.source.clone(),
-            length,
-            extents,
-            limits.runs.saturating_mul(2),
-        )
-        .map_err(|e| Error::io("NTFS MFT map", e))?;
+        let record = if expanded.is_some() {
+            parse_record_mode(
+                bytes,
+                0,
+                &context,
+                &geometry,
+                limits,
+                r,
+                RecordProfile::CompleteBase,
+            )?
+        } else {
+            parse_record(bytes, 0, &context, &geometry, limits, r)?
+        };
+        let (mft, reservation) = if let Some(streams) = expanded {
+            bootstrap::mapped_mft(&record, &context, &geometry, limits, streams, r)?
+        } else {
+            let data = unnamed_data(&record)?;
+            if !data.nonresident || data.flags != 0 {
+                return Err(unsupported(
+                    "NTFS MFT must be ordinary nonresident unnamed data",
+                ));
+            }
+            let reservation = r.memory.reserve(map_charge(limits.runs)?)?;
+            let (length, extents) = runs(
+                &record.bytes[data.start..data.start + data.length],
+                &geometry,
+                limits,
+                r,
+            )?;
+            if length < 4 * record_bytes as u64
+                || !length.is_multiple_of(record_bytes as u64)
+                || extents.iter().any(|e| !matches!(e.kind, MapKind::Data(_)))
+            {
+                return Err(bad("NTFS MFT length or sparse/uninitialized mapping"));
+            }
+            if extents.first().is_none_or(|e| {
+                e.kind != MapKind::Data(mft_offset) || e.length < record_bytes as u64
+            }) {
+                return Err(bad("NTFS bootstrap and MFT mapping disagree"));
+            }
+            let mft = ExtentFile::new(
+                context.source.clone(),
+                length,
+                extents,
+                limits.runs.saturating_mul(2),
+            )
+            .map_err(|e| Error::io("NTFS MFT map", e))?;
+            (mft, reservation)
+        };
         let mut volume = Self {
             context,
             geometry,
@@ -529,12 +578,28 @@ fn unnamed_data(record: &NtfsRecord) -> Result<Attribute> {
     found.ok_or_else(|| bad("NTFS missing unnamed DATA"))
 }
 fn parse_record(
+    bytes: Vec<u8>,
+    number: u64,
+    context: &Context,
+    g: &NtfsGeometry,
+    limits: NtfsReadLimits,
+    r: &Resources,
+) -> Result<NtfsRecord> {
+    parse_record_mode(bytes, number, context, g, limits, r, RecordProfile::Strict)
+}
+enum RecordProfile {
+    Strict,
+    CompleteBase,
+    Extension(u64),
+}
+fn parse_record_mode(
     mut bytes: Vec<u8>,
     number: u64,
     context: &Context,
     g: &NtfsGeometry,
     limits: NtfsReadLimits,
     r: &Resources,
+    profile: RecordProfile,
 ) -> Result<NtfsRecord> {
     context.check(r)?;
     let charge = (g.record_bytes as u64)
@@ -587,10 +652,21 @@ fn parse_record(
     if flags & !15 != 0 {
         return Err(unsupported("NTFS FILE flags"));
     }
-    if u64le(&bytes, 32) != 0 {
-        return Err(unsupported(
-            "NTFS extension FILE record requires attribute-list support",
-        ));
+    let (expected_base, allow_list) = match profile {
+        RecordProfile::Strict => (None, false),
+        RecordProfile::CompleteBase => (None, true),
+        RecordProfile::Extension(reference) => (Some(reference), true),
+    };
+    match expected_base {
+        Some(reference) if u64le(&bytes, 32) != reference => {
+            return Err(bad("NTFS extension base-reference mismatch"));
+        }
+        None if u64le(&bytes, 32) != 0 => {
+            return Err(unsupported(
+                "NTFS extension FILE record requires attribute-list support",
+            ));
+        }
+        _ => {}
     }
     if u32le(&bytes, 44) as u64 != number {
         return Err(bad("NTFS FILE record-number mismatch"));
@@ -640,8 +716,10 @@ fn parse_record(
                 "NTFS compressed/encrypted/unknown attribute flags",
             ));
         }
-        if kind == 0x20 {
-            return Err(unsupported("NTFS ATTRIBUTE_LIST not implemented"));
+        if kind == 0x20 && !allow_list {
+            return Err(unsupported(
+                "NTFS ATTRIBUTE_LIST not implemented in strict base profile",
+            ));
         }
         if kind == 0 || kind > 0x100 || !kind.is_multiple_of(16) || kind < previous {
             return Err(bad("NTFS attribute type/order"));
@@ -665,6 +743,7 @@ fn parse_record(
         if length < header
             || name_len != 0
                 && (name_at < header
+                    || !name_at.is_multiple_of(2)
                     || name_at.checked_add(name_len).is_none_or(|end| end > length))
         {
             return Err(bad("NTFS attribute name/header range"));
@@ -682,7 +761,7 @@ fn parse_record(
                 || v.checked_add(n).is_none_or(|end| end > length)
                 || name_len != 0 && v < name_at + name_len
                 || b[22] & !1 != 0
-                || b[23] != 0
+                || !allow_list && b[23] != 0
             {
                 return Err(bad("NTFS resident value range/flags"));
             }

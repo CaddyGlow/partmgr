@@ -14,12 +14,17 @@ use std::{
 };
 use virtdisk::ReadAt;
 const BLOCK: usize = 4096;
+type MetadataBlock = (u64, Arc<[u8; BLOCK]>);
 static SCOPES: AtomicU64 = AtomicU64::new(1);
 #[path = "fs_apfs_edit_cow.rs"]
 mod cow;
+#[path = "fs_apfs_edit_retention.rs"]
+mod retention;
 pub use cow::{
-    ApfsCreateMetadata, ApfsEditReceipt, ApfsMutationPlan, ApfsRangePlan, ApfsRecoveryAnchor,
+    ApfsCreateMetadata, ApfsEditReceipt, ApfsMutationPlan, ApfsRangePlan, ApfsReclamationPlan,
+    ApfsReclamationReceipt, ApfsRecoveryAnchor,
 };
+pub use retention::{ApfsCheckpointRetirementPlan, ApfsCheckpointRetirementReceipt};
 /// Independent metadata snapshot and restart ceilings, in addition to decoder/audit limits.
 #[derive(Clone, Copy, Debug)]
 pub struct ApfsEditLimits {
@@ -118,6 +123,16 @@ impl<S: Storage> ApfsEditor<S> {
         r: &Resources,
         seed: Option<(u64, [u8; BLOCK])>,
     ) -> Result<Self> {
+        Self::open_indexed(target, volume_oid, limits, r, seed, None)
+    }
+    fn open_indexed(
+        target: S,
+        volume_oid: u64,
+        limits: ApfsEditLimits,
+        r: &Resources,
+        seed: Option<(u64, [u8; BLOCK])>,
+        metadata: Option<&[MetadataBlock]>,
+    ) -> Result<Self> {
         r.cancellation.check()?;
         let seeded = seed.is_some();
         let length = target
@@ -165,6 +180,54 @@ impl<S: Storage> ApfsEditor<S> {
             })?;
         if let Some((_, bytes)) = seed {
             blocks.push((0, Arc::new(bytes)));
+        }
+        if let Some(metadata) = metadata {
+            if seeded || metadata.len() > limits.metadata_blocks {
+                return Err(Error::new(
+                    ErrorKind::BudgetExhausted,
+                    "APFS indexed seed ceiling",
+                ));
+            }
+            let mut previous = None;
+            for (block, expected) in metadata {
+                r.cancellation.check()?;
+                let offset = block
+                    .checked_mul(BLOCK as u64)
+                    .filter(|at| {
+                        at.checked_add(BLOCK as u64)
+                            .is_some_and(|end| end <= length)
+                    })
+                    .ok_or_else(|| Error::new(ErrorKind::InvalidData, "APFS indexed seed range"))?;
+                if previous.is_some_and(|old| old >= *block) {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "APFS indexed seed order",
+                    ));
+                }
+                work.charge(BLOCK as u64)?;
+                let mut actual = [0; BLOCK];
+                target
+                    .read_exact_at(offset, &mut actual)
+                    .map_err(|e| Error::io("APFS indexed seed binding", e))?;
+                if &actual != expected.as_ref() {
+                    return Err(Error::new(
+                        ErrorKind::StalePlan,
+                        "APFS indexed seed changed",
+                    ));
+                }
+                blocks.push((*block, expected.clone()));
+                previous = Some(*block);
+            }
+            if target
+                .len()
+                .map_err(|e| Error::io("APFS indexed seed length", e))?
+                != length
+            {
+                return Err(Error::new(
+                    ErrorKind::StalePlan,
+                    "APFS indexed seed length changed",
+                ));
+            }
         }
         let attempt_charge = limits
             .read

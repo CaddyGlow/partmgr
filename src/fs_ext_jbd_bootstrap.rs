@@ -225,14 +225,10 @@ impl Bootstrap {
         let original = &preparation.journal_superblock;
         let mut active = *original;
         put32(&mut active, 28, self.geometry.first);
-        put32(&mut active, 252, 0);
-        let sum = crc32c(!0, &active);
-        put32(&mut active, 252, sum);
+        journal_checksum(&self.geometry, &mut active);
         let mut empty = *original;
         put32(&mut empty, 24, next_sequence);
-        put32(&mut empty, 252, 0);
-        let sum = crc32c(!0, &empty);
-        put32(&mut empty, 252, sum);
+        journal_checksum(&self.geometry, &mut empty);
         if self
             .journal
             .iter()
@@ -390,6 +386,7 @@ impl Bootstrap {
         let checksums = match features & 0x18 {
             8 => Checksums::V2,
             16 => Checksums::V3,
+            0 => Checksums::None,
             _ => return Err(unsupported("JBD2 bootstrap checksum profile")),
         };
         if be32(&journal, 0) != MAGIC
@@ -403,7 +400,12 @@ impl Bootstrap {
             || journal[48..64] != primary[104..120]
             || be32(&journal, 64) != 1
             || be32(&journal, 68) != 0
-            || journal[80] != 4
+            || journal[80]
+                != if matches!(checksums, Checksums::None) {
+                    0
+                } else {
+                    4
+                }
             || be32(&journal, 84) != 0
             || be32(&journal, 32) != 0
         {

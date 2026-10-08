@@ -12,6 +12,8 @@ use std::{
     },
 };
 use virtdisk::ReadAt;
+#[path = "fs_hfsplus_node.rs"]
+pub(crate) mod authoring_node;
 static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
 pub(crate) fn bad(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
@@ -121,6 +123,7 @@ pub(crate) struct Node {
     pub(crate) parent: u32,
     pub(crate) name: Vec<u16>,
     pub(crate) raw: Vec<u8>,
+    pub(crate) catalog_offset: u64,
     pub(crate) directory: bool,
     pub(crate) forks: [Fork; 2],
 }
@@ -284,6 +287,7 @@ fn mapped_read(file: &ExtentFile, at: u64, b: &mut [u8], r: &Resources) -> Resul
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Key(Vec<u32>);
 struct Record {
+    data_offset: u64,
     key: Vec<u8>,
     data: Vec<u8>,
 }
@@ -438,7 +442,12 @@ impl Walker<'_> {
                     return Err(budget("HFS+ leaf-record ceiling"));
                 }
                 self.w.records += 1;
+                let data_offset = u64::from(id)
+                    .checked_mul(self.node_size as u64)
+                    .and_then(|at| at.checked_add((start + n + 2) as u64))
+                    .ok_or_else(|| bad("HFS+ catalog record location overflow"))?;
                 self.records.push(Record {
+                    data_offset,
                     key: copied(native_key)?,
                     data: copied(data)?,
                 });
@@ -839,6 +848,9 @@ impl HfsPlusVolume {
                         return Err(bad("HFS+ reserved catalog object ID"));
                     }
                     let flags = be16(&raw, 2);
+                    if dir && flags & 2 != 0 {
+                        return Err(bad("HFS+ reserved folder thread-exists flag"));
+                    }
                     if flags & !0x93 != 0
                         || raw[41] & 0x20 != 0
                         || !dir && raw[48..56] == *b"hlnkhfs+"
@@ -892,6 +904,7 @@ impl HfsPlusVolume {
                                 parent,
                                 name,
                                 raw,
+                                catalog_offset: record.data_offset,
                                 directory: dir,
                                 forks,
                             },
@@ -1028,6 +1041,26 @@ impl HfsPlusVolume {
             .nodes
             .get(&be32(&id.native, 0))
             .ok_or_else(|| bad("HFS+ catalog object missing"))
+    }
+    pub(crate) fn verify_catalog_record(&self, id: &ObjectId, r: &Resources) -> Result<()> {
+        let node = self.node(id)?;
+        let catalog = map(
+            self.inner.source.clone(),
+            &self.inner.system[2],
+            &self.inner.geometry,
+            self.inner.limits.extents,
+        )?;
+        let _lease = r.memory.reserve(node.raw.len() as u64)?;
+        let mut actual = vector(node.raw.len())?;
+        actual.resize(node.raw.len(), 0);
+        mapped_read(&catalog, node.catalog_offset, &mut actual, r)?;
+        if actual != node.raw {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "HFS+ selected catalog record changed",
+            ));
+        }
+        Ok(())
     }
     /// Recheck source length and retained primary header; caller still guarantees byte stability.
     pub fn revalidate(&self, id: &ObjectId, r: &Resources) -> Result<()> {
@@ -1303,3 +1336,7 @@ impl FileRead for HfsPlusFile {
         Ok(())
     }
 }
+
+/// Exclusive existing-length fork editing with disjoint external undo.
+#[path = "fs_hfsplus_edit.rs"]
+pub mod edit;

@@ -10,8 +10,8 @@ identified unencrypted case-sensitive and normalization-sensitive volume, and a
 single initial transaction at XID 1. Container and volume UUIDs, volume label and
 metadata defaults are explicit inputs. No wall-clock time, random identifiers or
 source codec are required to serialize the destination.
-Image length is 1–128 MiB; the initial layout uses one spaceman chunk/CIB and
-volume OID 1026. This bound is not full APFS destination-family completion.
+Image length is 1 MiB through 512 MiB plus one 4096-byte block. The bounded layout
+uses up to five 32768-block spaceman chunks, one CIB and volume OID 1026. This bound is not full APFS destination-family completion.
 
 The native structures are constructed from field definitions: NX superblocks,
 descriptor/data checkpoint rings and checkpoint mappings, ephemeral reaper and
@@ -41,8 +41,16 @@ Payloads remain deferred. A block whose entire logical range is a hole can remai
 unallocated, including the final block at EOF. Mixed blocks require initialized
 physical bytes containing the same logical zeros. Resource forks up to 2048 bytes
 are authored as separate embedded native streams; larger/external forks reject
-before mutation. Unwritten allocation, named/system streams and special objects
-remain explicitly unavailable in this authoring profile.
+before mutation. Unwritten allocation, system streams and special objects remain explicitly
+unavailable. The default constructor rejects Named streams. The additive
+`plan_with_named_xattrs` constructor accepts explicit stream-count and total-name
+byte caps and preserves dense user xattr values as deferred external native
+streams, including directory values. Names must be exact UTF-8 byte names; sparse
+or unwritten values, dedicated ResourceFork/FinderInfo/security/compression names
+and `com.apple.fs.*` semantics reject before destination mutation.
+`named_stream_outcomes()` records every mapped source object, exact name and
+logical length. Content-only metadata defaults remain explicit: this mapping
+preserves names and bytes, not source physical stream IDs or write counters.
 Hardlinks share one inode and stream while each native namespace occurrence has
 matching sibling link/map records. Source physical clone relationships are not
 inferred from equal bytes; independent objects retain distinct destination
@@ -110,4 +118,34 @@ The independent experimental construction/checking comparison uses
 [apfsprogs](https://github.com/eafer/apfsprogs), whose layout choices are compared
 against the specification rather than treated as mandatory geometry.
 
-`ApfsBuildPlan::plan_with_checkpoint_capacity` accepts additive `ApfsCheckpointCapacity { descriptor_blocks, data_blocks }`; existing `plan` retains byte-identical 8/8 defaults. Descriptor capacity must be even in 8–128 blocks and data capacity a multiple of four in 8–256; geometry must fit before inventory. Capacity changes construct all relocated native identities, mappings and bitmaps, rather than patching a formatted fixture. The supported one-chunk/CIB topology has an exact six-block internal pool, as required by its native allocation topology. Expanded rings allow two retained COW publications; they do not authorize arbitrary pool enlargement, reclamation or unbounded editing.
+`ApfsBuildPlan::plan_with_checkpoint_capacity` accepts additive `ApfsCheckpointCapacity { descriptor_blocks, data_blocks }`; existing `plan` retains byte-identical 8/8 defaults. Descriptor capacity must be even in 8–128 blocks and data capacity a multiple of four in 8–256; geometry must fit before inventory. Capacity changes construct all relocated native identities, mappings and bitmaps, rather than patching a formatted fixture. The internal pool is exactly three times the chunk/CIB/CAB count: six blocks for one chunk and one CIB, eighteen for five chunks and one CIB. Construction initializes one native bitmap per chunk with exact population/free counts. Native ephemeral-info and maximum-volume fields derive from container size. Expanded rings allow bounded repeated publications; each consumes unused internal-pool blocks for affected chunk bitmaps and a CIB. Six consecutive publications are demonstrated on the five-chunk authored image; arbitrary pool enlargement, reclamation and unbounded editing remain unsupported.
+
+A subsequent construction draft accepts up to 127 allocation chunks through two direct CIBs, retaining the existing default serialization. Each native CIB contains at most 126 ordered chunk entries with its exact index; the spaceman address table identifies both objects, and the internal pool is exactly three times the total chunk/CIB count. Explicit image/block/work/memory limits remain required. CAB-based geometry is rejected. This draft extends actual native construction rather than patching a preformatted fixture, but is not qualified by the historical five-chunk builder/native receipts above; separate multiple-CIB native evidence remains pending.
+
+The direct two-CIB native construction checkpoint is retained at `/data/cache/partmgr-apfs-cibs-native-v4`. It archives 26 embedded compiled sources and a fixed executable, with start/end source, executable and tool guards. Four framework-authored checkpoints on a 16,919,822,336-byte container pass the experimental native checker and complete TSK sparse DATA/resource/name/link/owner comparisons. Ordinary planning controls prove deferred payload reads and refusal/refunds for third-CIB geometry and insufficient memory. The native parameter profile uses the pinned formatter's piecewise main free-queue node limit, including 512 nodes at four GiB and above. Earlier native attempts and the corrected independent-fixture provenance remain explicit; this does not establish macOS kernel behavior, CAB construction or broader encrypted/multiple-store profiles.
+
+
+Named-xattr capture qualification uses an independent common TreeSource, not a
+preformatted-image template. Planning reads no payload bytes; emission revalidates
+identities and lengths, writes/readbacks values, and a reopened complete audit
+checks physical xattr ownership. Portable tests cover root and ordinary directory
+values, stale-plan zero-write refusal, explicit caps and lease refunds.
+
+The native gate `native_named_xattr_fresh_construction_files_directories_and_exact_values`
+requires `PARTMGR_APFS_NAMED_BUILD_EVIDENCE` and fails if its checker or TSK tools
+are unavailable. It checks complete independent DATA/resource and five Named
+value models, including a 7001-byte directory value, and retains compiled source,
+fixed executable, tool hashes and unchanged-image guards. This is Linux
+experimental-checker evidence, not a macOS mount or write claim.
+
+Two native oracle gaps remain explicit. Root xattrs have native physical owner
+ID 2 under Apple's inode-owner rule; the framework proves those mappings, but
+the pinned experimental checker rejects the reserved owner ID. The native clean
+gate therefore covers ordinary directories and files, while root values have
+portable format/audit tests only. Pinned TSK 4.14.0
+[APFSJObject directory parsing](https://github.com/sleuthkit/sleuthkit/blob/sleuthkit-4.14.0/tsk/fs/apfs_fs.cpp#L113)
+unconditionally assumes the hashed 12-byte directory key. This profile's native
+normalization-sensitive key is 10 bytes, so `fls` truncates its names. Inode xfield
+names and full stream extraction remain usable independent evidence; truncated
+`fls` output is not claimed as exact native namespace verification. The producer
+does not change native key encoding to accommodate that oracle limitation.

@@ -41,7 +41,7 @@ pub fn thread(parent: u32, name: &[u16], directory: bool) -> Vec<u8> {
 pub fn object(id: u32, directory: bool, valence: u32, data: &[u8], resource: &[u8]) -> Vec<u8> {
     let mut b = vec![0; if directory { 88 } else { 248 }];
     p16(&mut b, 0, if directory { 1 } else { 2 });
-    p16(&mut b, 2, 2);
+    p16(&mut b, 2, if directory { 0 } else { 2 });
     p32(&mut b, 4, valence);
     p32(&mut b, 8, id);
     p32(&mut b, 12, 0xabcdef01);
@@ -120,10 +120,21 @@ pub fn native_name(binary: bool) -> Vec<u16> {
     }
 }
 pub fn hfsplus_seed(binary: bool) -> Vec<u8> {
+    seed_profile(binary, false)
+}
+#[allow(dead_code)]
+pub fn hfsplus_directory_seed(binary: bool) -> Vec<u8> {
+    seed_profile(binary, true)
+}
+fn seed_profile(binary: bool, destination: bool) -> Vec<u8> {
     let block = 4096;
     let total = 256;
     let mut image = vec![0; total * block];
-    let name = native_name(binary);
+    let name = if destination {
+        "Data".encode_utf16().collect()
+    } else {
+        native_name(binary)
+    };
     let root: Vec<_> = "Volume".encode_utf16().collect();
     let dir: Vec<_> = "Dir".encode_utf16().collect();
     let child: Vec<_> = "child".encode_utf16().collect();
@@ -145,7 +156,11 @@ pub fn hfsplus_seed(binary: bool) -> Vec<u8> {
     let resource = fork(5, &[(32, 1)]);
     let child_fork = fork(7, &[(34, 1)]);
     let mut records = vec![
-        (1, root.clone(), object(2, true, 2, &empty, &empty)),
+        (
+            1,
+            root.clone(),
+            object(2, true, if destination { 3 } else { 2 }, &empty, &empty),
+        ),
         (2, vec![], thread(1, &root, true)),
         (2, name.clone(), object(16, false, 0, &data, &resource)),
         (2, dir.clone(), object(17, true, 1, &empty, &empty)),
@@ -154,6 +169,28 @@ pub fn hfsplus_seed(binary: bool) -> Vec<u8> {
         (17, child.clone(), object(18, false, 0, &child_fork, &empty)),
         (18, vec![], thread(17, &child, false)),
     ];
+    if destination {
+        let name: Vec<u16> = "Target".encode_utf16().collect();
+        records.push((2, name.clone(), object(19, true, 0, &empty, &empty)));
+        records.push((19, vec![], thread(2, &name, true)));
+    }
+    if binary {
+        for (_, _, body) in &mut records {
+            if u16::from_be_bytes(body[..2].try_into().unwrap()) == 1 {
+                p16(body, 2, 0x10);
+                let id = u32::from_be_bytes(body[8..12].try_into().unwrap());
+                p32(
+                    body,
+                    84,
+                    if id == 2 {
+                        if destination { 2 } else { 1 }
+                    } else {
+                        0
+                    },
+                );
+            }
+        }
+    }
     records.sort_by_key(|(p, n, _)| {
         (
             *p,
@@ -183,7 +220,19 @@ pub fn hfsplus_seed(binary: bool) -> Vec<u8> {
         key.extend_from_slice(&id.to_be_bytes());
         index.push(key);
     }
-    let catalog_header = header(block, 4, 0, 1, 2, 8, 2, 3, true, binary, 0xf0);
+    let catalog_header = header(
+        block,
+        4,
+        0,
+        1,
+        2,
+        if destination { 10 } else { 8 },
+        2,
+        3,
+        true,
+        binary,
+        0xf0,
+    );
     let catalog_root = node(block, 0, 2, 0, 0, &index);
     let left = node(block, 255, 1, 3, 0, &records[..4]);
     let right = node(block, 255, 1, 0, 2, &records[4..]);
@@ -227,11 +276,15 @@ pub fn hfsplus_seed(binary: bool) -> Vec<u8> {
     p16(&mut vh, 2, if binary { 5 } else { 4 });
     p32(&mut vh, 4, 0x100);
     p32(&mut vh, 32, 2);
-    p32(&mut vh, 36, 1);
+    p32(&mut vh, 36, if destination { 2 } else { 1 });
     p32(&mut vh, 40, block as u32);
     p32(&mut vh, 44, total as u32);
     p32(&mut vh, 48, total as u32 - allocated.len() as u32);
-    p32(&mut vh, 64, 19);
+    if destination {
+        p32(&mut vh, 56, 16384);
+        p32(&mut vh, 60, 16384);
+    }
+    p32(&mut vh, 64, if destination { 20 } else { 19 });
     vh[112..192].copy_from_slice(&fork(32, &[(1, 1)]));
     vh[192..272].copy_from_slice(&fork(block as u64, &[(2, 1)]));
     vh[272..352].copy_from_slice(&fork(4 * block as u64, &[(4, 4)]));

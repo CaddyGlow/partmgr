@@ -142,7 +142,7 @@ def main():
     receipt = {'status': 'failed', 'commands': [], 'images': {},
                'scope': 'Nested fragmented-file raw GPT/MBR copy and native payload acceptance; no firmware, physical-device, container transaction or cross-layer atomicity claim',
                'source_stability': 'Caller keeps the source tree stable during build; start/end hashes detect final changes only'}
-    env = dict(os.environ, LC_ALL='C', RUSTC_WRAPPER='', CARGO_TARGET_DIR=str(args.target_dir.resolve()))
+    env = dict(os.environ, LC_ALL='C', CARGO_TARGET_DIR=str(args.target_dir.resolve()))
 
     def save():
         with (output / 'receipt.json').open('w') as destination:

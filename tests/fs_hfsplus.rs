@@ -10,6 +10,192 @@ use virtdisk::ReadAt;
 #[path = "fixtures/hfsplus_clean.rs"]
 mod fixture;
 use fixture::*;
+
+#[test]
+fn public_builder_charges_retained_name_capacity_before_inventory() {
+    use partmgr::{
+        fs_copy::{CopyLimits, CopyNamePolicy},
+        fs_hfsplus_builder::*,
+    };
+    let source_resources = resources();
+    let volume = HfsPlusVolume::open(
+        Arc::new(Source::new(hfsplus_seed(false))),
+        limits(),
+        &source_resources,
+    )
+    .unwrap();
+    let tree =
+        Arc::new(HfsPlusTreeSource::inventory(volume, audit_limits(), &source_resources).unwrap());
+    let mut name = Vec::with_capacity(1 << 20);
+    name.extend("Name".encode_utf16());
+    let r = Resources {
+        memory: Budget::new(1 << 20),
+        cancellation: Cancellation::default(),
+    };
+    let result = HfsPlusBuildPlan::prepare(
+        tree.clone(),
+        HfsPlusBuildOptions {
+            allocation_block_bytes: 4096,
+            blocks: 256,
+            case: HfsPlusBuildCase::AsciiFold,
+            volume_name: name,
+            limits: CopyLimits {
+                objects: 8,
+                pages: 16,
+                page_entries: 1,
+            },
+            names: CopyNamePolicy::StrictUtf8,
+            metadata: HfsPlusBuildMetadata::ContentOnlyDefaults,
+        },
+        &r,
+    );
+    assert!(matches!(result, Err(ref e) if e.kind == ErrorKind::BudgetExhausted));
+    assert_eq!(r.memory.used(), 0);
+    drop(tree);
+    assert_eq!(source_resources.memory.used(), 0);
+}
+
+#[test]
+fn public_fresh_builder_native_forks_metadata_short_writes_and_staging_failures() {
+    use partmgr::{
+        fs_copy::{CopyLimits, CopyNamePolicy},
+        fs_hfsplus_builder::*,
+        storage::Storage,
+    };
+    struct Target {
+        bytes: Vec<u8>,
+        writes: usize,
+        fail: bool,
+        flushes: usize,
+    }
+    impl Storage for Target {
+        fn len(&self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            out.copy_from_slice(&self.bytes[at as usize..at as usize + out.len()]);
+            Ok(())
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            self.writes += 1;
+            if self.fail {
+                return Err(io::Error::from_raw_os_error(5));
+            }
+            let n = bytes.len().min(997);
+            self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
+    for binary in [false, true] {
+        for block in [512, 4096] {
+            for preserve in [false, true] {
+                let r = resources();
+                let source = Arc::new(Source::new(hfsplus_seed(binary)));
+                let volume = HfsPlusVolume::open(source.clone(), limits(), &r).unwrap();
+                let tree =
+                    Arc::new(HfsPlusTreeSource::inventory(volume, audit_limits(), &r).unwrap());
+                let plan = HfsPlusBuildPlan::prepare(
+                    tree.clone(),
+                    HfsPlusBuildOptions {
+                        allocation_block_bytes: block,
+                        blocks: (1 << 20) / block,
+                        case: if binary {
+                            HfsPlusBuildCase::BinaryUtf16
+                        } else {
+                            HfsPlusBuildCase::AsciiFold
+                        },
+                        volume_name: "PublicCopy".encode_utf16().collect(),
+                        limits: CopyLimits {
+                            objects: 8,
+                            pages: 16,
+                            page_entries: 1,
+                        },
+                        names: CopyNamePolicy::StrictUtf8,
+                        metadata: if preserve {
+                            HfsPlusBuildMetadata::NativeHfsCatalogFields
+                        } else {
+                            HfsPlusBuildMetadata::ContentOnlyDefaults
+                        },
+                    },
+                    &r,
+                )
+                .unwrap();
+                assert_eq!(plan.image_bytes(), 1 << 20);
+                assert_eq!(plan.metadata_outcomes().len(), 40);
+                assert_eq!(
+                    plan.metadata_outcomes()
+                        .iter()
+                        .filter(|o| matches!(o.decision, Preservation::Preserve))
+                        .count(),
+                    if preserve { 20 } else { 0 }
+                );
+                let mut target = Target {
+                    bytes: vec![0x55; 1 << 20],
+                    writes: 0,
+                    fail: false,
+                    flushes: 0,
+                };
+                assert_eq!(plan.emit(&mut target, &r).unwrap(), 1 << 20);
+                assert_eq!(target.flushes, 0);
+                assert!(target.writes > 1000);
+                let copy =
+                    HfsPlusVolume::open(Arc::new(Source::new(target.bytes.clone())), limits(), &r)
+                        .unwrap();
+                let audit = audit_hfsplus(&copy, audit_limits(), &r).unwrap();
+                assert!(audit.is_clean(), "{:?}", audit.findings());
+                for path in [
+                    vec![],
+                    vec![NativeName::Utf16(native_name(binary))],
+                    vec![NativeName::Utf16("Dir".encode_utf16().collect())],
+                    vec![
+                        NativeName::Utf16("Dir".encode_utf16().collect()),
+                        NativeName::Utf16("child".encode_utf16().collect()),
+                    ],
+                ] {
+                    let original = tree.volume().lookup(&path, &r).unwrap();
+                    let copied = copy.lookup(&path, &r).unwrap();
+                    let old = tree.metadata(&original, &r).unwrap();
+                    let new = copy.metadata(&copied, &r).unwrap();
+                    if preserve {
+                        assert_eq!(old.get().owner, new.get().owner);
+                        assert_eq!(old.get().mode, new.get().mode);
+                        assert_eq!(old.get().created, new.get().created);
+                        assert_eq!(old.get().modified, new.get().modified);
+                        assert_eq!(old.get().accessed, new.get().accessed);
+                    }
+                    if matches!(path.last(), Some(NativeName::Utf16(name)) if name == &native_name(binary))
+                        || path.len() == 2
+                    {
+                        for kind in [StreamKind::Data, StreamKind::ResourceFork] {
+                            let a = tree.open_stream(&original, &kind, &r).unwrap();
+                            let b = copy.open_fork(&copied, &kind, &r).unwrap();
+                            assert_eq!(a.len(), b.len());
+                            let mut expected = vec![0; a.len() as usize];
+                            let mut actual = vec![0; b.len() as usize];
+                            assert_eq!(a.read_at(0, &mut expected, &r).unwrap(), expected.len());
+                            assert_eq!(b.read_at(0, &mut actual, &r).unwrap(), actual.len());
+                            assert_eq!(expected, actual);
+                        }
+                    }
+                }
+                target.bytes.pop();
+                target.writes = 0;
+                assert!(plan.emit(&mut target, &r).is_err());
+                assert_eq!(target.writes, 0);
+                target.bytes.push(0);
+                target.fail = true;
+                let error = plan.emit(&mut target, &r).unwrap_err();
+                assert!(std::error::Error::source(&error).is_some());
+                drop((audit, copy, plan, tree));
+                assert_eq!(r.memory.used(), 0);
+            }
+        }
+    }
+}
 struct Source {
     bytes: Mutex<Vec<u8>>,
     length: AtomicU64,
@@ -371,6 +557,10 @@ fn native_hfsprogs_tsk_catalog_forks_and_unchanged_validation() {
             let key = usize::from(u16::from_be_bytes(record[..2].try_into().unwrap())) + 2;
             if u16::from_be_bytes(record[key..key + 2].try_into().unwrap()) == 1 {
                 p32(&mut record, key + 4, 2);
+                if binary {
+                    p16(&mut record, key + 2, 0x10);
+                    p32(&mut record, key + 84, 1);
+                }
             }
             records.push(record);
         }
@@ -422,6 +612,10 @@ fn native_hfsprogs_tsk_catalog_forks_and_unchanged_validation() {
                 thread(17, &"inside".encode_utf16().collect::<Vec<_>>(), false),
             ),
         ] {
+            let mut body = body;
+            if binary && u16::from_be_bytes(body[..2].try_into().unwrap()) == 1 {
+                p16(&mut body, 2, 0x10);
+            }
             let mut record = catalog_key(parent, &name.encode_utf16().collect::<Vec<_>>());
             record.extend_from_slice(&body);
             records.push(record);
@@ -607,4 +801,1221 @@ fn comparison_is_read_from_hfsx_catalog_and_caps_fail_with_refunds() {
             .kind,
         ErrorKind::Unsupported
     );
+}
+
+#[test]
+fn reserved_file_thread_flag_in_folder_record_rejects_and_refunds() {
+    for binary in [false, true] {
+        let r = resources();
+        let mut image = hfsplus_seed(binary);
+        let record = 6 * 4096 + 14;
+        let key_bytes = usize::from(u16::from_be_bytes(
+            image[record..record + 2].try_into().unwrap(),
+        )) + 2;
+        let flags = record + key_bytes + 2;
+        let old = u16::from_be_bytes(image[flags..flags + 2].try_into().unwrap());
+        p16(&mut image, flags, old | 2);
+        let error = match HfsPlusVolume::open(Arc::new(Source::new(image)), limits(), &r) {
+            Ok(_) => panic!("reserved folder flag accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind, ErrorKind::InvalidData);
+        assert_eq!(r.memory.used(), 0);
+    }
+}
+
+#[test]
+fn public_owned_range_commit_stale_plan_and_cold_recovery() {
+    use partmgr::{
+        fs_hfsplus::edit::*,
+        fs_undo::{UndoBinding, UndoLimits, UndoState},
+        storage::Storage,
+    };
+    struct Memory {
+        bytes: Vec<u8>,
+        fail: bool,
+        writes: usize,
+        flushes: usize,
+    }
+    impl Storage for Memory {
+        fn len(&self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            let at = at as usize;
+            out.copy_from_slice(
+                self.bytes
+                    .get(at..at + out.len())
+                    .ok_or(io::ErrorKind::UnexpectedEof)?,
+            );
+            Ok(())
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            if self.fail && (28 * 4096..28 * 4096 + 23).contains(&at) {
+                return Err(io::Error::from_raw_os_error(5));
+            }
+            let n = bytes.len().min(3);
+            self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
+            self.writes += 1;
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
+    let config = HfsPlusEditLimits {
+        pages: 256,
+        attempts: 257,
+        work: 1 << 36,
+        range_bytes: 1 << 16,
+        read: limits(),
+        audit: audit_limits(),
+        undo: UndoLimits {
+            patches: 16,
+            body_bytes: 1 << 15,
+        },
+    };
+    let binding = UndoBinding {
+        volume: [0x55; 32],
+        generation: 1,
+        transaction: [0x77; 16],
+    };
+    for binary in [false, true] {
+        for fail in [false, true] {
+            let r = resources();
+            let original = hfsplus_seed(binary);
+            let path = [NativeName::Utf16(native_name(binary))];
+            let mut session = HfsPlusEditSession::open(
+                Memory {
+                    bytes: original.clone(),
+                    fail,
+                    writes: 0,
+                    flushes: 0,
+                },
+                config,
+                &r,
+            )
+            .unwrap();
+            let plan = session
+                .plan_range(&path, &StreamKind::Data, 32760, &[0x5a; 31], &r)
+                .unwrap();
+            let stale = session
+                .plan_range(&path, &StreamKind::ResourceFork, 0, b"x", &r)
+                .unwrap();
+            let mut journal = Memory {
+                bytes: vec![0; 1 << 16],
+                fail: false,
+                writes: 0,
+                flushes: 0,
+            };
+            let result = session.commit_range(plan, &mut journal, binding, &r);
+            if fail {
+                assert!(result.unwrap_err().recovery_required);
+                assert!(session.needs_recovery());
+                assert!(
+                    session
+                        .plan_range(&path, &StreamKind::Data, 0, b"x", &r)
+                        .is_err()
+                );
+                drop(stale);
+                let mut target = session.into_storage();
+                target.fail = false;
+                assert_eq!(
+                    recover_range(
+                        &mut target,
+                        &mut journal,
+                        HfsPlusRecoverySelection {
+                            path: &path,
+                            kind: &StreamKind::Data,
+                            offset: 32760,
+                            length: 31,
+                            binding
+                        },
+                        config,
+                        &r
+                    )
+                    .unwrap()
+                    .state,
+                    UndoState::RolledBack
+                );
+                assert_eq!(target.bytes, original);
+                // A recovered target must pass a fresh owned preparation.
+                drop(HfsPlusEditSession::open(target, config, &r).unwrap());
+            } else {
+                assert_eq!(result.unwrap().state, UndoState::Committed);
+                assert!(!session.needs_recovery());
+                let counts = (journal.writes, journal.flushes);
+                assert_eq!(
+                    session
+                        .commit_range(stale, &mut journal, binding, &r)
+                        .unwrap_err()
+                        .source
+                        .kind,
+                    ErrorKind::StalePlan
+                );
+                assert_eq!(counts, (journal.writes, journal.flushes));
+                let resource = session
+                    .plan_range(&path, &StreamKind::ResourceFork, 1, b"abc", &r)
+                    .unwrap();
+                let mut next_journal = Memory {
+                    bytes: vec![0; 1 << 16],
+                    fail: false,
+                    writes: 0,
+                    flushes: 0,
+                };
+                let next_binding = UndoBinding {
+                    transaction: [0x78; 16],
+                    ..binding
+                };
+                assert_eq!(
+                    session
+                        .commit_range(resource, &mut next_journal, next_binding, &r)
+                        .unwrap()
+                        .state,
+                    UndoState::Committed
+                );
+                let target = session.into_storage();
+                let mut expected = original;
+                expected[32 * 4096 + 1..32 * 4096 + 4].copy_from_slice(b"abc");
+                expected[26 * 4096 + 4088..27 * 4096].fill(0x5a);
+                expected[28 * 4096..28 * 4096 + 23].fill(0x5a);
+                assert_eq!(target.bytes, expected);
+                assert_eq!(target.flushes, 6);
+            }
+            assert_eq!(r.memory.used(), 0);
+        }
+    }
+}
+
+#[test]
+fn public_resize_both_forks_and_cold_recovery() {
+    use partmgr::{
+        fs_hfsplus::edit::*,
+        fs_undo::{UndoBinding, UndoLimits, UndoState},
+        storage::Storage,
+    };
+    struct Memory {
+        bytes: Vec<u8>,
+        stop: bool,
+        writes: usize,
+    }
+    impl Storage for Memory {
+        fn len(&self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            out.copy_from_slice(
+                self.bytes
+                    .get(at as usize..at as usize + out.len())
+                    .ok_or(io::ErrorKind::UnexpectedEof)?,
+            );
+            Ok(())
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            let n = bytes.len().min(997);
+            self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
+            self.writes += 1;
+            if self.stop && at == 4096 {
+                return Err(io::Error::from_raw_os_error(5));
+            }
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let config = HfsPlusEditLimits {
+        pages: 256,
+        attempts: 257,
+        work: 1 << 36,
+        range_bytes: 1 << 20,
+        read: limits(),
+        audit: audit_limits(),
+        undo: UndoLimits {
+            patches: 256,
+            body_bytes: 1 << 19,
+        },
+    };
+    let binding = UndoBinding {
+        volume: [0x55; 32],
+        generation: 1,
+        transaction: [0x77; 16],
+    };
+    for binary in [false, true] {
+        for kind in [StreamKind::Data, StreamKind::ResourceFork] {
+            for length in [0, 7, 4097, 70000] {
+                for stop in [false, true] {
+                    let r = resources();
+                    let original = hfsplus_seed(binary);
+                    let path = [NativeName::Utf16(native_name(binary))];
+                    let original_volume =
+                        HfsPlusVolume::open(Arc::new(Source::new(original.clone())), limits(), &r)
+                            .unwrap();
+                    let id = original_volume.lookup(&path, &r).unwrap();
+                    let old = original_volume.open_fork(&id, &kind, &r).unwrap();
+                    let mut expected = vec![0; length as usize];
+                    let retained = old.len().min(length) as usize;
+                    let mut done = 0;
+                    while done < retained {
+                        let n = old
+                            .read_at(done as u64, &mut expected[done..retained], &r)
+                            .unwrap();
+                        assert!(n > 0);
+                        done += n;
+                    }
+                    drop(old);
+                    drop(original_volume);
+                    let overlay: &[u8] = if length >= 7 { b"XYZ" } else { b"" };
+                    let offset = if overlay.is_empty() { 0 } else { 3 };
+                    expected[offset as usize..offset as usize + overlay.len()]
+                        .copy_from_slice(overlay);
+                    let request = || HfsPlusResizeRequest {
+                        path: &path,
+                        kind: &kind,
+                        length,
+                        offset,
+                        replacement: overlay,
+                    };
+                    let session = HfsPlusEditSession::open(
+                        Memory {
+                            bytes: original.clone(),
+                            stop,
+                            writes: 0,
+                        },
+                        config,
+                        &r,
+                    )
+                    .unwrap();
+                    let mut journal = Memory {
+                        bytes: vec![0; 1 << 20],
+                        stop: false,
+                        writes: 0,
+                    };
+                    let stale = session.plan_range(&path, &kind, 0, b"x", &r).unwrap();
+                    let result = session.resize(request(), &mut journal, binding, &r);
+                    let mut target = match result {
+                        Ok(mut ready) => {
+                            assert!(!stop);
+                            let mut untouched = Memory {
+                                bytes: vec![0; 1 << 20],
+                                stop: false,
+                                writes: 0,
+                            };
+                            let error = ready
+                                .commit_range(stale, &mut untouched, binding, &r)
+                                .unwrap_err();
+                            assert_eq!(error.source.kind, ErrorKind::StalePlan);
+                            assert!(!error.target_may_have_changed);
+                            assert_eq!(untouched.writes, 0);
+                            assert!(untouched.bytes.iter().all(|&b| b == 0));
+                            assert!(!ready.needs_recovery());
+                            if length != 0 {
+                                drop(
+                                    ready
+                                        .plan_range(&path, &kind, length - 1, b"x", &r)
+                                        .unwrap(),
+                                );
+                            }
+                            ready.into_storage()
+                        }
+                        Err(failed) => {
+                            drop(stale);
+                            assert!(stop);
+                            assert!(failed.failure.recovery_required);
+                            failed.storage
+                        }
+                    };
+                    target.stop = false;
+                    let status =
+                        recover_resize(&mut target, &mut journal, request(), binding, config, &r)
+                            .unwrap();
+                    if stop {
+                        assert_eq!(status.state, UndoState::RolledBack);
+                        assert_eq!(target.bytes, original);
+                    } else {
+                        assert_eq!(status.state, UndoState::Committed);
+                        let volume = HfsPlusVolume::open(
+                            Arc::new(Source::new(target.bytes.clone())),
+                            limits(),
+                            &r,
+                        )
+                        .unwrap();
+                        let id = volume.lookup(&path, &r).unwrap();
+                        let fork = volume.open_fork(&id, &kind, &r).unwrap();
+                        assert_eq!(fork.len(), length);
+                        let mut actual = vec![0; length as usize];
+                        let mut done = 0;
+                        while done < actual.len() {
+                            let n = fork.read_at(done as u64, &mut actual[done..], &r).unwrap();
+                            assert!(n > 0);
+                            done += n;
+                        }
+                        assert_eq!(actual, expected);
+                        drop(fork);
+                        drop(volume);
+                    }
+                    let writes = target.writes;
+                    recover_resize(&mut target, &mut journal, request(), binding, config, &r)
+                        .unwrap();
+                    assert_eq!(target.writes, writes);
+                    let reopened = HfsPlusEditSession::open(target, config, &r).unwrap();
+                    drop(reopened);
+                    assert_eq!(r.memory.used(), 0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn public_rename_files_directories_and_cold_recovery() {
+    use partmgr::{
+        fs_hfsplus::edit::*,
+        fs_undo::{UndoBinding, UndoLimits, UndoState},
+        storage::Storage,
+    };
+    struct Memory {
+        bytes: Vec<u8>,
+        stop: bool,
+        writes: usize,
+    }
+    impl Storage for Memory {
+        fn len(&self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            out.copy_from_slice(
+                self.bytes
+                    .get(at as usize..at as usize + out.len())
+                    .ok_or(io::ErrorKind::UnexpectedEof)?,
+            );
+            Ok(())
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            let n = bytes.len().min(997);
+            self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
+            self.writes += 1;
+            if self.stop && at == 4 * 4096 {
+                return Err(io::Error::from_raw_os_error(5));
+            }
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let config = HfsPlusEditLimits {
+        pages: 256,
+        attempts: 257,
+        work: 1 << 36,
+        range_bytes: 1 << 20,
+        read: limits(),
+        audit: audit_limits(),
+        undo: UndoLimits {
+            patches: 256,
+            body_bytes: 1 << 19,
+        },
+    };
+    let binding = UndoBinding {
+        volume: [0x55; 32],
+        generation: 1,
+        transaction: [0x77; 16],
+    };
+
+    for binary in [false, true] {
+        for directory in [false, true] {
+            for stop in [false, true] {
+                let r = resources();
+                let original = hfsplus_seed(binary);
+                let path = [NativeName::Utf16(if directory {
+                    "Dir".encode_utf16().collect()
+                } else {
+                    native_name(binary)
+                })];
+                let name: Vec<u16> = "Renamed".encode_utf16().collect();
+                let request = || HfsPlusRenameRequest {
+                    path: &path,
+                    name: &name,
+                };
+                let session = HfsPlusEditSession::open(
+                    Memory {
+                        bytes: original.clone(),
+                        stop,
+                        writes: 0,
+                    },
+                    config,
+                    &r,
+                )
+                .unwrap();
+                let mut journal = Memory {
+                    bytes: vec![0; 1 << 20],
+                    stop: false,
+                    writes: 0,
+                };
+                let mut target = match session.rename(request(), &mut journal, binding, &r) {
+                    Ok(ready) => {
+                        assert!(!stop);
+                        ready.into_storage()
+                    }
+                    Err(failed) => {
+                        assert!(stop, "{}", failed.failure.source);
+                        assert!(failed.failure.recovery_required);
+                        failed.storage
+                    }
+                };
+                target.stop = false;
+                let committed = target.bytes.clone();
+                let counts = (target.writes, journal.writes);
+                assert!(
+                    recover_rename(
+                        &mut target,
+                        &mut journal,
+                        HfsPlusRenameRequest {
+                            path: &path,
+                            name: &[88]
+                        },
+                        binding,
+                        config,
+                        &r
+                    )
+                    .is_err()
+                );
+                assert_eq!((target.writes, journal.writes), counts);
+                let status =
+                    recover_rename(&mut target, &mut journal, request(), binding, config, &r)
+                        .unwrap();
+                assert_eq!(
+                    status.state,
+                    if stop {
+                        UndoState::RolledBack
+                    } else {
+                        UndoState::Committed
+                    }
+                );
+                assert_eq!(
+                    target.bytes,
+                    if stop { original.clone() } else { committed }
+                );
+                let counts = (target.writes, journal.writes);
+                recover_rename(&mut target, &mut journal, request(), binding, config, &r).unwrap();
+                assert_eq!((target.writes, journal.writes), counts);
+                let volume =
+                    HfsPlusVolume::open(Arc::new(Source::new(target.bytes.clone())), limits(), &r)
+                        .unwrap();
+                let renamed = [NativeName::Utf16(name)];
+                let actual = if stop { &path } else { &renamed };
+                let id = volume.lookup(actual, &r).unwrap();
+                drop(volume.metadata(&id, &r).unwrap());
+                if directory {
+                    let child = [
+                        actual[0].clone(),
+                        NativeName::Utf16("child".encode_utf16().collect()),
+                    ];
+                    volume.lookup(&child, &r).unwrap();
+                }
+                drop(volume);
+                let ready = HfsPlusEditSession::open(target, config, &r).unwrap();
+                drop(ready);
+                assert_eq!(r.memory.used(), 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn public_move_files_directories_and_cold_recovery() {
+    use partmgr::{
+        fs_hfsplus::edit::*,
+        fs_undo::{UndoBinding, UndoLimits, UndoState},
+        storage::Storage,
+    };
+    struct Memory {
+        bytes: Vec<u8>,
+        stop: bool,
+        writes: usize,
+    }
+    impl Storage for Memory {
+        fn len(&self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            out.copy_from_slice(
+                self.bytes
+                    .get(at as usize..at as usize + out.len())
+                    .ok_or(io::ErrorKind::UnexpectedEof)?,
+            );
+            Ok(())
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            let n = bytes.len().min(997);
+            self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
+            self.writes += 1;
+            if self.stop && at == 4 * 4096 {
+                return Err(io::Error::from_raw_os_error(5));
+            }
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let config = HfsPlusEditLimits {
+        pages: 256,
+        attempts: 257,
+        work: 1 << 36,
+        range_bytes: 1 << 20,
+        read: limits(),
+        audit: audit_limits(),
+        undo: UndoLimits {
+            patches: 256,
+            body_bytes: 1 << 19,
+        },
+    };
+    let binding = UndoBinding {
+        volume: [0x55; 32],
+        generation: 1,
+        transaction: [0x77; 16],
+    };
+
+    for binary in [false, true] {
+        for directory in [false, true] {
+            for stop in [false, true] {
+                let r = resources();
+                let original = if directory {
+                    hfsplus_directory_seed(binary)
+                } else {
+                    hfsplus_seed(binary)
+                };
+                let path = [NativeName::Utf16(if directory {
+                    "Dir".encode_utf16().collect()
+                } else {
+                    native_name(binary)
+                })];
+                let name: Vec<u16> = "Renamed".encode_utf16().collect();
+                let destination = [NativeName::Utf16(
+                    if directory { "Target" } else { "Dir" }
+                        .encode_utf16()
+                        .collect(),
+                )];
+                let request = || HfsPlusMoveRequest {
+                    destination: &destination,
+                    path: &path,
+                    name: &name,
+                };
+                let session = HfsPlusEditSession::open(
+                    Memory {
+                        bytes: original.clone(),
+                        stop,
+                        writes: 0,
+                    },
+                    config,
+                    &r,
+                )
+                .unwrap();
+                let mut journal = Memory {
+                    bytes: vec![0; 1 << 20],
+                    stop: false,
+                    writes: 0,
+                };
+                let mut target = match session.move_entry(request(), &mut journal, binding, &r) {
+                    Ok(ready) => {
+                        assert!(!stop);
+                        ready.into_storage()
+                    }
+                    Err(failed) => {
+                        assert!(stop, "{}", failed.failure.source);
+                        assert!(failed.failure.recovery_required);
+                        failed.storage
+                    }
+                };
+                target.stop = false;
+                let committed = target.bytes.clone();
+                let counts = (target.writes, journal.writes);
+                assert!(
+                    recover_move(
+                        &mut target,
+                        &mut journal,
+                        HfsPlusMoveRequest {
+                            destination: &destination,
+                            path: &path,
+                            name: &[88]
+                        },
+                        binding,
+                        config,
+                        &r
+                    )
+                    .is_err()
+                );
+                assert_eq!((target.writes, journal.writes), counts);
+                let status =
+                    recover_move(&mut target, &mut journal, request(), binding, config, &r)
+                        .unwrap();
+                assert_eq!(
+                    status.state,
+                    if stop {
+                        UndoState::RolledBack
+                    } else {
+                        UndoState::Committed
+                    }
+                );
+                assert_eq!(
+                    target.bytes,
+                    if stop { original.clone() } else { committed }
+                );
+                let counts = (target.writes, journal.writes);
+                recover_move(&mut target, &mut journal, request(), binding, config, &r).unwrap();
+                assert_eq!((target.writes, journal.writes), counts);
+                let volume =
+                    HfsPlusVolume::open(Arc::new(Source::new(target.bytes.clone())), limits(), &r)
+                        .unwrap();
+                let renamed = vec![destination[0].clone(), NativeName::Utf16(name)];
+                let actual: &[NativeName] = if stop { &path } else { &renamed };
+                let id = volume.lookup(actual, &r).unwrap();
+                drop(volume.metadata(&id, &r).unwrap());
+                if directory {
+                    let mut child = actual.to_vec();
+                    child.push(NativeName::Utf16("child".encode_utf16().collect()));
+                    volume.lookup(&child, &r).unwrap();
+                }
+                drop(volume);
+                let ready = HfsPlusEditSession::open(target, config, &r).unwrap();
+                drop(ready);
+                assert_eq!(r.memory.used(), 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn public_delete_files_directories_and_cold_recovery() {
+    use partmgr::{
+        fs_hfsplus::edit::*,
+        fs_undo::{UndoBinding, UndoLimits, UndoState},
+        storage::Storage,
+    };
+    struct Memory {
+        bytes: Vec<u8>,
+        stop: bool,
+        writes: usize,
+    }
+    impl Storage for Memory {
+        fn len(&self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            out.copy_from_slice(
+                self.bytes
+                    .get(at as usize..at as usize + out.len())
+                    .ok_or(io::ErrorKind::UnexpectedEof)?,
+            );
+            Ok(())
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            let n = bytes.len().min(997);
+            self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
+            self.writes += 1;
+            if self.stop && at == 4 * 4096 {
+                return Err(io::Error::from_raw_os_error(5));
+            }
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let config = HfsPlusEditLimits {
+        pages: 256,
+        attempts: 257,
+        work: 1 << 36,
+        range_bytes: 1 << 20,
+        read: limits(),
+        audit: audit_limits(),
+        undo: UndoLimits {
+            patches: 256,
+            body_bytes: 1 << 19,
+        },
+    };
+    let binding = UndoBinding {
+        volume: [0x55; 32],
+        generation: 1,
+        transaction: [0x77; 16],
+    };
+
+    for binary in [false, true] {
+        for directory in [false, true] {
+            for stop in [false, true] {
+                let r = resources();
+                let original = if directory {
+                    hfsplus_directory_seed(binary)
+                } else {
+                    hfsplus_seed(binary)
+                };
+                let path = [NativeName::Utf16(if directory {
+                    "Target".encode_utf16().collect()
+                } else {
+                    native_name(binary)
+                })];
+                let request = || HfsPlusDeleteRequest { path: &path };
+                let session = HfsPlusEditSession::open(
+                    Memory {
+                        bytes: original.clone(),
+                        stop,
+                        writes: 0,
+                    },
+                    config,
+                    &r,
+                )
+                .unwrap();
+                let mut journal = Memory {
+                    bytes: vec![0; 1 << 20],
+                    stop: false,
+                    writes: 0,
+                };
+                let mut target = match session.delete_entry(request(), &mut journal, binding, &r) {
+                    Ok(ready) => {
+                        assert!(!stop);
+                        ready.into_storage()
+                    }
+                    Err(failed) => {
+                        assert!(stop, "{}", failed.failure.source);
+                        assert!(failed.failure.recovery_required);
+                        failed.storage
+                    }
+                };
+                target.stop = false;
+                let committed = target.bytes.clone();
+                let counts = (target.writes, journal.writes);
+                let wrong = [NativeName::Utf16("Dir".encode_utf16().collect())];
+                assert!(
+                    recover_delete(
+                        &mut target,
+                        &mut journal,
+                        HfsPlusDeleteRequest { path: &wrong },
+                        binding,
+                        config,
+                        &r
+                    )
+                    .is_err()
+                );
+                assert_eq!((target.writes, journal.writes), counts);
+                let status =
+                    recover_delete(&mut target, &mut journal, request(), binding, config, &r)
+                        .unwrap();
+                assert_eq!(
+                    status.state,
+                    if stop {
+                        UndoState::RolledBack
+                    } else {
+                        UndoState::Committed
+                    }
+                );
+                assert_eq!(
+                    target.bytes,
+                    if stop { original.clone() } else { committed }
+                );
+                let counts = (target.writes, journal.writes);
+                recover_delete(&mut target, &mut journal, request(), binding, config, &r).unwrap();
+                assert_eq!((target.writes, journal.writes), counts);
+                let volume =
+                    HfsPlusVolume::open(Arc::new(Source::new(target.bytes.clone())), limits(), &r)
+                        .unwrap();
+                assert_eq!(volume.lookup(&path, &r).is_ok(), stop);
+                let child = [
+                    NativeName::Utf16("Dir".encode_utf16().collect()),
+                    NativeName::Utf16("child".encode_utf16().collect()),
+                ];
+                volume.lookup(&child, &r).unwrap();
+                let old_free = u32::from_be_bytes(original[1072..1076].try_into().unwrap());
+                assert_eq!(
+                    u32::from_be_bytes(target.bytes[1072..1076].try_into().unwrap()),
+                    old_free + if !stop && !directory { 10 } else { 0 }
+                );
+                drop(volume);
+                if !directory {
+                    for block in [12, 14, 16, 18, 20, 22, 24, 26, 28, 32] {
+                        let at = block * 4096;
+                        assert_eq!(&target.bytes[at..at + 4096], &original[at..at + 4096]);
+                    }
+                }
+                let ready = HfsPlusEditSession::open(target, config, &r).unwrap();
+                drop(ready);
+                assert_eq!(r.memory.used(), 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn public_create_files_directories_and_cold_recovery() {
+    use partmgr::{
+        fs_hfsplus::edit::*,
+        fs_undo::{UndoBinding, UndoLimits, UndoState},
+        storage::Storage,
+    };
+    struct Memory {
+        bytes: Vec<u8>,
+        stop: bool,
+        writes: usize,
+    }
+    impl Storage for Memory {
+        fn len(&self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            out.copy_from_slice(
+                self.bytes
+                    .get(at as usize..at as usize + out.len())
+                    .ok_or(io::ErrorKind::UnexpectedEof)?,
+            );
+            Ok(())
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            let n = bytes.len().min(997);
+            self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
+            self.writes += 1;
+            if self.stop && at == 4 * 4096 {
+                return Err(io::Error::from_raw_os_error(5));
+            }
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let config = HfsPlusEditLimits {
+        pages: 256,
+        attempts: 257,
+        work: 1 << 36,
+        range_bytes: 1 << 20,
+        read: limits(),
+        audit: audit_limits(),
+        undo: UndoLimits {
+            patches: 256,
+            body_bytes: 1 << 19,
+        },
+    };
+    let binding = UndoBinding {
+        volume: [0x55; 32],
+        generation: 1,
+        transaction: [0x77; 16],
+    };
+
+    for binary in [false, true] {
+        for directory in [false, true] {
+            for stop in [false, true] {
+                let r = resources();
+                let original = hfsplus_seed(binary);
+                let parent = [NativeName::Utf16("Dir".encode_utf16().collect())];
+                let name: Vec<u16> = "Born".encode_utf16().collect();
+                let metadata = HfsPlusCreateMetadata {
+                    uid: 123,
+                    gid: 456,
+                    permissions: 0o750,
+                    created: 17,
+                    modified: 19,
+                    attributes_modified: 23,
+                    accessed: 29,
+                    backup: 31,
+                };
+                let request = || HfsPlusCreateRequest {
+                    parent: &parent,
+                    name: &name,
+                    directory,
+                    metadata: Some(&metadata),
+                };
+                let session = HfsPlusEditSession::open(
+                    Memory {
+                        bytes: original.clone(),
+                        stop,
+                        writes: 0,
+                    },
+                    config,
+                    &r,
+                )
+                .unwrap();
+                let mut journal = Memory {
+                    bytes: vec![0; 1 << 20],
+                    stop: false,
+                    writes: 0,
+                };
+                let mut target = match session.create_entry(request(), &mut journal, binding, &r) {
+                    Ok(ready) => {
+                        assert!(!stop);
+                        ready.into_storage()
+                    }
+                    Err(failure) => {
+                        assert!(stop, "{}", failure.failure.source);
+                        assert!(failure.failure.recovery_required);
+                        failure.storage
+                    }
+                };
+                target.stop = false;
+                let expected = target.bytes.clone();
+                let before = (target.writes, journal.writes);
+                assert!(
+                    recover_create(
+                        &mut target,
+                        &mut journal,
+                        HfsPlusCreateRequest {
+                            parent: &parent,
+                            name: &name,
+                            directory: !directory,
+                            metadata: Some(&metadata),
+                        },
+                        binding,
+                        config,
+                        &r
+                    )
+                    .is_err()
+                );
+                assert_eq!((target.writes, journal.writes), before);
+                let status =
+                    recover_create(&mut target, &mut journal, request(), binding, config, &r)
+                        .unwrap();
+                assert_eq!(
+                    status.state,
+                    if stop {
+                        UndoState::RolledBack
+                    } else {
+                        UndoState::Committed
+                    }
+                );
+                assert_eq!(target.bytes, if stop { original.clone() } else { expected });
+                let before = (target.writes, journal.writes);
+                recover_create(&mut target, &mut journal, request(), binding, config, &r).unwrap();
+                assert_eq!((target.writes, journal.writes), before);
+                let volume =
+                    HfsPlusVolume::open(Arc::new(Source::new(target.bytes.clone())), limits(), &r)
+                        .unwrap();
+                let path = [parent[0].clone(), NativeName::Utf16(name)];
+                assert_eq!(volume.lookup(&path, &r).is_ok(), !stop);
+                if !stop {
+                    let id = volume.lookup(&path, &r).unwrap();
+                    let object = volume.metadata(&id, &r).unwrap();
+                    let MetadataField::Known(owner) = &object.get().owner else {
+                        panic!("missing owner");
+                    };
+                    assert_eq!(
+                        owner.as_slice(),
+                        [123u32.to_be_bytes(), 456u32.to_be_bytes()].concat()
+                    );
+                    let MetadataField::Known(mode) = object.get().mode else {
+                        panic!("missing mode");
+                    };
+                    assert_eq!(mode & 0o7777, 0o750);
+                    let MetadataField::Known(date) = &object.get().created else {
+                        panic!("missing creation date");
+                    };
+                    assert_eq!(date.ticks, 17);
+                }
+
+                let child = [
+                    parent[0].clone(),
+                    NativeName::Utf16("child".encode_utf16().collect()),
+                ];
+                volume.lookup(&child, &r).unwrap();
+                assert_eq!(&target.bytes[1072..1076], &original[1072..1076]);
+                drop(volume);
+                drop(HfsPlusEditSession::open(target, config, &r).unwrap());
+                assert_eq!(r.memory.used(), 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn public_populated_create_both_forks_and_cold_recovery() {
+    use partmgr::{
+        fs_hfsplus::edit::*,
+        fs_undo::{UndoBinding, UndoLimits, UndoState},
+        storage::Storage,
+    };
+    struct Memory {
+        bytes: Vec<u8>,
+        stop: bool,
+        writes: usize,
+    }
+    impl Storage for Memory {
+        fn len(&self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            out.copy_from_slice(
+                self.bytes
+                    .get(at as usize..at as usize + out.len())
+                    .ok_or(io::ErrorKind::UnexpectedEof)?,
+            );
+            Ok(())
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            let n = bytes.len().min(997);
+            self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
+            self.writes += 1;
+            if self.stop && at == 1056 {
+                return Err(io::Error::from_raw_os_error(5));
+            }
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let config = HfsPlusEditLimits {
+        pages: 256,
+        attempts: 257,
+        work: 1 << 36,
+        range_bytes: 1 << 20,
+        read: limits(),
+        audit: audit_limits(),
+        undo: UndoLimits {
+            patches: 256,
+            body_bytes: 1 << 19,
+        },
+    };
+    let binding = UndoBinding {
+        volume: [0x55; 32],
+        generation: 1,
+        transaction: [0x77; 16],
+    };
+
+    for binary in [false, true] {
+        {
+            for stop in [false, true] {
+                let r = resources();
+                let original = hfsplus_seed(binary);
+                let parent = [NativeName::Utf16("Dir".encode_utf16().collect())];
+                let name: Vec<u16> = "Born".encode_utf16().collect();
+                let metadata = HfsPlusCreateMetadata {
+                    uid: 123,
+                    gid: 456,
+                    permissions: 0o750,
+                    created: 17,
+                    modified: 19,
+                    attributes_modified: 23,
+                    accessed: 29,
+                    backup: 31,
+                };
+                let request = || HfsPlusCreateFileRequest {
+                    parent: &parent,
+                    name: &name,
+                    data: b"born DATA",
+                    resource: b"born RESOURCE",
+                    metadata: Some(&metadata),
+                };
+                let session = HfsPlusEditSession::open(
+                    Memory {
+                        bytes: original.clone(),
+                        stop,
+                        writes: 0,
+                    },
+                    config,
+                    &r,
+                )
+                .unwrap();
+                let mut journal = Memory {
+                    bytes: vec![0; 1 << 20],
+                    stop: false,
+                    writes: 0,
+                };
+                let mut target = match session.create_file(request(), &mut journal, binding, &r) {
+                    Ok(ready) => {
+                        assert!(!stop);
+                        ready.into_storage()
+                    }
+                    Err(failure) => {
+                        assert!(stop, "{}", failure.failure.source);
+                        assert!(failure.failure.recovery_required);
+                        failure.storage
+                    }
+                };
+                target.stop = false;
+                let expected = target.bytes.clone();
+                let before = (target.writes, journal.writes);
+                assert!(
+                    recover_create_file(
+                        &mut target,
+                        &mut journal,
+                        HfsPlusCreateFileRequest {
+                            parent: &parent,
+                            name: &name,
+                            data: b"wrong DATA",
+                            resource: b"born RESOURCE",
+                            metadata: Some(&metadata),
+                        },
+                        binding,
+                        config,
+                        &r
+                    )
+                    .is_err()
+                );
+                assert_eq!((target.writes, journal.writes), before);
+                let status =
+                    recover_create_file(&mut target, &mut journal, request(), binding, config, &r)
+                        .unwrap();
+                assert_eq!(
+                    status.state,
+                    if stop {
+                        UndoState::RolledBack
+                    } else {
+                        UndoState::Committed
+                    }
+                );
+                assert_eq!(target.bytes, if stop { original.clone() } else { expected });
+                let before = (target.writes, journal.writes);
+                recover_create_file(&mut target, &mut journal, request(), binding, config, &r)
+                    .unwrap();
+                assert_eq!((target.writes, journal.writes), before);
+                let volume =
+                    HfsPlusVolume::open(Arc::new(Source::new(target.bytes.clone())), limits(), &r)
+                        .unwrap();
+                let path = [parent[0].clone(), NativeName::Utf16(name)];
+                assert_eq!(volume.lookup(&path, &r).is_ok(), !stop);
+                if !stop {
+                    let id = volume.lookup(&path, &r).unwrap();
+                    for (kind, expected) in [
+                        (StreamKind::Data, b"born DATA".as_slice()),
+                        (StreamKind::ResourceFork, b"born RESOURCE".as_slice()),
+                    ] {
+                        let file = volume.open_fork(&id, &kind, &r).unwrap();
+                        let mut actual = vec![0; expected.len()];
+                        assert_eq!(file.read_at(0, &mut actual, &r).unwrap(), expected.len());
+                        assert_eq!(actual, expected);
+                        assert_eq!(file.read_at(file.len(), &mut [0; 1], &r).unwrap(), 0);
+                    }
+
+                    let object = volume.metadata(&id, &r).unwrap();
+                    let MetadataField::Known(owner) = &object.get().owner else {
+                        panic!("missing owner");
+                    };
+                    assert_eq!(
+                        owner.as_slice(),
+                        [123u32.to_be_bytes(), 456u32.to_be_bytes()].concat()
+                    );
+                    let MetadataField::Known(mode) = object.get().mode else {
+                        panic!("missing mode");
+                    };
+                    assert_eq!(mode & 0o7777, 0o750);
+                    let MetadataField::Known(date) = &object.get().created else {
+                        panic!("missing creation date");
+                    };
+                    assert_eq!(date.ticks, 17);
+                }
+
+                let child = [
+                    parent[0].clone(),
+                    NativeName::Utf16("child".encode_utf16().collect()),
+                ];
+                volume.lookup(&child, &r).unwrap();
+                let old_free = u32::from_be_bytes(original[1072..1076].try_into().unwrap());
+                assert_eq!(
+                    u32::from_be_bytes(target.bytes[1072..1076].try_into().unwrap()),
+                    old_free - if stop { 0 } else { 2 }
+                );
+                drop(volume);
+                drop(HfsPlusEditSession::open(target, config, &r).unwrap());
+                assert_eq!(r.memory.used(), 0);
+            }
+        }
+    }
 }

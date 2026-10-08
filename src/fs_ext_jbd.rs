@@ -4,6 +4,10 @@ use crate::fs_core::{Error, ErrorKind, Reservation, Resources};
 use std::{cell::Cell, io};
 #[path = "fs_ext_jbd_bootstrap.rs"]
 mod bootstrap;
+#[path = "fs_ext_jbd_legacy.rs"]
+mod legacy;
+#[path = "fs_ext_jbd_modern_plan.rs"]
+mod modern_plan;
 #[cfg(all(test, unix))]
 #[path = "fs_ext_jbd_native.rs"]
 mod native;
@@ -55,7 +59,7 @@ impl<'a> super::ExtDecoder<&'a dyn crate::storage::Storage> {
         scope: u128,
         resources: &Resources,
     ) -> io::Result<(Self, NativeJournalProof)> {
-        let decoder = Self::open_reader(storage, scope, resources, true)?;
+        let decoder = Self::open_owned_profile_qualification(storage, scope, resources)?;
         if !decoder.geometry.has_journal {
             return Err(unsupported(
                 "native ext editor requires internal JBD2 journal",
@@ -70,7 +74,8 @@ impl<'a> super::ExtDecoder<&'a dyn crate::storage::Storage> {
         let checksums = match be32(&header, 40) & 0x18 {
             8 => Checksums::V2,
             16 => Checksums::V3,
-            _ => return Err(unsupported("native editor requires JBD2 checksum-v2/v3")),
+            0 => Checksums::None,
+            _ => return Err(unsupported("native editor JBD2 checksum profile")),
         };
         let geometry = Geometry {
             block_bytes: decoder.geometry.block_size as usize,
@@ -174,10 +179,21 @@ fn header(bytes: &mut [u8], kind: u32, sequence: u32) {
     put32(bytes, 8, sequence);
 }
 fn metadata_checksum(geometry: &Geometry, bytes: &mut [u8], at: usize) {
+    if matches!(geometry.checksums, Checksums::None) {
+        return;
+    }
     put32(bytes, at, 0);
     let checksum = crc32c(geometry.seeded(), bytes);
     put32(bytes, at, checksum);
 }
+fn journal_checksum(geometry: &Geometry, bytes: &mut [u8; 1024]) {
+    if !matches!(geometry.checksums, Checksums::None) {
+        put32(bytes, 252, 0);
+        let sum = crc32c(!0, bytes);
+        put32(bytes, 252, sum);
+    }
+}
+
 const CAPSULE_MAGIC: &[u8; 16] = b"PMGRJBD2PREPARE1";
 pub(crate) struct Preparation {
     pub(crate) superblock: [u8; MAX_BLOCK],
@@ -187,10 +203,10 @@ pub(crate) struct Preparation {
 }
 fn original_journal(geometry: &Geometry, bytes: &[u8; 1024]) -> io::Result<()> {
     let features = be32(bytes, 40);
-    let desired = if matches!(geometry.checksums, Checksums::V3) {
-        16
-    } else {
-        8
+    let desired = match geometry.checksums {
+        Checksums::None => 0,
+        Checksums::V2 => 8,
+        Checksums::V3 => 16,
     } | u32::from(geometry.revoke);
     if be32(bytes, 0) != MAGIC
         || be32(bytes, 4) != 4
@@ -207,7 +223,12 @@ fn original_journal(geometry: &Geometry, bytes: &[u8; 1024]) -> io::Result<()> {
         || bytes[48..64] != geometry.uuid
         || be32(bytes, 64) != 1
         || be32(bytes, 68) != 0
-        || bytes[80] != 4
+        || bytes[80]
+            != if matches!(geometry.checksums, Checksums::None) {
+                0
+            } else {
+                4
+            }
         || be32(bytes, 84) != 0
     {
         return Err(invalid("JBD2 preparation original header binding"));
@@ -215,7 +236,7 @@ fn original_journal(geometry: &Geometry, bytes: &[u8; 1024]) -> io::Result<()> {
     let mut checked = *bytes;
     let supplied = be32(&checked, 252);
     put32(&mut checked, 252, 0);
-    if crc32c(!0, &checked) != supplied {
+    if !matches!(geometry.checksums, Checksums::None) && crc32c(!0, &checked) != supplied {
         return Err(invalid("JBD2 preparation original header checksum"));
     }
     Ok(())
@@ -279,6 +300,7 @@ pub(crate) fn prepare(
         &mut result.blocks[2].bytes[..geometry.block_bytes],
         16,
     );
+    legacy::stamp(geometry, &mut result.blocks)?;
     Ok(result)
 }
 pub(crate) fn preparation(
@@ -327,7 +349,7 @@ pub(crate) fn preparation(
             u32::from(u16::from_be_bytes(descriptor[16..18].try_into().unwrap())),
             22,
         ),
-        Checksums::None => return Err(unsupported("JBD2 preparation requires native checksums")),
+        Checksums::None => (be32(&descriptor, 16), 0, 20),
     };
     if commit[12..16] != [0; 4]
         || (matches!(geometry.checksums, Checksums::V3) && be32(&descriptor, 20) != 0)
@@ -341,13 +363,20 @@ pub(crate) fn preparation(
         crc32c(geometry.seeded(), &geometry.sequence.to_be_bytes()),
         &data[..geometry.block_bytes],
     );
-    if (if matches!(geometry.checksums, Checksums::V2) {
-        actual & 0xffff
-    } else {
-        actual
-    }) != checksum
+    if !matches!(geometry.checksums, Checksums::None)
+        && (if matches!(geometry.checksums, Checksums::V2) {
+            actual & 0xffff
+        } else {
+            actual
+        }) != checksum
     {
         return Err(invalid("JBD2 preparation superblock data checksum"));
+    }
+    if matches!(geometry.checksums, Checksums::None) {
+        let mut integrity = legacy::Integrity::new(geometry, geometry.sequence);
+        integrity.feed(geometry.first, &descriptor[..geometry.block_bytes])?;
+        integrity.feed(second, &data[..geometry.block_bytes])?;
+        integrity.verify(geometry, &commit[..geometry.block_bytes])?;
     }
     if flags & 1 != 0 {
         if data[..4] != [0; 4] {
@@ -391,9 +420,6 @@ pub(crate) fn encode(
     mut destination: impl FnMut(u32) -> io::Result<()>,
 ) -> io::Result<EncodedTransaction> {
     geometry.check()?;
-    if matches!(geometry.checksums, Checksums::None) {
-        return Err(unsupported("native JBD2 writer requires checksum-v2/v3"));
-    }
     if input.is_empty() {
         return Err(invalid("empty native JBD2 transaction"));
     }
@@ -470,6 +496,8 @@ pub(crate) fn encode(
             if matches!(geometry.checksums, Checksums::V3) {
                 put32(&mut descriptor, at + 4, flags);
                 put32(&mut descriptor, at + 12, sum);
+            } else if matches!(geometry.checksums, Checksums::None) {
+                put32(&mut descriptor, at + 4, flags);
             } else {
                 descriptor[at + 4..at + 6].copy_from_slice(&(sum as u16).to_be_bytes());
                 descriptor[at + 6..at + 8].copy_from_slice(&(flags as u16).to_be_bytes());
@@ -507,6 +535,7 @@ pub(crate) fn encode(
         bytes: commit,
     });
     logical = geometry.next(logical);
+    legacy::stamp(geometry, &mut blocks)?;
     Ok(EncodedTransaction {
         blocks,
         next_logical: logical,
@@ -525,13 +554,26 @@ pub(crate) fn publish_log(
 ) -> io::Result<()> {
     let length = storage.len()?;
     let block_bytes = proof.geometry.block_bytes;
+    let _scratch_reservation = resources
+        .memory
+        .reserve((2 * MAX_BLOCK + 512) as u64)
+        .map_err(io::Error::other)?;
     let mut scratch = [0u8; MAX_BLOCK];
-    let write = |storage: &mut _, logical, bytes: &[u8]| -> io::Result<()> {
+    let write = |storage: &mut _, logical, inside: usize, bytes: &[u8]| -> io::Result<()> {
         resources.cancellation.check().map_err(io::Error::other)?;
         if crate::storage::Storage::len(storage)? != length {
             return Err(invalid("JBD2 target length changed"));
         }
-        let mut at = proof.physical(logical)?;
+        if inside
+            .checked_add(bytes.len())
+            .is_none_or(|end| end > block_bytes)
+        {
+            return Err(invalid("JBD2 partial log range outside block"));
+        }
+        let mut at = proof
+            .physical(logical)?
+            .checked_add(inside as u64)
+            .ok_or_else(|| invalid("JBD2 partial log offset overflow"))?;
         if at
             .checked_add(bytes.len() as u64)
             .is_none_or(|end| end > length)
@@ -568,9 +610,12 @@ pub(crate) fn publish_log(
     if preceding.is_empty() || be32(&commit.bytes, 0) != MAGIC || be32(&commit.bytes, 4) != 2 {
         return Err(invalid("JBD2 missing encoded commit"));
     }
-    // A durable stop block excludes old records beyond the new transaction.
-    write(storage, encoded.next_logical, &scratch[..block_bytes])?;
+    // Clear both the future tail and commit header before any new descriptor/data.
+    // An inactive ring may retain a valid commit with the upcoming native sequence.
+    write(storage, encoded.next_logical, 0, &scratch[..block_bytes])?;
+    write(storage, commit.logical, 0, &[0; 12])?;
     storage.flush()?;
+    verify(storage, commit.logical, &[0; 12], &mut scratch[..12])?;
     verify(
         storage,
         encoded.next_logical,
@@ -578,8 +623,10 @@ pub(crate) fn publish_log(
         &mut scratch[..block_bytes],
     )?;
     for block in preceding {
-        write(storage, block.logical, &block.bytes[..block_bytes])?;
+        write(storage, block.logical, 0, &block.bytes[..block_bytes])?;
     }
+    // The complete commit body is durable while its publication header is zero.
+    write(storage, commit.logical, 12, &commit.bytes[12..block_bytes])?;
     storage.flush()?;
     for block in preceding {
         verify(
@@ -589,7 +636,15 @@ pub(crate) fn publish_log(
             &mut scratch[..block_bytes],
         )?;
     }
-    write(storage, commit.logical, &commit.bytes[..block_bytes])?;
+    let mut unpublished = commit.bytes;
+    unpublished[..12].fill(0);
+    verify(
+        storage,
+        commit.logical,
+        &unpublished[..block_bytes],
+        &mut scratch[..block_bytes],
+    )?;
+    write(storage, commit.logical, 0, &commit.bytes[..12])?;
     storage.flush()?;
     verify(
         storage,
@@ -607,8 +662,45 @@ pub(crate) fn scan(
     maximum_records: usize,
     maximum_work: usize,
     resources: &Resources,
+    read: impl FnMut(u32, &mut [u8]) -> io::Result<()>,
+    destination: impl FnMut(u32) -> io::Result<()>,
+) -> io::Result<ReplayPlan> {
+    scan_profile(
+        geometry,
+        maximum_records,
+        maximum_work,
+        resources,
+        read,
+        destination,
+        false,
+    )
+}
+pub(crate) fn scan_owned(
+    geometry: &Geometry,
+    maximum_records: usize,
+    maximum_work: usize,
+    resources: &Resources,
+    read: impl FnMut(u32, &mut [u8]) -> io::Result<()>,
+    destination: impl FnMut(u32) -> io::Result<()>,
+) -> io::Result<ReplayPlan> {
+    scan_profile(
+        geometry,
+        maximum_records,
+        maximum_work,
+        resources,
+        read,
+        destination,
+        true,
+    )
+}
+fn scan_profile(
+    geometry: &Geometry,
+    maximum_records: usize,
+    maximum_work: usize,
+    resources: &Resources,
     mut read: impl FnMut(u32, &mut [u8]) -> io::Result<()>,
     mut destination: impl FnMut(u32) -> io::Result<()>,
+    owned_legacy: bool,
 ) -> io::Result<ReplayPlan> {
     geometry.check()?;
     resources.cancellation.check().map_err(io::Error::other)?;
@@ -642,6 +734,7 @@ pub(crate) fn scan(
         return Err(budget("JBD2 allocator exceeded reservation"));
     }
     let mut sequence = geometry.sequence;
+    let mut integrity = legacy::Integrity::new(geometry, sequence);
     let mut committed = 0;
     let mut pending_bad = false;
     let mut discarded = false;
@@ -672,6 +765,7 @@ pub(crate) fn scan(
         read(at, bytes)
     };
     while log != 0 {
+        let control_log = log;
         read_block(log, &mut control[..block_bytes])?;
         if be32(&control, 0) != MAGIC || be32(&control, 8) != sequence {
             discarded = !pending.is_empty() || !revocations.is_empty();
@@ -680,6 +774,9 @@ pub(crate) fn scan(
         log = geometry.next(log);
         match be32(&control, 4) {
             1 => {
+                if matches!(geometry.checksums, Checksums::None) && owned_legacy {
+                    integrity.feed(control_log, &control[..block_bytes])?;
+                }
                 if !geometry.metadata_valid(&mut control[..block_bytes], block_bytes - 4) {
                     discarded = true;
                     break;
@@ -704,6 +801,8 @@ pub(crate) fn scan(
                             return Err(unsupported("JBD2 high destination block"));
                         }
                         (be32(&control, at + 4), be32(&control, at + 12))
+                    } else if matches!(geometry.checksums, Checksums::None) && owned_legacy {
+                        (be32(&control, at + 4), 0)
                     } else {
                         (
                             u32::from(u16::from_be_bytes(
@@ -739,6 +838,9 @@ pub(crate) fn scan(
                         });
                     }
                     read_block(log, &mut data[..block_bytes])?;
+                    if matches!(geometry.checksums, Checksums::None) && owned_legacy {
+                        integrity.feed(log, &data[..block_bytes])?;
+                    }
                     log = geometry.next(log);
                     let actual = crc32c(
                         crc32c(geometry.seeded(), &sequence.to_be_bytes()),
@@ -766,6 +868,9 @@ pub(crate) fn scan(
                 }
             }
             5 => {
+                if matches!(geometry.checksums, Checksums::None) && owned_legacy {
+                    integrity.feed(control_log, &control[..block_bytes])?;
+                }
                 if !geometry.revoke {
                     return Err(unsupported("JBD2 revocation feature absent"));
                 }
@@ -795,6 +900,9 @@ pub(crate) fn scan(
                 }
             }
             2 => {
+                if matches!(geometry.checksums, Checksums::None) && owned_legacy {
+                    integrity.verify(geometry, &control[..block_bytes])?;
+                }
                 if !geometry.metadata_valid(&mut control[..block_bytes], 16) {
                     discarded = true;
                     break;
@@ -828,6 +936,7 @@ pub(crate) fn scan(
                 pending_bad = false;
                 committed += 1;
                 sequence = sequence.wrapping_add(1); // Native transaction IDs are modulo 2^32.
+                integrity = legacy::Integrity::new(geometry, sequence);
             }
             _ => {
                 discarded = !pending.is_empty() || !revocations.is_empty();
@@ -1098,13 +1207,13 @@ mod tests {
             assert!(encode(&geometry, &input, 1, &r, |_| Ok(())).is_err());
             assert_eq!(r.memory.used(), 0);
             geometry.checksums = Checksums::None;
+            let encoded = encode(&geometry, &input, 5000, &r, |_| Ok(())).unwrap();
             assert_eq!(
-                encode(&geometry, &input, 5000, &r, |_| Ok(()))
-                    .err()
-                    .unwrap()
-                    .kind(),
-                io::ErrorKind::Unsupported
+                encoded.blocks.last().unwrap().bytes[640..656],
+                *b"PMGRJBD2SHA256V1"
             );
+            drop(encoded);
+            assert_eq!(r.memory.used(), 0);
         }
     }
     #[test]
@@ -1262,6 +1371,9 @@ mod tests {
         let encoded = encode(&proof.geometry, &input, 100, &r, |_| Ok(())).unwrap();
         let mut original = vec![0xa5; 20 * 1024];
         original[4096..16 * 1024].fill(0);
+        let commit = encoded.blocks.last().unwrap();
+        let physical = proof.physical(commit.logical).unwrap() as usize;
+        original[physical..physical + 1024].copy_from_slice(&commit.bytes[..1024]);
         let make = |cut, immediate, persist_failed_flush| Fault {
             visible: original.clone(),
             durable: original.clone(),

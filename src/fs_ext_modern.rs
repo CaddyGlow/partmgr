@@ -1,12 +1,12 @@
 //! Bounded source-independent ext4 geometry and global metadata exclusions.
 //! Metadata geometry proof is retained by immutable decoding; full inode ownership is audited separately.
-use super::{ExtDecodeRead, invalid, metadata::MetadataChecksums, u16le, u32le, unsupported};
+use super::{ExtDecodeRead, integrity::Integrity, invalid, u16le, u32le, unsupported};
 use crate::fs_core::{Error, ErrorKind, Reservation, Resources};
 use std::io;
 
 const MAX_GROUPS: usize = 1024;
 impl<R: ExtDecodeRead> super::ExtDecoder<R> {
-    fn validate_modern_orphan(&self, resources: &Resources) -> io::Result<()> {
+    pub(crate) fn validate_modern_orphan(&self, resources: &Resources) -> io::Result<()> {
         let proof = self.geometry.modern.as_ref().unwrap();
         if proof.orphan_inode == 0 {
             return Ok(());
@@ -17,7 +17,7 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
             || u16le(&inode.raw, 26) != 1
             || inode.uid() != 0
             || inode.gid() != 0
-            || u32le(&inode.raw, 32) != 0x80000
+            || !matches!(u32le(&inode.raw, 32), 0 | 0x80000)
             || u32le(&inode.raw, 104) != 0
             || inode.length == 0
             || !inode.length.is_multiple_of(bs)
@@ -38,6 +38,27 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
                     "ext orphan file block ceiling",
                 ))
             })? as usize;
+        if u32le(&inode.raw, 32) == 0 {
+            let decoded = self.file_map(inode.number, cap, resources, false)?;
+            let mut buffer = [0; 4096];
+            for extent in &decoded.extents {
+                resources.cancellation.check().map_err(io::Error::other)?;
+                let super::ExtentKind::Data(offset) = extent.kind else {
+                    return Err(invalid("ext orphan file hole mapping"));
+                };
+                if extent.length != bs || !offset.is_multiple_of(bs) {
+                    return Err(invalid("ext orphan file partial block mapping"));
+                }
+                self.read_exact_at(offset, &mut buffer[..bs as usize])?;
+                proof.checksums.orphan(
+                    inode.number,
+                    inode.generation,
+                    offset / bs,
+                    &buffer[..bs as usize],
+                )?;
+            }
+            return Ok(());
+        }
         let decoded = self.extent_allocations(&inode, cap, resources)?;
         let mut logical = 0;
         let mut buffer = [0; 4096];
@@ -152,9 +173,46 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
         source_id: u128,
         resources: &Resources,
     ) -> io::Result<Self> {
+        Self::open_structural(source, source_id, resources, false)
+    }
+    // Private owned qualification only; immutable/public admission stays strict.
+    #[cfg(test)]
+    pub(super) fn open_owned_profile_qualification(
+        source: R,
+        source_id: u128,
+        resources: &Resources,
+    ) -> io::Result<Self> {
         let mut sb = [0; 1024];
         source.decode_read_exact_at(1024, &mut sb)?;
-        let proof = std::sync::Arc::new(ModernProof::inspect(&source, &sb, resources)?);
+        let structural_legacy = u32le(&sb, 100) & 0x400 == 0
+            && (u32le(&sb, 92) & !4 != 0 || u32le(&sb, 96) & !6 != 0 || u32le(&sb, 100) & !3 != 0);
+        if structural_legacy {
+            Self::open_legacy_structural_qualification(source, source_id, resources)
+        } else {
+            Self::open_reader(source, source_id, resources, true)
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn open_legacy_structural_qualification(
+        source: R,
+        source_id: u128,
+        resources: &Resources,
+    ) -> io::Result<Self> {
+        Self::open_structural(source, source_id, resources, true)
+    }
+    fn open_structural(
+        source: R,
+        source_id: u128,
+        resources: &Resources,
+        legacy_qualification: bool,
+    ) -> io::Result<Self> {
+        let mut sb = [0; 1024];
+        source.decode_read_exact_at(1024, &mut sb)?;
+        let proof = std::sync::Arc::new(if legacy_qualification {
+            ModernProof::inspect_profile(&source, &sb, resources, true)?
+        } else {
+            ModernProof::inspect(&source, &sb, resources)?
+        });
         let minimum_extra_size = u16le(&sb, 348);
         let desired = u16le(&sb, 350);
         if minimum_extra_size > 128
@@ -258,7 +316,7 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
 }
 #[derive(Debug)]
 pub(crate) struct ModernProof {
-    pub checksums: MetadataChecksums,
+    pub checksums: Integrity,
     pub block_size: u32,
     pub blocks: u32,
     pub inodes: u32,
@@ -281,7 +339,7 @@ pub(crate) struct ModernProof {
 }
 impl ModernProof {
     pub(crate) fn backup_superblock(&self, bytes: &[u8; 1024]) -> io::Result<()> {
-        if MetadataChecksums::superblock(bytes)?.seed != self.checksums.seed {
+        if !Integrity::superblock(bytes)?.same_policy(&self.checksums) {
             return Err(invalid("ext backup checksum seed disagrees"));
         }
         Ok(())
@@ -291,6 +349,14 @@ impl ModernProof {
         sb: &[u8; 1024],
         resources: &Resources,
     ) -> io::Result<Self> {
+        Self::inspect_profile(source, sb, resources, false)
+    }
+    fn inspect_profile<R: ExtDecodeRead>(
+        source: &R,
+        sb: &[u8; 1024],
+        resources: &Resources,
+        legacy_qualification: bool,
+    ) -> io::Result<Self> {
         resources.cancellation.check().map_err(io::Error::other)?;
         if u16le(sb, 56) != 0xef53 || u32le(sb, 76) != 1 || u32le(sb, 72) != 0 {
             return Err(unsupported("ext modern revision/Linux profile"));
@@ -298,8 +364,14 @@ impl ModernProof {
         let compat = u32le(sb, 92);
         let incompat = u32le(sb, 96);
         let ro = u32le(sb, 100);
-        if compat & !0x103c != 0 || incompat & !0x22c2 != 0 || ro & !0x46b != 0 {
+        let allowed_ro = 0x46b | if legacy_qualification { 0x10 } else { 0 };
+        if compat & !0x103c != 0 || incompat & !0x22c2 != 0 || ro & !allowed_ro != 0 {
             return Err(unsupported("ext modern feature profile"));
+        }
+        // Legacy structural profiles remain gated until every ownership validator
+        // and native mutation writer handles their explicit checksum policy.
+        if ro & 0x400 == 0 && !legacy_qualification {
+            return Err(unsupported("ext legacy structural profile not qualified"));
         }
         if u32le(sb, 352) & 3 == 3 {
             return Err(invalid("ext conflicting native directory hash signedness"));
@@ -312,7 +384,7 @@ impl ModernProof {
         if u16le(sb, 58) != 1 || u32le(sb, 232) != 0 {
             return Err(unsupported("ext modern dirty/orphan recovery state"));
         }
-        let checksums = MetadataChecksums::superblock(sb)?;
+        let checksums = Integrity::superblock(sb)?;
         let log = u32le(sb, 24);
         if log > 2
             || u32le(sb, 28) != log
@@ -563,6 +635,11 @@ impl ModernProof {
             .get(group)
             .ok_or_else(|| invalid("ext bitmap group bounds"))?;
         let flags = u16le(descriptor, 18);
+        if flags & 3 != 0 && !self.checksums.has_group_checksum() {
+            return Err(unsupported(
+                "ext uninitialized bitmap without descriptor checksum",
+            ));
+        }
         let uninitialized = flags & if inode { 1 } else { 2 } != 0;
         let bs = self.block_size as usize;
         let per = if inode {
@@ -606,7 +683,7 @@ impl ModernProof {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
     use std::sync::Arc;
@@ -689,10 +766,14 @@ mod tests {
             cancellation: Cancellation::default(),
         }
     }
-    mod independent {
+    pub(in crate::fs_ext) mod independent {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/fixtures/fs_ext_modern.rs"
+        ));
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/fs_ext_legacy_integrity.rs"
         ));
     }
     use independent::fixture as ownership_fixture;
@@ -704,6 +785,71 @@ mod tests {
             directory_blocks: 16,
             directory_entries: 32,
             findings: 32,
+        }
+    }
+    #[test]
+    fn private_legacy_structural_ownership_payload_and_public_gate() {
+        for extents in [false, true] {
+            for gdt16 in [false, true] {
+                let (image, payload) = independent::without_metadata_checksums(extents, gdt16);
+                let r = resources(4 << 20);
+                assert!(super::super::ExtVolume::open(Arc::new(Image(image.clone())), &r).is_err());
+                assert_eq!(r.memory.used(), 0);
+                let source: Arc<dyn ReadAt> = Arc::new(Image(image.clone()));
+                let decoder = super::super::ExtDecoder::open_legacy_structural_qualification(
+                    source,
+                    18u128 << 64,
+                    &r,
+                )
+                .unwrap();
+                assert!(!decoder.geometry().has_metadata_checksums());
+                assert!(!decoder.geometry().is_classic());
+                let report =
+                    crate::fs_ext_audit::audit_decoder(&decoder, audit_limits(), &r).unwrap();
+                assert!(report.is_clean(), "{:?}", report.findings());
+                drop(report);
+                let directory = decoder.directory(2, 16, 32, &r).unwrap();
+                assert_eq!(
+                    directory.entries().last().unwrap().name,
+                    crate::fs_core::NativeName::Bytes(b"x\xff".to_vec())
+                );
+                drop(directory);
+                let map = decoder.file_map(12, 16, &r, false).unwrap();
+                let mut out = vec![0; 2048];
+                assert_eq!(
+                    decoder.read_map(&map, 0, &mut out, &r).unwrap(),
+                    payload.len()
+                );
+                assert_eq!(&out[..payload.len()], payload);
+                assert_eq!(
+                    decoder
+                        .read_map(&map, payload.len() as u64, &mut out, &r)
+                        .unwrap(),
+                    0
+                );
+                drop(map);
+                drop(decoder);
+                assert_eq!(r.memory.used(), 0);
+                // Bitmap bytes have no checksum in either legacy policy. Complete
+                // ownership/counter validation must still reject altered allocation.
+                let mut bad = image;
+                bad[3 * 1024 + 1] &= !(1 << 1);
+                let source: Arc<dyn ReadAt> = Arc::new(Image(bad));
+                match super::super::ExtDecoder::open_legacy_structural_qualification(
+                    source,
+                    18u128 << 64,
+                    &r,
+                ) {
+                    Ok(decoder) => {
+                        let report =
+                            crate::fs_ext_audit::audit_decoder(&decoder, audit_limits(), &r);
+                        assert!(report.is_err() || !report.unwrap().is_clean());
+                        drop(decoder);
+                    }
+                    Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidData),
+                }
+                assert_eq!(r.memory.used(), 0);
+            }
         }
     }
     fn orphan_fixture(alias: bool, active: bool) -> Vec<u8> {
@@ -795,6 +941,86 @@ mod tests {
                 assert_eq!(report.allocated_inodes(), 2);
             }
             drop(report);
+            drop(volume);
+            assert_eq!(r.memory.used(), 0);
+        }
+    }
+    #[test]
+    fn independent_classic_orphan_map_checksum_hole_and_trailing_ownership() {
+        for defect in 0..5 {
+            let mut image = orphan_fixture(false, false);
+            let at = 5 * 1024 + 12 * 256;
+            d(&mut image, at + 32, 0);
+            image[at + 40..at + 100].fill(0);
+            d(&mut image, at + 40, 13);
+            match defect {
+                1 => image[13 * 1024 + 1020] ^= 1,
+                2 => d(&mut image, at + 40, 0),
+                3 => d(&mut image, at + 44, 13),
+                4 => d(&mut image, at + 88, 13),
+                _ => {}
+            }
+            independent::inode_checksum(&mut image, 13);
+            let r = resources(4 << 20);
+            let opened = super::super::ExtVolume::open(Arc::new(Image(image)), &r);
+            if matches!(defect, 1 | 2) {
+                assert!(opened.is_err());
+            } else {
+                let volume = opened.unwrap();
+                let report = crate::fs_ext_audit::audit(&volume, audit_limits(), &r);
+                if defect == 0 {
+                    assert!(report.unwrap().is_clean());
+                } else {
+                    assert!(report.is_err() || !report.unwrap().is_clean());
+                }
+                drop(volume);
+            }
+            assert_eq!(r.memory.used(), 0);
+        }
+    }
+    #[test]
+    fn independent_zero_reserved_gdt_resize_root_ownership_and_defects() {
+        for defect in 0..4 {
+            let mut image = orphan_fixture(false, false);
+            d(&mut image, 1024 + 92, 0x1018);
+            d(&mut image, 1024 + 12, 49);
+            image[3 * 1024 + 1] |= 1 << 5;
+            let at = 5 * 1024 + 6 * 256;
+            image[at..at + 256].fill(0);
+            w(&mut image, at, 0o100600);
+            d(&mut image, at + 4, (12 + 256 + 256 * 256) * 1024);
+            w(&mut image, at + 26, 1);
+            d(&mut image, at + 28, 2);
+            d(&mut image, at + 92, 14);
+            w(&mut image, at + 128, 32);
+            match defect {
+                1 => d(&mut image, 14 * 1024, 13),
+                2 => d(&mut image, at + 28, 0),
+                3 => d(&mut image, at + 92, 3),
+                _ => {}
+            }
+            independent::inode_checksum(&mut image, 7);
+            let bc = forward(0x12345678, &image[3 * 1024..3 * 1024 + 8]);
+            let gd = &mut image[2048..2112];
+            w(gd, 12, 49);
+            w(gd, 24, bc as u16);
+            w(gd, 56, (bc >> 16) as u16);
+            w(gd, 30, 0);
+            let checksum = forward(forward(0x12345678, &0u32.to_le_bytes()), gd);
+            w(gd, 30, checksum as u16);
+            let checksum = forward(!0, &image[1024..2044]);
+            d(&mut image, 2044, checksum);
+            let r = resources(4 << 20);
+            let volume = super::super::ExtVolume::open(Arc::new(Image(image)), &r).unwrap();
+            let report = crate::fs_ext_audit::audit(&volume, audit_limits(), &r);
+            if defect == 0 {
+                let report = report.unwrap();
+                assert!(report.is_clean(), "{:?}", report.findings());
+                assert_eq!(report.owned_blocks(), 6);
+                drop(report);
+            } else {
+                assert!(report.is_err());
+            }
             drop(volume);
             assert_eq!(r.memory.used(), 0);
         }

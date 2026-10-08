@@ -1578,3 +1578,253 @@ through XID3; the native single-chunk internal pool remains exactly six blocks.
 A third transaction is refused before writes. Arbitrarily enlarged-pool attempts
 are retained as failures. This strengthens repeated publication evidence without
 claiming reclamation or multi-chunk/multi-leaf editing.
+
+Public `fs_pipeline::PipelineReport` now records version1 independent source,
+container, partition, filesystem, copy, boot and publication outcomes. The APFS
+copy example emits a report on success or failure, distinguishes unpublished
+staging from visible publication with uncertain directory persistence, and
+retains original typed I/O errors. Native/failure evidence is root-audited at
+`/data/cache/partmgr-pipeline-report-native-v5-z7wz2y0d/root-audit.json`:
+three standalone/GPT/MBR cases, six full native stream models and three actual
+failure controls. An injected directory `fsync` error leaves the artifact visible
+and byte-identical to successful output; the report requires inspection/retry
+and preserves original OS error5. Missing-source and staging failures publish
+nothing. All362 frozen source files and check logs are bound; required fmt,
+strict locked all-target/all-feature Clippy and host tests pass453/40ignored.
+This snapshot applies the report change to the prior namespace engine baseline;
+later engine drafts are excluded. Initial formatting and shared-target artifact
+mismatch attempts remain unaccepted evidence. Other pipeline orchestrators still
+need the same structured reporting contract; reporting does not complete their
+operation scope or establish a multi-layer atomic transaction.
+
+FAT, exFAT and ext copy frontends now use the same structured report and shared
+publication helper as APFS. Root audit at
+`/data/cache/partmgr-copy-pipeline-native-v2-4spfac13/root-audit.json`
+verifies 363 frozen source bindings, 88 command logs, ten independently decoded
+GPT/MBR outputs, thirty complete native payload models and twenty rejection
+controls. Sixteen additional controls exercise success, missing source, missing
+staging parent and actual directory-flush failure in all four frontends.
+Every failed directory flush returns the original OS cause, reports visible
+publication with uncertain durability and leaves output byte-identical to its
+successful standalone counterpart. Required frozen fmt, strict locked Clippy
+and all-feature host tests pass (453 passed, 40 ignored). Engine drafts remain
+outside this checkpoint; remaining container and boot orchestrators still need
+the reporting contract and their separate correctness gates.
+
+Root audit of the ext native JBD2 v21 checkpoint is recorded at
+`/data/cache/partmgr-ext-jbd-codec-native-20261008-v21/root-audit.json`.
+It independently verifies 27 source bindings, 852 artifact hashes, 273 native
+command results and 96 complete payload models. The 42 saved operation images
+cover classic create/extend/truncate/mkdir/move/file-delete/directory-delete;
+six deletion-time controls retain exact supplied timestamps at or above the
+inode-count boundary. Native journal replay diagnostics and three fatal gate
+controls are checked. This qualifies the staged private classic session only:
+modern/default-legacy planners, public exposure and independent native operation
+interruption/restart evidence remain unfinished.
+
+Root independently re-ran native APFS tools against the five-chunk v4 checkpoint
+at `/data/cache/partmgr-apfs-multichunk-native-v4/root-audit.json`. Six successive
+checkpoint images (XIDs2..7) pass apfsck and full native extraction, with exact
+UID/GID, Unicode primary names and link counts. The actual framework builder
+uses five chunks and the native18-block internal pool. A separate 8MiB replacement
+crosses chunks0/1 while retaining the 126025728-byte all-zero Bulk file and the
+resource fork. The root audit checks 21 complete models, sixteen fresh native
+commands, retained fixed executable/tool hashes and archives all artifact hashes.
+The source closure includes eighteen Rust files and Cargo manifests; this is
+bounded native COW evidence, with reclamation, broader trees and macOS mount
+validation still unfinished.
+
+JFS run11 is independently audited at
+`/data/cache/partmgr-jfs-owned-uid-native-run11/root-audit.json`: fourteen archived
+source bindings, fixed native test/tool hashes, seven cases and seven fresh
+read-only native checks. Five UID/recovery/abort outputs retain every byte
+outside the explicitly permitted superblock, log and UID fields; native UID
+and hardlink counts agree. Both allocation fixtures retain the exact nested
+payload at block113, with native XAD addressing independently checked. The
+journal-authorized partial-map decoder supplies no read/allocation authority
+until regenerated native maps and committed tree overlays pass ordinary strict
+decode and complete ownership audit. This is private UID lifecycle plus native
+COW codec/preflight evidence; owned COW mutation and public JFS writing remain
+unfinished. Full host checking for this checkpoint is still running.
+
+HFS+ authoring now has a staged native leaf-node assembler in
+`src/fs_hfsplus_node.rs`, included only in test builds while the complete writer
+is developed. It emits native big-endian sibling pointers, leaf kind/height,
+record count and reversed offset table, rejects empty/unaligned/oversized records
+before allocation, checks cancellation and returns a retained reservation with
+the node buffer. An independent exact-capacity byte-layout regression verifies
+the descriptor, record boundaries and charge/refund behavior. This is catalog
+authoring groundwork; no HFS+/HFSX mutation capability is advertised. Catalog
+key comparison/ordering, index/header/map nodes, allocation, fork planning and
+journal-aware publication/recovery remain required.
+
+The same staged HFS+ assembler now emits index nodes with explicit height and
+checked native key-length/child records. Empty indexes, heights below2, zero
+child targets, malformed key spans and capacity overflow reject before output
+allocation. Exact native descriptor/record/offset bytes and reservation refunds
+are checked independently for both leaf and index nodes. Key ordering and
+child-minimum relationships remain the responsibility of the forthcoming
+catalog tree planner; the codec alone grants no tree or mutation authority.
+
+HFS+ staged node assembly now includes native header and continuation-map
+nodes. Header records require the native106-byte header and128-byte user record,
+with a nonempty bitmap; continuation maps require exactly one bitmap record.
+Descriptor links, kinds, heights and reversed offsets have independent exact
+byte-layout coverage. Index heights are limited to the existing checked64-level
+profile. These bytes still require complete tree geometry, comparison/order,
+node allocation and ownership planning before becoming writable filesystem
+authority. The assembler remains test-only during that integration.
+
+Staged HFS+ catalog authoring now encodes native parent-CNID/UTF16 keys and
+uses the reader comparator to check strict leaf-key order and collisions.
+Tests retain exact big-endian key bytes, empty thread keys, ASCII case-fold
+collision rejection, HFSX binary distinction and binary Unicode units, with
+name bounds and complete reservation refunds. Full Unicode folding remains
+unsupported under the existing declared comparator profile. Catalog record
+bodies and native thread/reference relationships still require the tree planner;
+these key codecs do not establish complete catalog or writer acceptance.
+
+The staged HFS+ catalog planner now assembles a complete bounded single-leaf
+tree with native header geometry, comparator type, live-node bitmap and free
+node counts. A regression replaces an independently constructed indexed
+catalog with the assembled tree and opens both HFS+ and HFSX volumes through
+the existing decoder; both pass complete ownership/reference audits and refund
+all retained charges. The frozen source is
+`/data/cache/partmgr-hfsplus-catalog-source-2oilnpyt`, excluding concurrent engine
+drafts. This still supplies tree bytes only: multi-leaf/index planning, complete
+volume creation and journal-aware editing/recovery remain required.
+
+The staged HFS+ catalog planner now splits leaf records by byte capacity and
+an explicit record ceiling, emits sibling-linked leaves and a checked index
+root from each child minimum, and derives header/root/leaf/free-node accounting
+from the resulting layout. Both single-leaf and indexed replacements pass the
+existing HFS+/HFSX full decoder and complete ownership audit. Insufficient node
+allocation and zero record ceilings reject with full refunds. The isolated
+source is `/data/cache/partmgr-hfsplus-indexed-source-zh730j2o`; deeper index
+levels and continuation maps in the tree planner remain required. The earlier
+live host run has now finished successfully (474 passed, 43 ignored), but it
+compiled before the latest indexed planner and does not qualify that addition.
+
+HFS+ staged catalog assembly now constructs successive index levels up to the
+checked64-level ceiling, deriving each separator from the child minimum and
+linking siblings at every level. A four-level100-leaf structural model reopens
+through the reader with all keys/data exact. Native-profile one-child index
+tails rebalance before emission; allocation/height/fanout limits remain checked.
+Both complete HFS+/HFSX fixture ownership regressions still pass. Frozen source
+`/data/cache/partmgr-hfsplus-deep-source-0mo7ahs4` is being checked independently
+of concurrent engine drafts. Structural tree assembly is not yet whole-volume
+authoring or journal-aware editing acceptance.
+
+Native HFS+ catalog assembly acceptance is independently audited at
+`/data/cache/partmgr-hfsplus-native-catalog-v5/root-audit.json`: four rebuilt
+HFS+/HFSX layouts pass fsck and twelve complete TSK data/resource models, with
+every byte outside the catalog unchanged. fsck uses a retained regular-file
+BLKBSZGET512-byte adapter; this is not device or macOS acceptance. Earlier
+missing-tool/ioctl attempts and native fixture defects remain failed evidence.
+Native repair controls exposed the independent fixture folder flag2 as reserved,
+and missing HFSX HasFolderCount/count metadata. Corrected input artifacts retain
+exact catalog-only correction manifests; the repository fixture constructors
+now emit those native fields correctly. The reader rejects the reserved folder
+flag as invalid and a new HFS+/HFSX regression verifies rejection/refunds. Six
+reader regressions pass. The corrected frozen source is
+`/data/cache/partmgr-hfsplus-corrected-source-6vlj7pmu`, with required checks
+running; catalog byte rebuilding still supplies no owned durable write session.
+
+HFS+ staged tree assembly now supports the native extents-overflow key format
+and fixed64-byte extent records, including an empty tree and indexed512-byte
+nodes. A three-level40-leaf structural model reopens with exact keys/records;
+complete HFS+/HFSX fixture tests rebuild both catalog and overflow trees and
+retain full ownership proofs. Native combined rebuilding is root-audited at
+`/data/cache/partmgr-hfsplus-native-extents-v1/root-audit.json`: four images
+pass fsck with the documented regular-file ioctl adapter and twelve complete
+TSK fork models; bytes outside both system trees remain exact. Frozen source
+`/data/cache/partmgr-hfsplus-extents-source-tpcjckq7` is undergoing required
+checks. Whole-volume authoring, attributes trees, allocation/editing sessions
+and journal publication/recovery remain unfinished.
+
+Staged HFS+ fork planning now emits native80-byte fork headers and correctly
+keyed overflow records for data and resource forks. It checks geometry, extent
+bounds/overlap, declared allocation versus EOF, cancellation and retained
+charges without requiring physical extents to be sorted in logical order.
+A seventeen-fragment exact-byte model verifies both overflow logical starts
+and zero descriptor tails. Complete HFS+/HFSX fixtures now rebuild the main
+data/resource fork headers and overflow records from plans, then reopen with
+clean complete ownership proofs. Eight focused tests pass; frozen source
+`/data/cache/partmgr-hfsplus-fork-source-4xyjwvlm` is undergoing required checks.
+This does not grant physical allocation ownership or an owned write session;
+whole-volume allocation, payload emission and durable recovery remain required.
+
+Fresh-volume HFS+ allocation planning now reserves primary/alternate header
+areas and its own bitmap extent before handing out disjoint contiguous tree
+and payload ranges. It emits native MSB-first bits with zero padding, derives
+free counts from planned ownership and refuses exhausted/zero requests without
+changing the plan. The512-byte and4096-byte boundary models verify every bit,
+full-volume exhaustion, cancellation and budget refunds. This is explicitly
+fresh-volume layout; it cannot authorize reuse or repair in an existing image.
+Frozen source `/data/cache/partmgr-hfsplus-allocation-source-r_scshei` retains
+the allocator plus fork/tree codecs; whole-volume emission and owned recovery
+remain unfinished.
+
+Fresh HFS+/HFSX empty-layout native checkpoint (2026-10-08): frozen source `/data/cache/partmgr-hfsplus-empty-v3-source-ki228ktt` produces four fresh 1 MiB images, covering HFS+ and HFSX at 512-byte and 4096-byte allocation blocks. `fsck.hfsplus -fn` reports each clean and independent TSK `fsstat` agrees with the formatter free-block counts (2022 and 249). Receipt: `/data/cache/partmgr-hfsplus-empty-native-v3/receipt.txt`. The regular-file block-size ioctl adapter remains explicit; this is neither macOS nor physical-device evidence. Native v1/v2 failures remain preserved. Extents-tree node sizes now accommodate allocation-block geometry; header clump sizes and text-encoding accounting were also corrected. This remains a test-only empty formatter foundation, not a public write API or populated-volume/owned-edit acceptance. Full frozen-source checks are tracked separately in the adjacent `-checks.json`.
+
+Fresh populated HFS+/HFSX staged checkpoint (2026-10-08): `/data/cache/partmgr-hfsplus-populated-native-v1/root-audit.json` verifies four fresh images from frozen source `/data/cache/partmgr-hfsplus-populated-source-x3aoqn9f`, its retained executable, exact mirrored headers and bitmap free counts, clean native checks, and eight complete independently extracted fork models. Each image contains a 65,553-byte data fork and 14-byte resource fork authored from deferred common `FileRead` handles with three-byte short reads. The code remains test-only and currently supports a single root file; recursive common-tree authoring, bounded streaming output, public publication, and owned editing remain required. This snapshot predates the subsequent tightening of identity binding and fallible inventory allocation. The earlier empty-layout frozen snapshot now has all required checks green, including the full host suite.
+
+Populated formatter identity-binding refresh: `/data/cache/partmgr-hfsplus-populated-native-v2/root-audit.json` repeats all four clean native images and eight complete fork models against frozen source `/data/cache/partmgr-hfsplus-populated-v2-source-0wbv0o6t` and retained fixed executable. Source identities are now retained during allocation planning, their native keys are budgeted, and small inventories use fallible capacity reservation. Formatting, strict all-target/all-feature Clippy and focused tests pass; full host checks are still running in the adjacent source checks record. Scope remains the staged single-file foundation described above.
+
+Fresh multiple-file HFS+/HFSX staged checkpoint (2026-10-08): `/data/cache/partmgr-hfsplus-multiple-native-v2/root-audit.json` binds frozen source `/data/cache/partmgr-hfsplus-multiple-v2-source-he77i76x`, the compiled fixed executable, unchanged input/output image hashes and native tools. Four fresh 1 MiB images cover both families and 512/4096-byte allocation blocks, each with 48 root files supplied in reverse name order. Native fsck is clean, independent free-space accounting agrees, all 384 complete data/resource-fork models match, and native directory enumeration verifies 192 exact name/CNID relationships. The formatter now assigns distinct CNIDs, sizes an indexed catalog, sorts native comparison keys and rejects collisions. Ordinary controls cover case-fold versus binary collisions, duplicate names, cancellation and full memory refunds. This remains test-only: recursive common-tree inventory, metadata preservation, bounded streaming output, publication and recoverable owned HFS+ editing remain required. Required frozen-source checks are recorded in the adjacent `-checks.json`; the earlier populated v1 snapshot passed its complete required suite.
+
+Fresh nested-directory HFS+/HFSX staged checkpoint (2026-10-08): `/data/cache/partmgr-hfsplus-nested-native-v1/root-audit.json` binds frozen source `/data/cache/partmgr-hfsplus-nested-source-eyq6z2ls`, retained compiled executable and tool hashes. Four clean native images cover both families and 512/4096-byte allocation blocks. Independent recursive enumeration verifies 204 exact names, parent hierarchy and native identities, including BOX/INNER, an empty directory and 48 files; all 384 complete data/resource-fork models match. Mirrored headers, file/folder totals and bitmap free counts are independently checked. The staged builder now encodes folder threads, valence and HFSX folder counts, accepts forward parent references and rejects invalid/cyclic parent graphs with bounded accounting work. Later ordinary parent-graph controls are frozen in `/data/cache/partmgr-hfsplus-nested-v2-source-w_v5ku3a`, whose required checks are tracked separately. Remaining requirements include common-tree inventory/preservation integration, bounded streaming emission, public publication and recoverable owned editing; the native gate uses the documented regular-file ioctl adapter and does not establish macOS/device acceptance.
+
+Bounded HFS+/HFSX staging emission checkpoint (2026-10-08): `/data/cache/partmgr-hfsplus-streamed-native-v1/root-audit.json` binds frozen source `/data/cache/partmgr-hfsplus-streamed-source-zevpkvth` and retained executable. The formatter separates staging emission from the optional whole-image convenience buffer, zeros the staging range in bounded chunks, writes metadata/payload in at most 64KiB calls, handles short deferred reads, and emits mirrored headers after payload success. Two 128MiB native images each contain generated 16MiB+17-byte data and 14-byte resource forks under a 256KiB builder budget; observed peak charged builder memory is 95,922 bytes. Native fsck is clean and four complete independent fork models match. Validation harness and external-tool allocations are separate from this builder budget. Portable controls cover sink-error propagation, prewrite cancellation, maximum write sizes and resource refunds. Formatting, strict all-target/all-feature Clippy and focused tests pass; the full frozen-source suite is running in the adjacent checks record. The nested-v2 frozen checkpoint now has its complete required suite green. Streaming emission does not flush/publish or authorize editing an existing filesystem; common-tree metadata-preserving integration and owned editing remain required.
+
+Staged HFS+/HFSX common-tree capture checkpoint (2026-10-08): `/data/cache/partmgr-hfsplus-capture-native-v1/root-audit.json` binds frozen source `/data/cache/partmgr-hfsplus-capture-source-59hcjybf`, retained compiled executable and unchanged source images. The new test-only inventory adapter consumes paginated common `TreeSource`, bounds objects/pages/tokens/identities, converts names under explicit policy, rejects aliases and unsupported objects/streams, retains deferred data/resource handles, and revalidates each stream read. An explicit content-only defaults policy produces per-object inspection-status-aware metadata transformation outcomes; no faithful metadata capture is claimed. Four streamed native copies of the nested 52-object source tree pass fsck, all 384 complete fork models and 204 namespace relationships match, and 2,080 explicit metadata decisions are retained. Required checks for this exact snapshot are tracked beside it; the earlier streaming snapshot has its complete required suite green. Native metadata-preserving conversion, hardlink/attribute/special-object authoring, public API/publication and recoverable owned editing remain required.
+
+HFS+/HFSX staging cancellation refresh (2026-10-08): frozen source `/data/cache/partmgr-hfsplus-cancellation-source-xmiitfmr` checks cancellation immediately after a deferred read and before each mirrored-header write. Regression controls prove that a reader cancelling while returning bytes causes zero payload/header writes, and cancellation after the primary header suppresses the alternate-header write; all reservations refund. Formatting, strict all-target/all-feature Clippy and focused tests pass, with the full host suite tracked in the adjacent checks record. `/data/cache/partmgr-hfsplus-cancellation-source-xmiitfmr-native-root-audit.json` binds the retained executable, source files and both refreshed native gates: six images and complete fork artifacts are byte-identical to the separately accepted common-tree capture/large streamed-volume baselines. Existing stage bytes may remain after cancellation and require discard; no publication or existing-volume mutation is implied. The inventory-only frozen snapshot has now passed its complete required suite.
+
+Root APFS reclamation-v2 acceptance (2026-10-08): `/data/cache/partmgr-apfs-reclamation-root-audit-v1/root-audit.json` verifies 23 archived compiled-source hashes, 276 artifact bindings, retained executable and matching before/after native-tool guards. Root ran 81 fresh native commands across 16 checkpoints, reconstructed 48 complete payload/resource models and checked native ownership, primary names and link counts. Independent Fletcher residues for the torn boot block are nonzero and fresh native rejection is followed by clean recovered XID16. Whole-image retirement comparison permits exactly five zeroed terminal NXSB descriptors (XIDs1–5), with every other allocation/queue/payload byte unchanged. Existing portable fixed-executable evidence remains separately scoped to twelve cycles and the recorded cut models. Acceptance is the bounded frozen five-chunk/single-leaf profile; wider writable topology and macOS remain open. The HFS+ cancellation frozen snapshot has now passed its complete required suite.
+
+Typed HFS+/HFSX metadata authoring checkpoint (2026-10-08): frozen source `/data/cache/partmgr-hfsplus-typed-v2-source-_wb6yioh` introduces checked caller inputs for UID, GID, permission bits and all five native catalog dates. Root, directory and file records rebuild identities and fork locations rather than transplanting opaque catalog bytes. Invalid permission bits fail before modifying the record. `/data/cache/partmgr-hfsplus-typed-native-v2/root-audit.json` binds the frozen source, fixed executable and eight fresh independent TSK commands: six complete native metadata records and two full payloads across HFS+ and HFSX. Native fsck reports both fresh images clean with the explicit regular-file ioctl adapter. The first gate's timezone-dependent assertion failure is preserved; the corrected gate sets UTC on TSK date inspection. Formatting, strict Clippy and focused tests pass; full host and default common-tree/streaming regression results are tracked in adjacent checks and regression records. The common-tree adapter still explicitly defaults metadata; native metadata-preserving capture, public authoring and existing-volume recovery remain unfinished.
+
+Native HFS metadata conversion checkpoint (2026-10-08): frozen source `/data/cache/partmgr-hfsplus-metadata-conversion-source-h0ikmqjx` adds an explicitly selected HFS catalog decoder for typed authoring. It requires exactly one retained native catalog record of the appropriate directory/file shape, exact native timestamp epoch/resolution/value agreement, matching UID/GID bytes and mode, and matching directory/file type. It extracts ownership, permissions and all five dates without copying CNIDs or fork locations. Round-trip controls cover root/directory/file in both HFS+ and HFSX; inconsistent ownership and creation dates reject. Formatting, strict all-target/all-feature Clippy and focused tests pass; full host verification is recorded in the adjacent checks manifest. This codec does not yet change the common-tree content-only policy or establish preservation of other catalog metadata.
+
+HFS native catalog capture policy (2026-10-08): frozen source `/data/cache/partmgr-hfsplus-metadata-capture-source-tmuvwjdu` wires checked native metadata into the paginated common-tree planner for root, directories and files. Callers explicitly choose `NativeHfsCatalogFields`; the original content-only defaults remain available. Per-object reports preserve known ownership/mode/creation/modification/access semantics and explicitly report loss of remaining catalog fields, while checked attribute/backup dates are extracted separately. The round-trip copy control reopens both HFS+ and HFSX output trees and verifies all three objects' ownership, permissions and five dates, including 15 preservation decisions. Formatting, strict Clippy and focused tests pass; full host verification remains in the adjacent checks record. This policy is not full metadata preservation, public write support or owned editing. The preceding typed metadata native-v2 snapshot has now passed its complete required host suite.
+
+Native HFS catalog capture gate (2026-10-08): `/data/cache/partmgr-hfsplus-metadata-capture-native-v1/root-comparison.json` binds frozen source `/data/cache/partmgr-hfsplus-metadata-native-source-z7hnz_xm` and the retained executable. Both HFS+/HFSX outputs are produced through paginated common-tree capture with the explicit native catalog-fields policy. Native fsck is clean; TSK verifies root/directory/file ownership, modes, all five dates and complete payloads. Source images remain unchanged. Root whole-image comparisons establish that both copied outputs and inputs equal the independently qualified typed-metadata-v2 baselines byte for byte. Complete required checks are tracked separately beside the snapshot. Broader metadata preservation, public authoring/publication and existing-volume editing remain open.
+
+Root APFS multi-leaf acceptance (2026-10-08): `/data/cache/partmgr-apfs-multileaf-root-audit-v1/root-audit.json` verifies all 24 archived compiled sources, the fixed executable, portable-test log and 3,990 artifact hashes before and after a fresh independent oracle. The final 301-file catalog checkpoint passes 304 complete stream models, including exact primary names/links/owners for 298 one-byte files, sparse original/clone bytes, nested payload and both resource forks. Empty-file native size-zero and TSK missing-DATA-attribute behavior are checked explicitly. `fresh-checkers.json` records six additional clean native checks for actual multi-leaf create/replace/truncate/hardlink/rename/unlink checkpoints XIDs2–7. Portable fault evidence remains the separately retained 14-test run and 124 new multi-leaf cut scenarios. This acceptance covers the frozen bounded indexed-tree profile; multiple-CIB expansion and macOS remain open. The preceding HFS metadata conversion snapshot has passed its complete required host suite; capture/native-refresh suites remain separately tracked.
+
+Public HFS+/HFSX fresh-image builder checkpoint (2026-10-08): `fs_hfsplus_builder::HfsPlusBuildPlan` now exposes stable paginated input preparation, exact target length, prewrite metadata decisions and bounded streamed emission to exclusively owned unpublished `Storage`. The emitter supports short writes, preserves causal I/O failures, checks cancellation between writes and writes mirrored headers last. It deliberately performs no flush/publication and grants no existing-volume edit authority. Production builds now compile the native codecs; test-only helpers remain gated and unexpected overflow in fresh contiguous forks rejects. The consumer test covers HFS+/HFSX ×512/4096-byte blocks ×content-only/native catalog metadata, complete DATA/resource bytes, clean allocation audit, staging length mismatch before writes, causal sink failure and complete budget refunds. Frozen source `/data/cache/partmgr-hfsplus-public-builder-v3-source-0y2xaaj3` has formatting/strict Clippy/focused tests green with full host verification tracked beside it. `/data/cache/partmgr-hfsplus-public-builder-native-v1/root-audit.json` binds the fixed executable and native public-API gate: two clean images, exact ownership/modes/five dates, complete payloads and byte-identical input/output matches to prior independently qualified baselines under997-byte storage writes. Full metadata, hardlinks/special objects, publication integration and recoverable existing-volume writing remain unfinished. Both preceding metadata-capture frozen snapshots have now passed their complete required suites.
+
+Public HFS builder retained-capacity refresh: frozen source `/data/cache/partmgr-hfsplus-public-builder-v4-source-qoaqxhi_` reserves the actual retained volume-name vector capacity before inventory, rather than only its length. A four-unit label with a2MiB retained allocation rejects under a1MiB pool and refunds fully; public consumer and native gates both pass. `/data/cache/partmgr-hfsplus-public-builder-native-v2/root-audit.json` verifies source/executable/public-test bindings and byte-identical public-API output to native-v1 for both families. Formatting, strict Clippy and focused tests pass; both public-builder full host suites remain tracked in their adjacent checks records. The destination contract explicitly forbids aliasing source storage.
+
+Same-owner HFS+/HFSX preparation and range preflight (2026-10-08): frozen source `/data/cache/partmgr-hfsplus-owned-range-source-tumzzac2` stages a private owned-storage gate that gives the immutable decoder only requested512-byte metadata copies. Typed missing-page sentinels authorize bounded restart/copy operations; arbitrary underlying I/O errors retain their original cause. Copied metadata is reread from the held storage before acceptance; complete clean allocation/reference proof, exact bare-volume length, metadata/page/attempt/work ceilings and reservations are required. Portable controls cover both HFS+ and HFSX, no payload prefetch, changed-metadata rejection, exhausted page/attempt/work ceilings, referenced-free allocation rejection, causal OS error5, cancellation and refunds, with write/flush methods that panic if called. The first damaged-allocation negative control changed extents padding and failed; immutable v2 failure remains preserved. The corrected control derives bitmap location/block size from the native header and proves the allocated bit is set before clearing it.
+
+The private range planner checks EOF and derives exact before/after patches from the audited native DATA/resource map. Its fragmented31-byte control reads exactly8bytes at the final inline extent and23bytes at the overflow extent; the separate resource-fork control reads only the requested3-byte preimage. It revalidates metadata before/after planning and retains budgeted patches without writes. Formatting, strict all-target/all-feature Clippy and focused tests pass; full host results are tracked beside the frozen source. Native dirty fencing, external-undo commit/recovery, cold failure matrices and public existing-volume APIs remain unfinished. Both public fresh-builder v3/v4 frozen snapshots have now passed their complete required suites.
+
+Private HFS+/HFSX dirty-fenced range commit checkpoint (2026-10-08): `/data/cache/partmgr-hfsplus-owned-range-native-v1/root-audit.json` binds frozen source `/data/cache/partmgr-hfsplus-owned-native-source-2uihwiuy`, retained executable, ioctl adapter and six fresh root native commands. The private transaction stages durable external undo before clearing the unmounted bit in both headers, flushes/verifies the dirty fence before payload writes, flushes/verifies the payload stage and performs a complete masked clean audit before publishing clean header bits. Successful plans invalidate earlier generations; uncertain failures close the session. Portable HFS+/HFSX controls observe dirty headers during every payload write, exactly three target barriers, whole-image31-byte changes only, stale-plan zero writes/flushes and refunds. File-backed native commits use7-byte short writes and real sync_all; both fsck checks are clean, TSK verifies complete replaced payload, unchanged UID/GID/mode/five dates, and whole-image comparison permits only the requested5-byte change. Inputs/tools remain unchanged. Formatting, strict Clippy and focused tests pass; full host results are recorded beside the frozen snapshots. Cold recovery, failure/restart matrices, public owned editing and broader operations remain unfinished. Earlier same-owner preparation and range-preflight frozen snapshots have now passed their complete required suites.
+
+Private HFS+/HFSX cold range recovery checkpoint (2026-10-08): `/data/cache/partmgr-hfsplus-owned-recovery-native-v1/qualification.json` retains the compiled executable, frozen-source hashes and native artifacts. A file-backed target persists one replacement byte and returns OS error5; the stopped session is dropped before a fresh owned target and journal are opened for recovery. Both HFS+ and HFSX return RolledBack, restore the entire original image byte-for-byte, pass fsck with the documented regular-file ioctl adapter, and retain complete TSK payload/ownership/mode output. Recovery validates exact selected audited fork ranges and both native clean-state records before writes, keeps headers dirty until restored payload flush/readback and complete masked structural audit, then flushes/verifies clean publication. Portable controls additionally interrupt recovery itself, retry from a fresh session, reject mismatched ranges/bindings and dirty targets with empty journals without writes, verify terminal retry makes no writes and check full memory refunds. Frozen source `/data/cache/partmgr-hfsplus-recovery-native-source-f0hp89rw` passed formatting, strict Clippy and focused tests; full host suite is running. Subsequent preflight tightening sorts physical ranges for binary-search journal validation and rejects coverage overflow/physical overlap. Exhaustive persistence cuts, public owned editing and broader mutation remain unfinished.
+
+HFS+/HFSX persistence-cut checkpoint (2026-10-08): portable fragmented-range commit and rollback matrices cover every modeled write/barrier and all four independent retain/drop combinations for target and external journal. Native commit `/data/cache/partmgr-hfsplus-commit-cuts-native-v1/qualification.json` retains194 recovered images; native rollback `/data/cache/partmgr-hfsplus-rollback-cuts-native-v1/qualification.json` retains82 recovered images. Every image passes fsck through the regular-file ioctl adapter and complete TSK payload verification; whole-image models require exact old or committed-new bytes for commit and exact original bytes after rollback retry. Each gate retains a fixed executable, source archive and artifact hashes. The first portable matrix incorrectly required successful parsing of a torn unpublished header; the corrected control allows rejection only with exact clean original target and no recovery target writes. Recovery v1/v2/native frozen snapshots have now passed their complete required suites. Current strict Clippy passes; the frozen cut-suite full host check remains running. Public HFS+ owned editing, broader operations, device and macOS acceptance remain open.
+
+Public bounded HFS+/HFSX range editor checkpoint (2026-10-08): `fs_hfsplus::edit` exposes exclusive exact bare-volume preparation, generation-bound DATA/resource-fork plans, durable external-undo commit, uncertain-state closure, consuming storage return and caller-bound exact-range cold recovery. External consumer tests cover both families, fragmented31-byte commit, stale-plan rejection before journal writes, subsequent resource-fork commit with a fresh journal, exact whole-image preservation and six target barriers, uncertain failure closure, exact rollback, fresh owned reopen and complete budget refunds. `/data/cache/partmgr-hfsplus-public-edit-native-v1/qualification.json` and `/data/cache/partmgr-hfsplus-public-recovery-native-v1/qualification.json` retain actual public-wrapper real-file gates: exact full-image results, clean native fsck, complete TSK payload and unchanged ownership/mode. Frozen source `/data/cache/partmgr-hfsplus-public-edit-source-8jxt61pe` runs the complete required checks; support qualification remains scoped until all results are terminal. Documentation `docs/filesystem-hfsplus-edit.md` states exclusive/disjoint ownership, original binding/selection retention, journal lifecycle and interruption semantics. Existing-length operations preserve filesystem metadata byte-for-byte. Growth/shrink/allocation/namespace operations, native journaling and macOS/device acceptance remain unfinished. The preceding frozen recovery-cut snapshot now passed its complete required suite.
+
+Private HFS+/HFSX resize checkpoint (2026-10-08): the COW allocator uses only complete audited free ranges, initializes retained data/gaps/tails, preserves old physical payload, updates exact catalog fork fields and mirrored free counts, and rebuilds the bounded native overflow tree preserving unrelated records. External undo stages initialized payload before metadata and performs complete masked audit before clean-state publication; successful consuming commit returns freshly prepared metadata. Cold recovery first audits original metadata reconstructed from undo preimages, regenerates exact operation patches and rejects wrong EOF/fork requests without target/journal writes or flushes. Commit and rollback matrices cover every modeled write/barrier across four target/journal persistence combinations, both families and EOF 0/7/4097/70000; rollback retries restore exact original visible and durable images. `/data/cache/partmgr-hfsplus-resize-native-v2/qualification.json` binds sixteen actual file-backed successful or torn-bitmap/cold-recovery cases to frozen source `/data/cache/partmgr-hfsplus-resize-native-v2-source-q5mzqhf3`, retained executable, tools and image artifacts. All native fsck and complete DATA models pass; the typed source has an explicitly empty resource fork, verified via TSK metadata when no extractable attribute exists. Native v1 incorrectly assumed that empty fork was an extractable attribute; source/log failure remains preserved. Nonempty resource preservation is currently portable evidence. Resize remains test-only pending broader native/resource/cut qualification and public API work. Shared undo preflight now uses one read-only bounded framing/digest/semantic parser, preserving lazy target-length inspection for empty journals; existing eight undo integration tests pass.
+
+Public HFS+/HFSX resize checkpoint (2026-10-08): `fs_hfsplus::edit` now exposes consuming `resize`, `HfsPlusResizeRequest`, retained-storage `HfsPlusResizeFailure` and cold `recover_resize`. The production engine uses the shared read-only undo framing/digest/semantic parser. Public consumer tests cover both DATA/resource forks, both families, EOF 0/7/4097/70000, retained bytes/growth zeroes/XYZ overlays, torn bitmap recovery, terminal no-write retry, clean reopen and full reservation refunds. Exhaustive portable commit and rollback cut matrices now cover both fork kinds across all four target/journal persistence combinations. Frozen `/data/cache/partmgr-hfsplus-public-resize-v2-source-k2oxomjr` passes formatting, strict Clippy and focused tests; the required full host suite is tracked in the adjacent checks record. `/data/cache/partmgr-hfsplus-public-fork-resize-native-v3/qualification.json` binds that source and its retained compiled executable to 32 actual public-wrapper native cases, complete selected and unchanged other streams, clean native fsck, preserved old physical payload and whole-image cold rollback. The earlier public-resize frozen check captured an APFS performance draft with two type-complexity Clippy errors; failed sources/logs remain preserved, and the separately frozen retry includes its named alias correction. All-cut native resize qualification, broader HFS namespace/metadata/journal work and macOS/device acceptance remain open.
+
+Public HFS+/HFSX resize required checks are now terminal green for frozen `/data/cache/partmgr-hfsplus-public-resize-v2-source-k2oxomjr`: fmt, strict all-target/all-feature locked Clippy, focused tests and full all-feature locked host suite. The exact checks/log hashes are retained in the adjacent `-checks.json`; concurrent later agent edits require separate qualification.
+
+Native all-position HFS+/HFSX resize recovery checkpoint (2026-10-08): `/data/cache/partmgr-hfsplus-resize-all-cuts-native-v1/qualification.json` binds frozen `/data/cache/partmgr-hfsplus-resize-native-cuts-source-6c06gbof`, retained compiled executable and unchanged source closure to 3,856 complete cold-resolved images. The commit and interrupted-rollback matrices now run on independently native-qualified populated source volumes with DATA 65553/resource 14, across both families, both fork kinds, EOF 0/7/4097/70000 and all four target/journal persistence combinations. Every modeled write/flush cut is exercised, including modeled torn writes; recovery compares the full image to the original or committed projection, then native fsck checks allocation/structure and TSK checks both complete selected/other fork streams against independently extracted source models. Empty resources require an explicit native metadata size 0 oracle. Native commands leave every modeled image unchanged, source bytes and checker/icat/istat hashes remain unchanged, and memory refunds are verified per recovery model. All 3,856 cases pass in 77.85s; required checks for the new frozen test code run in the adjacent checks record. This is regular-file modeling with the explicit ioctl adapter, not macOS/device durability acceptance. The already-qualified public-wrapper resize production checkpoint remains separately bound to its green required suite and 32 actual file-backed commit/bitmap-cut cases.
+
+Ext native journal checkpoint root artifact audit (2026-10-08): `/data/cache/partmgr-ext-v36-root-artifact-audit.json` independently rehashes all 11,831 retained artifacts from `/data/cache/partmgr-ext-jbd-codec-native-20261008-v36-draft/verification.json` with zero mismatches and no deferred large artifacts. The checkpoint retains 39 compiled sources, 304 native replay cuts, 21 no-EXTENTS operations across 1/2/4 KiB, HTree/shared-EA models and fixed-binary reader/ordinary/fatal controls. This confirms the retained checkpoint bindings; public editor exposure and broader native mutation fault coverage remain open.
+
+HFS+/HFSX consuming-resize authority regression: the external consumer test now retains an old range plan across resize, verifies `StalePlan` with an untouched zeroed journal and no recovery requirement, and prepares a fresh range at the resized EOF. Both fork kinds/families and every existing success/failure resize case pass; cold recovery and all reservation-refund assertions remain intact. Production resize behavior is unchanged from the separately frozen required-suite/native checkpoints.
+
+HFS+/HFSX overflow metadata preservation correction (2026-10-08): resize previously rebuilt the overflow B-tree's nonstructural header/user record using authoring defaults. It now retains native reserved/clump/type/comparison/attribute fields, descriptor reserved bytes and the entire 128-byte user record, while regenerating only topology/count/node-allocation state. The extra header copy is explicitly charged. A portable consuming commit/cold-recovery regression with nondefault header fields and user bytes passes across both families and four EOF models. `/data/cache/partmgr-hfsplus-overflow-user-record-source-v1/qualification.json` retains two raw-adjusted native-clean source images with clump 8192 and nonzero user bytes. Frozen `/data/cache/partmgr-hfsplus-resize-preservation-source-p3ynjg2r` passes formatting, strict Clippy and focused tests; full required host suite remains in progress. `/data/cache/partmgr-hfsplus-public-fork-resize-native-v4/qualification.json` binds 32 repeated actual public-wrapper native cases to this correction. The all-position native-v2 gate is running on the nondefault-header sources and additionally compares exact preserved header/user bytes for every recovered image. Earlier all-cut native-v1 snapshot completed its full required suite; its default-header sources alone did not prove this preservation requirement.
+
+HFS+/HFSX overflow-preservation native-v2 is now terminal green: `/data/cache/partmgr-hfsplus-resize-all-cuts-native-v2/qualification.json` binds the corrected frozen source/executable, unchanged nondefault native source images and ioctl adapter to all 3,856 write/barrier-cut models. Native fsck, both complete fork models and exact preserved overflow header/user/descriptor bytes pass in 102.36s. The actual public-wrapper native-v4 gate also passes 32 cases. The correction's full host suite remains tracked separately in the frozen-source checks record.
+
+Ext native uninitialized-inode checkpoint root binding audit: `/data/cache/partmgr-ext-v38-root-artifact-audit.json` independently rehashes all 11,869 retained v38 artifacts with zero mismatches. The retained checkpoint adds native create/delete in a previously uninitialized inode group and exact unaffected-group table/bitmap, payload and stale-handle controls; its engine remains private pending broader qualification.
+
+HFS+/HFSX preservation correction required checks are terminal green for `/data/cache/partmgr-hfsplus-resize-preservation-source-p3ynjg2r`: formatting, strict all-target/all-feature locked Clippy, focused tests and full all-feature locked host suite. Current HFS source files and the public consumer test match this exact frozen source byte-for-byte. Checks/log hashes remain in its adjacent `-checks.json`; native-v4/public and native-v2/all-cut receipts retain the matching compiled executable and source bindings.

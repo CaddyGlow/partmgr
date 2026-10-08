@@ -12,7 +12,105 @@ use disk::{d, q, seal, w};
 type Records = Vec<(Vec<u8>, Vec<u8>)>;
 #[path = "fs_apfs_edit_namespace.rs"]
 mod namespace;
+#[path = "fs_apfs_edit_tree.rs"]
+mod tree;
 pub use namespace::{ApfsCreateMetadata, ApfsMutationPlan};
+#[path = "fs_apfs_edit_reclaim.rs"]
+mod reclaim;
+pub use reclaim::{ApfsReclamationPlan, ApfsReclamationReceipt};
+// These helpers only consume catalog bytes copied and validated by the reader.
+// Stream reference counts count inodes, not their directory occurrences.
+#[derive(Clone, Copy)]
+struct StreamUsage {
+    references: u32,
+    sharing: bool,
+    resource: bool,
+    physical_owner: u64,
+}
+fn stream_users(catalog: &Records) -> Result<BTreeMap<u64, StreamUsage>> {
+    let mut users = BTreeMap::<u64, StreamUsage>::new();
+    for (key, raw) in catalog {
+        let kind = u64le(key, 0) >> 60;
+        let resource = kind == 4
+            && key.len() >= 11
+            && raw.len() == 52
+            && u16::from_le_bytes(raw[..2].try_into().unwrap()) == 1;
+        let data = kind == 3
+            && u16::from_le_bytes(raw[80..82].try_into().unwrap()) & 0xf000 == 0x8000
+            && namespace::fields(raw).iter().any(|field| field.0 == 8);
+        if !resource && !data {
+            continue;
+        }
+        let id = u64le(raw, if resource { 4 } else { 8 });
+        let physical_owner = if resource {
+            u64le(key, 0) & 0x0fffffffffffffff
+        } else {
+            id
+        };
+        let entry = users.entry(id).or_insert(StreamUsage {
+            references: 0,
+            sharing: true,
+            resource,
+            physical_owner,
+        });
+        if entry.resource != resource || resource && entry.references != 0 {
+            return Err(invalid("APFS projected resource stream identity collision"));
+        }
+        entry.references = entry
+            .references
+            .checked_add(1)
+            .ok_or_else(|| budget("APFS projected stream references"))?;
+        entry.sharing &= resource || u64le(raw, 48) & 0x410 != 0;
+    }
+    Ok(users)
+}
+fn detach_data_stream(catalog: &mut Records, inode: u64, next: &mut u64) -> Result<u64> {
+    let at = catalog
+        .iter()
+        .position(|record| u64le(&record.0, 0) == (3u64 << 60 | inode))
+        .ok_or_else(|| invalid("APFS detached inode absent"))?;
+    let old = u64le(&catalog[at].1, 8);
+    if stream_users(catalog)?
+        .get(&old)
+        .is_none_or(|users| users.references <= 1)
+    {
+        return Ok(old);
+    }
+    let new = *next;
+    *next = next
+        .checked_add(1)
+        .filter(|id| *id < 1u64 << 60)
+        .ok_or_else(|| budget("APFS detached stream identity exhausted"))?;
+    q(&mut catalog[at].1, 8, new);
+    // The old stream remains mapped for the other cloned inodes. The caller
+    // creates this stream's complete mapping from the retained indexed runs.
+    Ok(new)
+}
+fn reconcile_streams(catalog: &mut Records) -> Result<BTreeMap<u64, StreamUsage>> {
+    let users = stream_users(catalog)?;
+    for usage in users.values() {
+        if usage.references > 1 && !usage.sharing {
+            return Err(invalid("APFS projected shared stream lacks clone history"));
+        }
+    }
+    catalog.retain(|record| {
+        let kind = u64le(&record.0, 0) >> 60;
+        kind != 6 && (kind != 8 || users.contains_key(&(u64le(&record.0, 0) & 0x0fffffffffffffff)))
+    });
+    catalog
+        .try_reserve_exact(users.len())
+        .map_err(|_| budget("APFS projected stream reference records"))?;
+    for (&id, usage) in &users {
+        if usage.resource {
+            continue;
+        }
+        catalog.push((
+            (6u64 << 60 | id).to_le_bytes().to_vec(),
+            usage.references.to_le_bytes().to_vec(),
+        ));
+    }
+    Ok(users)
+}
 /// Retained checked native geometry for recovery when the block-zero hint is torn.
 /// The caller retains this anchor before mutation; it contains no rollback bytes or journal authority.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -213,6 +311,7 @@ struct Projection {
     lease: Reservation,
     resources: Resources,
     counters: Option<(u64, u64, u64)>,
+    reclamation: Option<reclaim::Reclamation>,
 }
 /// Durable native publication outcome; payload/barrier readback is followed by a complete reopened audit.
 #[derive(Debug)]
@@ -286,12 +385,6 @@ fn records(
     r: &Resources,
 ) -> Result<Records> {
     let tree = index::tree(c, root, storage, kind, map, work, r)?;
-    if tree.pages.len() != 1 || u16::from_le_bytes(tree.pages[0].1[34..36].try_into().unwrap()) != 0
-    {
-        return Err(unavailable(
-            "APFS initial COW single-leaf native tree profile",
-        ));
-    }
     Ok(tree
         .records
         .into_iter()
@@ -520,7 +613,7 @@ impl<S: Storage> ApfsEditor<S> {
         Ok(inode)
     }
     /// Plan an existing-length positional replacement without reading any payload or writing the target.
-    /// The initial COW profile has one volume, native single-leaf trees, inline forks and no shared data streams.
+    /// The COW profile has one volume, bounded native catalog/OMAP/extent trees, inline forks and validated regular cloned data streams.
     pub fn plan_range(
         &self,
         id: &ObjectId,
@@ -542,9 +635,9 @@ impl<S: Storage> ApfsEditor<S> {
         }
         let c = self.volume.container();
         let blocks = c.checkpoint().blocks;
-        if c.checkpoint().volumes.len() != 1 || blocks > 131073 {
+        if c.checkpoint().volumes.len() != 1 || blocks > 127 * 32768 {
             return Err(unavailable(
-                "APFS initial COW single-volume/single-CIB profile",
+                "APFS initial COW single-volume/direct two-CIB profile",
             ));
         }
         if u32le(&self.volume.inner.nodes[&file].raw, 68) != 0 {
@@ -566,13 +659,12 @@ impl<S: Storage> ApfsEditor<S> {
             .ok_or_else(|| invalid("APFS range exceeds unchanged EOF"))?;
         for node in self.volume.inner.nodes.values() {
             for stream in &node.streams {
-                if stream.kind != StreamKind::Data && stream.inline.is_none() {
+                if !matches!(
+                    stream.kind,
+                    StreamKind::Data | StreamKind::ResourceFork | StreamKind::Named(_)
+                ) && stream.inline.is_none()
+                {
                     return Err(unavailable("APFS COW external resource stream"));
-                }
-                if stream.kind == StreamKind::Data && stream.id != node.id {
-                    return Err(unavailable(
-                        "APFS COW shared/clone stream profile pending exact refcount mutation",
-                    ));
                 }
             }
         }
@@ -691,6 +783,8 @@ impl<S: Storage> ApfsEditor<S> {
                 previous,
             });
         }
+        let mut next = u64le(&self.volume.inner.header, 176);
+        let data_id = detach_data_stream(&mut catalog, file, &mut next)?;
         let inode = catalog
             .iter_mut()
             .find(|record| u64le(&record.0, 0) == ((3u64 << 60) | file))
@@ -741,11 +835,11 @@ impl<S: Storage> ApfsEditor<S> {
             .map_err(|_| budget("APFS COW catalog normalization"))?;
         // Split every mapped native data record into block-sized records, including beyond-EOF allocation.
         catalog.retain(|record| {
-            !(u64le(&record.0, 0) >> 60 == 8 && u64le(&record.0, 0) & 0x0fffffffffffffff == file)
+            !(u64le(&record.0, 0) >> 60 == 8 && u64le(&record.0, 0) & 0x0fffffffffffffff == data_id)
         });
         for run in stream.runs.iter() {
             for logical in (run.logical..run.logical + run.length).step_by(BLOCK) {
-                let mut key = ((8u64 << 60) | file).to_le_bytes().to_vec();
+                let mut key = ((8u64 << 60) | data_id).to_le_bytes().to_vec();
                 key.extend_from_slice(&logical.to_le_bytes());
                 let mut value = vec![0; 24];
                 q(
@@ -776,7 +870,12 @@ impl<S: Storage> ApfsEditor<S> {
                 zero_from: None,
                 lease,
                 resources: r.clone(),
-                counters: None,
+                counters: Some((
+                    next,
+                    u64le(&self.volume.inner.header, 184),
+                    u64le(&self.volume.inner.header, 192),
+                )),
+                reclamation: None,
             },
             r,
         )
@@ -784,7 +883,7 @@ impl<S: Storage> ApfsEditor<S> {
     fn assemble(&self, projection: Projection, r: &Resources) -> Result<ApfsRangePlan> {
         let Projection {
             binding,
-            catalog,
+            mut catalog,
             payload,
             input,
             offset,
@@ -793,6 +892,7 @@ impl<S: Storage> ApfsEditor<S> {
             lease,
             resources,
             counters,
+            reclamation,
         } = projection;
         if input.identity().native.len() > 4096 {
             return Err(budget("APFS source identity cap"));
@@ -812,13 +912,72 @@ impl<S: Storage> ApfsEditor<S> {
         let old_cmap = c.checkpoint().object_map;
         let old_vmap = u64le(&self.volume.inner.header, 128);
         let catalog_root = u64le(&self.volume.inner.header, 136);
-        let free = self.free_blocks()?;
+        let mut free = self.free_blocks()?;
+        if let Some(release) = &reclamation {
+            free.extend_from_slice(&release.main);
+            free.sort_unstable();
+            if free.windows(2).any(|pair| pair[0] == pair[1]) {
+                return Err(invalid("APFS reclamation aliases already-free allocation"));
+            }
+        }
         let payload_count = payload.len();
         if free.len() < payload_count + 8 {
             return Err(budget("APFS COW native free allocations"));
         }
-        let mut ownership: BTreeMap<u64, (u64, u32)> = BTreeMap::new();
+        let stream_users = reconcile_streams(&mut catalog)?;
+        // Canonical native runs preserve logical bytes while keeping contiguous
+        // mappings bounded by run count rather than one catalog key per block.
+        catalog.sort_by(|a, b| disk::compare(&a.0, &b.0));
+        let original_catalog = std::mem::take(&mut catalog);
+        catalog
+            .try_reserve_exact(original_catalog.len())
+            .map_err(|_| budget("APFS native extent run index"))?;
+        for (key, value) in original_catalog {
+            let merged = if u64le(&key, 0) >> 60 == 8 {
+                if let Some((old_key, old_value)) =
+                    catalog.last_mut().filter(|(k, _)| u64le(k, 0) >> 60 == 8)
+                {
+                    let length = u64le(old_value, 0) & 0x00ffffffffffffff;
+                    let next_length = u64le(&value, 0) & 0x00ffffffffffffff;
+                    let physical = u64le(old_value, 8);
+                    let next_physical = u64le(&value, 8);
+                    if u64le(old_key, 0) == u64le(&key, 0)
+                        && length.is_multiple_of(BLOCK as u64)
+                        && next_length.is_multiple_of(BLOCK as u64)
+                        && u64le(old_key, 8).checked_add(length) == Some(u64le(&key, 8))
+                        && ((physical == 0 && next_physical == 0)
+                            || (physical != 0
+                                && next_physical != 0
+                                && physical.checked_add(length / BLOCK as u64)
+                                    == Some(next_physical)))
+                        && (u64le(old_value, 0) & 0xff00000000000000)
+                            == (u64le(&value, 0) & 0xff00000000000000)
+                        && old_value[16..] == value[16..]
+                    {
+                        let total = length
+                            .checked_add(next_length)
+                            .filter(|n| *n <= 0x00ffffffffffffff)
+                            .ok_or_else(|| budget("APFS catalog extent run length"))?;
+                        let flags = u64le(old_value, 0) & 0xff00000000000000;
+                        q(old_value, 0, flags | total);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if !merged {
+                catalog.push((key, value));
+            }
+        }
+        // Sweep extent boundaries rather than expanding unchanged payload ownership.
+        let mut events: BTreeMap<u64, Vec<(u64, bool)>> = BTreeMap::new();
         for (key, value) in &catalog {
+            r.cancellation.check()?;
             if u64le(key, 0) >> 60 != 8 {
                 continue;
             }
@@ -827,42 +986,139 @@ impl<S: Storage> ApfsEditor<S> {
             if physical == 0 {
                 continue;
             }
-            let length = u64le(value, 0) & 0x00ffffffffffffff;
-            for block in physical..physical + length.div_ceil(BLOCK as u64) {
-                let entry = ownership.entry(block).or_insert((owner, 0));
-                if entry.0 != owner {
-                    return Err(unavailable("APFS COW conflicting stream extent sharing"));
-                }
-                entry.1 = entry
-                    .1
-                    .checked_add(1)
-                    .ok_or_else(|| budget("APFS COW extent refs"))?;
+            let length = (u64le(value, 0) & 0x00ffffffffffffff).div_ceil(BLOCK as u64);
+            let end = physical
+                .checked_add(length)
+                .filter(|end| *end <= c.checkpoint().blocks)
+                .ok_or_else(|| invalid("APFS COW physical extent bounds"))?;
+            if length == 0 {
+                return Err(invalid("APFS COW empty physical extent"));
             }
+            events.entry(physical).or_default().push((owner, true));
+            events.entry(end).or_default().push((owner, false));
         }
-        let physical_records: Records = ownership
-            .into_iter()
-            .map(|(block, (owner, refs))| {
-                let key = ((2u64 << 60) | block).to_le_bytes().to_vec();
-                let mut value = vec![0; 20];
-                q(&mut value, 0, (1u64 << 60) | 1);
-                q(&mut value, 8, owner);
-                d(&mut value, 16, refs);
-                (key, value)
-            })
-            .collect();
+        // Split at old physical-owner boundaries even when a logical run
+        // crosses them, preserving historical ownership exactly.
+        for &(start, length, _, _) in &self.volume.inner.extent_records {
+            events.entry(start).or_default();
+            events.entry(start + length).or_default();
+        }
+        let mut active: BTreeMap<u64, u32> = BTreeMap::new();
+        let mut ownership: Vec<(u64, u64, u64, u32)> = Vec::new();
+        let mut previous = 0;
+        let mut physical_count = 0u64;
+        for (position, changes) in events {
+            r.cancellation.check()?;
+            if position > previous && !active.is_empty() {
+                if active.len() > 1
+                    && active
+                        .keys()
+                        .any(|id| !stream_users.get(id).is_some_and(|users| users.sharing))
+                {
+                    return Err(invalid("APFS COW physical sharing lacks clone history"));
+                }
+                let resource = stream_users[active.first_key_value().unwrap().0].resource;
+                if active
+                    .keys()
+                    .any(|id| stream_users[id].resource != resource)
+                {
+                    return Err(invalid("APFS COW DATA/resource physical owner collision"));
+                }
+                // The original canonical owner can outlive its inode. Retained
+                // checkpoints must name the same physical allocation owner.
+                let owner = self
+                    .volume
+                    .inner
+                    .extent_records
+                    .iter()
+                    .find(|&&(start, length, _, _)| start <= previous && position <= start + length)
+                    .map_or_else(
+                        || stream_users[active.first_key_value().unwrap().0].physical_owner,
+                        |record| record.2,
+                    );
+                let refs = u32::try_from(active.len())
+                    .map_err(|_| budget("APFS COW physical stream references"))?;
+                let length = position - previous;
+                physical_count = physical_count
+                    .checked_add(length)
+                    .ok_or_else(|| budget("APFS COW extent count"))?;
+                if let Some(last) = ownership.last_mut()
+                    && last.0 + last.1 == previous
+                    && last.2 == owner
+                    && last.3 == refs
+                {
+                    last.1 += length;
+                } else {
+                    ownership.push((previous, length, owner, refs));
+                }
+            }
+            // End events first: adjacent different owners do not overlap.
+            for &(owner, starts) in &changes {
+                if !starts {
+                    let count = active
+                        .get_mut(&owner)
+                        .ok_or_else(|| invalid("APFS COW extent boundary"))?;
+                    *count = count
+                        .checked_sub(1)
+                        .ok_or_else(|| invalid("APFS COW extent reference underflow"))?;
+                    if *count == 0 {
+                        active.remove(&owner);
+                    }
+                }
+            }
+            for (owner, starts) in changes {
+                if starts {
+                    let count = active.entry(owner).or_default();
+                    *count = count
+                        .checked_add(1)
+                        .ok_or_else(|| budget("APFS COW extent refs"))?;
+                }
+            }
+            previous = position;
+        }
+        if !active.is_empty() {
+            return Err(invalid("APFS COW unterminated extent"));
+        }
+        let mut physical_records: Records = Vec::new();
+        for &(start, length, owner, refs) in &ownership {
+            let key = ((2u64 << 60) | start).to_le_bytes().to_vec();
+            let mut value = vec![0; 20];
+            q(&mut value, 0, (1u64 << 60) | length);
+            q(&mut value, 8, owner);
+            d(&mut value, 16, refs);
+            physical_records.push((key, value));
+        }
         let mut retired_main: BTreeSet<u64> =
             self.volume.inner.pages.iter().map(|page| page.0).collect();
-        let current_physical: BTreeSet<u64> = physical_records
-            .iter()
-            .map(|record| u64le(&record.0, 0) & 0x0fffffffffffffff)
-            .collect();
         for node in self.volume.inner.nodes.values() {
-            for stream in node.streams.iter().filter(|s| s.kind == StreamKind::Data) {
+            for stream in node.streams.iter().filter(|s| s.inline.is_none()) {
                 for run in stream.runs.iter().filter(|run| run.physical != 0) {
-                    for block in run.physical..run.physical + run.length.div_ceil(BLOCK as u64) {
-                        if !current_physical.contains(&block) {
+                    r.cancellation.check()?;
+                    let end = run
+                        .physical
+                        .checked_add(run.length.div_ceil(BLOCK as u64))
+                        .ok_or_else(|| invalid("APFS retired extent bounds"))?;
+                    let mut cursor = run.physical;
+                    for &(start, length, _, _) in &ownership {
+                        let retained_end = start + length;
+                        if retained_end <= cursor {
+                            continue;
+                        }
+                        if start >= end {
+                            break;
+                        }
+                        for block in cursor..start.min(end) {
+                            r.cancellation.check()?;
                             retired_main.insert(block);
                         }
+                        cursor = cursor.max(retained_end.min(end));
+                        if cursor == end {
+                            break;
+                        }
+                    }
+                    for block in cursor..end {
+                        r.cancellation.check()?;
+                        retired_main.insert(block);
                     }
                 }
             }
@@ -875,6 +1131,13 @@ impl<S: Storage> ApfsEditor<S> {
             .ok_or_else(|| invalid("APFS COW spaceman mapping"))?;
         let old_sm = self.copied(sm_mapping.address)?;
         let mut main_pending = self.pending_blocks(u64le(&old_sm, 248), r)?;
+        if let Some(release) = &reclamation {
+            for block in &release.main {
+                main_pending
+                    .remove(block)
+                    .ok_or_else(|| invalid("APFS reclamation main reservation changed"))?;
+            }
+        }
         for block in retired_main {
             if main_pending.insert(block, next).is_some() {
                 return Err(invalid("APFS newly retired current owner already pending"));
@@ -883,20 +1146,65 @@ impl<S: Storage> ApfsEditor<S> {
         let retired_count = main_pending.len() as u64;
         let main_oldest = main_pending.values().copied().min().unwrap_or(0);
         let main_queue = queue_records(main_pending);
-        let addresses = &free[payload_count..payload_count + 8];
-        let (cm, cmroot, vol, vm, vmroot, cat, ext, snap) = (
-            addresses[0],
-            addresses[1],
-            addresses[2],
-            addresses[3],
-            addresses[4],
-            addresses[5],
-            addresses[6],
-            addresses[7],
-        );
+        let cat_tree = tree::Tree::plan(catalog, None, self, r)?;
+        let ext_tree = tree::Tree::plan(physical_records, None, self, r)?;
+        let namespace_next = counters.map_or(u64le(&self.volume.inner.header, 176), |n| n.0);
+        let first_child = namespace_next.max(u64le(&c.inner.header, 88));
+        let next_oid = if cat_tree.len() == 1 {
+            namespace_next
+        } else {
+            first_child
+                .checked_add((cat_tree.len() - 1) as u64)
+                .filter(|id| *id < (1u64 << 60))
+                .ok_or_else(|| budget("APFS catalog child object IDs exhausted"))?
+        };
+        let map_shape = cat_tree.mappings(catalog_root, first_child, &vec![0; cat_tree.len()])?;
+        let vm_shape = tree::Tree::plan(
+            map_shape
+                .iter()
+                .map(|(id, at)| omap_record(*id, next, *at))
+                .collect(),
+            Some((16, 16)),
+            self,
+            r,
+        )?;
+        let vm_count = vm_shape.len();
+        drop(vm_shape);
+        let metadata_count = 5usize
+            .checked_add(vm_count)
+            .and_then(|n| n.checked_add(cat_tree.len()))
+            .and_then(|n| n.checked_add(ext_tree.len()))
+            .ok_or_else(|| budget("APFS native metadata count"))?;
+        let allocation_count = payload_count
+            .checked_add(metadata_count)
+            .ok_or_else(|| budget("APFS native allocation count"))?;
+        if metadata_count > self.limits.metadata_blocks || free.len() < allocation_count {
+            return Err(budget("APFS COW native metadata allocations"));
+        }
+        let addresses = &free[payload_count..allocation_count];
+        let (cm, cmroot, vol, vm) = (addresses[0], addresses[1], addresses[2], addresses[3]);
+        let vm_addresses = &addresses[4..4 + vm_count];
+        let cat_at = 4 + vm_count;
+        let cat_addresses = &addresses[cat_at..cat_at + cat_tree.len()];
+        let ext_at = cat_at + cat_tree.len();
+        let ext_addresses = &addresses[ext_at..ext_at + ext_tree.len()];
+        let snap = addresses[metadata_count - 1];
+        let mappings = cat_tree.mappings(catalog_root, first_child, cat_addresses)?;
+        let vm_tree = tree::Tree::plan(
+            mappings
+                .into_iter()
+                .map(|(id, at)| omap_record(id, next, at))
+                .collect(),
+            Some((16, 16)),
+            self,
+            r,
+        )?;
+        if vm_tree.len() != vm_count {
+            return Err(invalid("APFS native OMAP shape changed"));
+        }
         let mut metadata = Vec::new();
         metadata
-            .try_reserve_exact(8)
+            .try_reserve_exact(metadata_count)
             .map_err(|_| budget("APFS COW metadata map"))?;
         let mut cmheader = self.copied(old_cmap)?;
         q(&mut cmheader, 8, cm);
@@ -917,42 +1225,37 @@ impl<S: Storage> ApfsEditor<S> {
         ));
         let mut header = self.volume.inner.header.clone();
         q(&mut header, 16, next);
-        let current_allocated = 5u64
-            .checked_add(current_physical.len() as u64)
+        let current_allocated = (2 + vm_count + cat_tree.len() + ext_tree.len()) as u64;
+        let current_allocated = current_allocated
+            .checked_add(physical_count)
             .ok_or_else(|| budget("APFS COW volume allocated overflow"))?;
-        if let Some((next_oid, files, dirs)) = counters {
-            q(&mut header, 176, next_oid);
+        q(&mut header, 176, next_oid);
+        if let Some((_, files, dirs)) = counters {
             q(&mut header, 184, files);
             q(&mut header, 192, dirs);
         }
         q(&mut header, 88, current_allocated);
         q(&mut header, 128, vm);
-        q(&mut header, 144, ext);
+        q(&mut header, 144, ext_addresses[0]);
         q(&mut header, 152, snap);
         seal(&mut header);
         metadata.push((vol, header));
         let mut vmheader = self.copied(old_vmap)?;
         q(&mut vmheader, 8, vm);
         q(&mut vmheader, 16, next);
-        q(&mut vmheader, 48, vmroot);
+        q(&mut vmheader, 48, vm_addresses[0]);
         seal(&mut vmheader);
         metadata.push((vm, vmheader));
-        metadata.push((
-            vmroot,
-            leaf(
-                vmroot,
-                0x40000000,
-                11,
-                vec![omap_record(catalog_root, next, cat)],
-                Some((16, 16)),
-                next,
-            )?,
-        ));
-        metadata.push((cat, leaf(catalog_root, 0, 14, catalog, None, next)?));
-        metadata.push((
-            ext,
-            leaf(ext, 0x40000000, 15, physical_records, None, next)?,
-        ));
+        metadata.extend(vm_tree.render(vm_addresses[0], 0, 0x40000000, 11, vm_addresses, next)?);
+        metadata.extend(cat_tree.render(catalog_root, first_child, 0, 14, cat_addresses, next)?);
+        metadata.extend(ext_tree.render(
+            ext_addresses[0],
+            0,
+            0x40000000,
+            15,
+            ext_addresses,
+            next,
+        )?);
         metadata.push((snap, leaf(snap, 0x40000000, 16, vec![], None, next)?));
         let h = &c.inner.header;
         let desc_base = u64le(h, 112);
@@ -994,8 +1297,9 @@ impl<S: Storage> ApfsEditor<S> {
             .find(|m| m.oid == c.checkpoint().space_manager)
             .ok_or_else(|| invalid("APFS COW spaceman mapping"))?;
         let mut sm = self.copied(smmap.address)?;
-        if u32le(&sm, 64) != 1 {
-            return Err(unavailable("APFS COW direct single CIB"));
+        let cib_count = u32le(&sm, 64) as usize;
+        if !(1..=2).contains(&cib_count) || u32le(&sm, 68) != 0 {
+            return Err(unavailable("APFS COW direct two-CIB profile"));
         }
         let ipbase = u64le(&sm, 176);
         let ipcount = u64le(&sm, 152) as usize;
@@ -1005,22 +1309,64 @@ impl<S: Storage> ApfsEditor<S> {
         let foff = u32le(&sm, 332) as usize;
         let active = u16::from_le_bytes(sm[boff..boff + 2].try_into().unwrap()) as usize;
         let mut ipbits = self.copied(bm_base + active as u64)?;
-        let address_offset = u32le(&sm, 80) as usize;
-        let old_cib = u64le(&sm, address_offset);
-        let mut cib = self.copied(old_cib)?;
-        let chunks = u32le(&cib, 36) as usize;
-        if chunks == 0 || chunks > 5 || chunks as u64 != c.checkpoint().blocks.div_ceil(32768) {
-            return Err(unavailable("APFS COW bounded single-CIB chunk profile"));
+        if let Some(release) = &reclamation {
+            for block in &release.internal {
+                let relative = block
+                    .checked_sub(ipbase)
+                    .filter(|index| *index < ipcount as u64)
+                    .ok_or_else(|| invalid("APFS reclamation internal pool bounds"))?
+                    as usize;
+                let mask = 1 << (relative % 8);
+                if ipbits[relative / 8] & mask == 0 {
+                    return Err(invalid("APFS reclamation internal bit already free"));
+                }
+                ipbits[relative / 8] &= !mask;
+            }
         }
-        let mut changed: BTreeMap<usize, Vec<u64>> = BTreeMap::new();
-        for block in free.iter().take(payload_count + 8) {
+        let address_offset = u32le(&sm, 80) as usize;
+        let chunks = usize::try_from(u64le(&sm, 56)).map_err(|_| budget("APFS COW chunk count"))?;
+        if chunks == 0
+            || chunks > 127
+            || chunks as u64 != c.checkpoint().blocks.div_ceil(32768)
+            || cib_count != chunks.div_ceil(126)
+        {
+            return Err(unavailable("APFS COW bounded direct CIB chunk profile"));
+        }
+        let mut cibs = Vec::new();
+        cibs.try_reserve_exact(cib_count)
+            .map_err(|_| budget("APFS COW CIB index"))?;
+        for i in 0..cib_count {
+            let old = u64le(&sm, address_offset + i * 8);
+            let bytes = self.copied(old)?;
+            if u32le(&bytes, 32) as usize != i
+                || u32le(&bytes, 36) as usize != (chunks - i * 126).min(126)
+            {
+                return Err(invalid("APFS COW native CIB index/count"));
+            }
+            cibs.push((old, bytes));
+        }
+        let mut changed: BTreeMap<usize, Vec<(u64, bool)>> = BTreeMap::new();
+        if let Some(release) = &reclamation {
+            for block in &release.main {
+                let chunk = (*block / 32768) as usize;
+                if chunk >= chunks {
+                    return Err(invalid("APFS reclaimed allocation outside CIB"));
+                }
+                changed.entry(chunk).or_default().push((*block, false));
+            }
+        }
+        for block in free.iter().take(allocation_count) {
             let chunk = (*block / 32768) as usize;
             if chunk >= chunks {
                 return Err(invalid("APFS new allocation outside CIB"));
             }
-            changed.entry(chunk).or_default().push(*block);
+            changed.entry(chunk).or_default().push((*block, true));
         }
-        let required = changed.len() + 1;
+        let affected_cibs: BTreeSet<_> = changed.keys().map(|chunk| chunk / 126).collect();
+        let required = changed
+            .len()
+            .checked_add(affected_cibs.len())
+            .ok_or_else(|| budget("APFS COW pool slots"))?;
         let slots: Vec<_> = (0..ipcount)
             .filter(|i| ipbits[i / 8] & (1 << (i % 8)) == 0)
             .take(required)
@@ -1028,7 +1374,6 @@ impl<S: Storage> ApfsEditor<S> {
         if slots.len() != required {
             return Err(budget("APFS COW retained internal-pool exhaustion"));
         }
-        let cib_addr = ipbase + slots[changed.len()] as u64;
         for slot in &slots {
             ipbits[slot / 8] |= 1 << (slot % 8);
         }
@@ -1050,14 +1395,24 @@ impl<S: Storage> ApfsEditor<S> {
             }
         }
         let mut ip_pending = self.pending_blocks(u64le(&sm, 208), r)?;
-        if ip_pending.insert(old_cib, next).is_some() {
-            return Err(invalid("APFS newly retired CIB owner already pending"));
+        if let Some(release) = &reclamation {
+            for block in &release.internal {
+                ip_pending
+                    .remove(block)
+                    .ok_or_else(|| invalid("APFS reclamation internal reservation changed"))?;
+            }
+        }
+        for i in &affected_cibs {
+            if ip_pending.insert(cibs[*i].0, next).is_some() {
+                return Err(invalid("APFS newly retired CIB owner already pending"));
+            }
         }
         let mut free_count = 0u64;
         for chunk in 0..chunks {
-            let at = 40 + chunk * 32;
+            let cib = &mut cibs[chunk / 126].1;
+            let at = 40 + (chunk % 126) * 32;
             if let Some(allocations) = changed.get(&chunk) {
-                let old_bitmap = u64le(&cib, at + 24);
+                let old_bitmap = u64le(cib, at + 24);
                 let mut bitmap = if old_bitmap == 0 {
                     let mut b = Vec::new();
                     b.try_reserve_exact(BLOCK)
@@ -1070,34 +1425,50 @@ impl<S: Storage> ApfsEditor<S> {
                     }
                     self.copied(old_bitmap)?
                 };
-                for block in allocations {
+                let mut new_free = u32le(cib, at + 20);
+                for (block, allocate) in allocations {
                     let relative = (*block % 32768) as usize;
-                    if bitmap[relative / 8] & (1 << (relative % 8)) != 0 {
-                        return Err(invalid("APFS new allocation already set in chunk bitmap"));
+                    let mask = 1 << (relative % 8);
+                    if (bitmap[relative / 8] & mask != 0) == *allocate {
+                        return Err(invalid(
+                            "APFS allocation bit transition disagrees with native proof",
+                        ));
                     }
-                    bitmap[relative / 8] |= 1 << (relative % 8);
+                    if *allocate {
+                        bitmap[relative / 8] |= mask;
+                        new_free = new_free
+                            .checked_sub(1)
+                            .ok_or_else(|| invalid("APFS COW chunk allocation count"))?;
+                    } else {
+                        bitmap[relative / 8] &= !mask;
+                        new_free = new_free
+                            .checked_add(1)
+                            .ok_or_else(|| invalid("APFS COW chunk reclamation count"))?;
+                    }
                 }
-                let old_free = u32le(&cib, at + 20);
-                let new_free = old_free
-                    .checked_sub(allocations.len() as u32)
-                    .ok_or_else(|| invalid("APFS COW chunk free count"))?;
                 let slot_index = changed
                     .keys()
                     .position(|n| *n == chunk)
                     .ok_or_else(|| invalid("APFS changed chunk slot"))?;
                 let bitmap_addr = ipbase + slots[slot_index] as u64;
-                q(&mut cib, at, next);
-                d(&mut cib, at + 20, new_free);
-                q(&mut cib, at + 24, bitmap_addr);
+                q(cib, at, next);
+                d(cib, at + 20, new_free);
+                q(cib, at + 24, bitmap_addr);
                 metadata.push((bitmap_addr, bitmap));
             }
             free_count = free_count
-                .checked_add(u64::from(u32le(&cib, at + 20)))
+                .checked_add(u64::from(u32le(cib, at + 20)))
                 .ok_or_else(|| budget("APFS COW aggregate free count"))?;
         }
         if free_count
             != u64le(&sm, 72)
-                .checked_sub((payload_count + 8) as u64)
+                .checked_add(
+                    reclamation
+                        .as_ref()
+                        .map_or(0, |release| release.main.len() as u64),
+                )
+                .ok_or_else(|| invalid("APFS COW reclaimed free count"))?
+                .checked_sub(allocation_count as u64)
                 .ok_or_else(|| invalid("APFS COW free count"))?
         {
             return Err(invalid("APFS COW aggregate chunk count disagrees"));
@@ -1105,16 +1476,21 @@ impl<S: Storage> ApfsEditor<S> {
         let ip_count = ip_pending.len() as u64;
         let ip_oldest = ip_pending.values().copied().min().unwrap_or(0);
         let ip_queue = queue_records(ip_pending);
-        q(&mut cib, 8, cib_addr);
-        q(&mut cib, 16, next);
-        seal(&mut cib);
+        for (ordinal, ci) in affected_cibs.iter().enumerate() {
+            let cib_addr = ipbase + slots[changed.len() + ordinal] as u64;
+            let cib = &mut cibs[*ci].1;
+            q(cib, 8, cib_addr);
+            q(cib, 16, next);
+            seal(cib);
+            q(&mut sm, address_offset + *ci * 8, cib_addr);
+            metadata.push((cib_addr, std::mem::take(cib)));
+        }
         q(&mut sm, 16, next);
         q(&mut sm, 200, ip_count);
         q(&mut sm, 216, ip_oldest);
         q(&mut sm, 240, retired_count);
         q(&mut sm, 256, main_oldest);
         q(&mut sm, 72, free_count);
-        q(&mut sm, address_offset, cib_addr);
         q(&mut sm, xoff, next);
         w(&mut sm, boff, index as u16);
         let after = u16::from_le_bytes(
@@ -1129,7 +1505,6 @@ impl<S: Storage> ApfsEditor<S> {
         w(&mut sm, foff + index * 2, 65535);
         w(&mut sm, 322, active as u16);
         seal(&mut sm);
-        metadata.push((cib_addr, cib));
         metadata.push((bm_base + index as u64, ipbits));
         let mut ephemeral = Vec::new();
         let mut cp = self.copied(desc_base + u32le(h, 136) as u64)?;
@@ -1167,6 +1542,7 @@ impl<S: Storage> ApfsEditor<S> {
         q(&mut cp, 16, next);
         seal(&mut cp);
         let mut nx = h.clone();
+        q(&mut nx, 88, u64le(h, 88).max(next_oid));
         q(&mut nx, 16, next);
         q(
             &mut nx,
@@ -1264,7 +1640,7 @@ impl<S: Storage> ApfsEditor<S> {
         }
         Ok(())
     }
-    fn write_block(&mut self, address: u64, bytes: &[u8], r: &Resources) -> Result<()> {
+    pub(super) fn write_block(&mut self, address: u64, bytes: &[u8], r: &Resources) -> Result<()> {
         self.snapshot.work.charge(bytes.len() as u64)?;
         let at = address
             .checked_mul(BLOCK as u64)
@@ -1455,15 +1831,25 @@ impl<S: Storage> ApfsEditor<S> {
                 .flush()
                 .map_err(|e| Error::io("APFS COW checkpoint barrier", e))?;
             self.verify_blocks(std::slice::from_ref(&plan.nx), r)?;
-            self.refresh_owned(plan.xid + 1, r)?;
+            self.refresh_indexed(
+                plan.xid + 1,
+                &[
+                    &plan.metadata,
+                    &plan.ephemeral,
+                    std::slice::from_ref(&plan.map),
+                    std::slice::from_ref(&plan.nx),
+                ],
+                &plan.payload,
+                r,
+            )?;
             self.recovery_required = true;
             let boot = self.volume.container().inner.header.clone();
             self.write_block(0, &boot, r)?;
             self.target
                 .flush()
                 .map_err(|e| Error::io("APFS COW terminal boot-hint barrier", e))?;
-            self.verify_blocks(&[(0, boot)], r)?;
-            self.refresh_owned(plan.xid + 1, r)?;
+            self.verify_blocks(&[(0, boot.clone())], r)?;
+            self.refresh_indexed(plan.xid + 1, &[&[(0, boot)]], &[], r)?;
             Ok(ApfsEditReceipt {
                 previous_xid: plan.xid,
                 xid: plan.xid + 1,
@@ -1481,7 +1867,72 @@ impl<S: Storage> ApfsEditor<S> {
             error
         })
     }
-    fn refresh_owned(&mut self, expected_xid: u64, r: &Resources) -> Result<()> {
+    pub(super) fn refresh_owned(&mut self, expected_xid: u64, r: &Resources) -> Result<()> {
+        self.refresh_inner(expected_xid, None, r)
+    }
+    fn refresh_indexed(
+        &mut self,
+        expected_xid: u64,
+        overlays: &[&[(u64, Vec<u8>)]],
+        payload: &[Payload],
+        r: &Resources,
+    ) -> Result<()> {
+        // This separate reservation covers the merged index while old and fresh proofs coexist.
+        let charge = u64::try_from(self.limits.metadata_blocks)
+            .ok()
+            .and_then(|n| n.checked_mul(BLOCK as u64 + 256))
+            .ok_or_else(|| budget("APFS reopen seed reservation"))?;
+        let owner_resources = self.snapshot.work.resources.clone();
+        let _lease = owner_resources.memory.reserve(charge)?;
+        let mut blocks = Vec::new();
+        blocks
+            .try_reserve_exact(self.limits.metadata_blocks)
+            .map_err(|_| budget("APFS reopen seed allocation"))?;
+        // Native allocation candidates are strictly increasing; validate before binary lookup.
+        if payload
+            .windows(2)
+            .any(|pair| pair[0].physical >= pair[1].physical)
+        {
+            return Err(invalid("APFS reopen payload allocation order"));
+        }
+        // Reclaimed former metadata may now be payload: never seed its old bytes.
+        blocks.extend(
+            self.snapshot
+                .blocks
+                .iter()
+                .filter(|(at, _)| {
+                    payload
+                        .binary_search_by_key(at, |entry| entry.physical)
+                        .is_err()
+                })
+                .cloned(),
+        );
+        for entries in overlays {
+            for (at, bytes) in *entries {
+                r.cancellation.check()?;
+                let bytes: [u8; BLOCK] = bytes
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| invalid("APFS reopen seed block length"))?;
+                match blocks.binary_search_by_key(at, |entry| entry.0) {
+                    Ok(index) => blocks[index].1 = Arc::new(bytes),
+                    Err(index) => {
+                        if blocks.len() == self.limits.metadata_blocks {
+                            return Err(budget("APFS reopen seed block ceiling"));
+                        }
+                        blocks.insert(index, (*at, Arc::new(bytes)));
+                    }
+                }
+            }
+        }
+        self.refresh_inner(expected_xid, Some(&blocks), r)
+    }
+    fn refresh_inner(
+        &mut self,
+        expected_xid: u64,
+        metadata: Option<&[MetadataBlock]>,
+        r: &Resources,
+    ) -> Result<()> {
         struct Borrowed<'a>(&'a dyn Storage);
         impl Storage for Borrowed<'_> {
             fn len(&self) -> io::Result<u64> {
@@ -1505,11 +1956,13 @@ impl<S: Storage> ApfsEditor<S> {
             .ok_or_else(|| budget("APFS COW reopen work"))?;
         r.cancellation.check()?;
         let owner_resources = self.snapshot.work.resources.clone();
-        let fresh = ApfsEditor::open(
+        let fresh = ApfsEditor::open_indexed(
             Borrowed(&self.target),
             self.volume.inner.oid,
             limits,
             &owner_resources,
+            None,
+            metadata,
         )?;
         if fresh.checkpoint_xid() != expected_xid {
             return Err(Error::new(

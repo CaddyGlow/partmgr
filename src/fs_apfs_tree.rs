@@ -115,7 +115,13 @@ impl TreeSource for ApfsTreeSource {
     fn streams(&self, id: &ObjectId, r: &Resources) -> Result<Budgeted<Vec<StreamInfo>>> {
         self.volume.revalidate(id, r)?;
         let node = self.volume.node(id)?;
-        Budgeted::try_new(&r.memory, 256, || {
+        let charge = node
+            .streams
+            .len()
+            .checked_mul(1024)
+            .and_then(|n| n.checked_add(256))
+            .ok_or_else(|| bad("APFS stream inventory charge overflow"))?;
+        Budgeted::try_new(&r.memory, charge as u64, || {
             let mut streams = vector(node.streams.len())?;
             for stream in &node.streams {
                 streams.push(StreamInfo {

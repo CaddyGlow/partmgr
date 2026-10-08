@@ -454,3 +454,19 @@ pub fn external_directory(image: &mut [u8]) {
     used.extend([90, 91, 100, 102, 110, 112]);
     rebuild_map(image, &used);
 }
+
+/// Independent native inline dtree/index update giving inode 6 two names.
+pub fn small_hardlink(image: &mut [u8]) {
+    let directory = 29 * BLOCK + 5 * 512;
+    let (tree, indexes) = dt(
+        &[
+            ("Child".encode_utf16().collect(), 6, 2),
+            ("Peer".encode_utf16().collect(), 6, 3),
+        ],
+        2,
+    );
+    p32(image, directory + 120, 4);
+    image[directory + 128..directory + 224].copy_from_slice(&indexes);
+    image[directory + 224..directory + 512].copy_from_slice(&tree);
+    p32(image, 29 * BLOCK + 6 * 512 + 40, 2);
+}

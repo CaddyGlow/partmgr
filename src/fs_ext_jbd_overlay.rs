@@ -116,9 +116,7 @@ impl<'a> Overlay<'a> {
             }
             put32(&mut control.original, 24, control.next_sequence);
             put32(&mut control.original, 28, 0);
-            put32(&mut control.original, 252, 0);
-            let sum = crc32c(!0, &control.original);
-            put32(&mut control.original, 252, sum);
+            journal_checksum(&control.geometry, &mut control.original);
             Some((control.physical, control.original))
         } else {
             None
@@ -147,7 +145,8 @@ impl<'a> Overlay<'a> {
                 expected.destination(record.destination)?;
             }
         }
-        let decoder = super::super::ExtDecoder::open_reader(self, scope, &resources, true)?;
+        let decoder =
+            super::super::ExtDecoder::open_owned_profile_qualification(self, scope, &resources)?;
         if let Some(expected) = expected_journal {
             let inode = decoder.inode(8, &resources)?;
             if inode.raw != expected.inode[..128] || inode.extra != expected.inode[128..256] {

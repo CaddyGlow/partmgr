@@ -1,5 +1,5 @@
 //! Bounded checksum, topology and native hash-range validation for indexed directories.
-use super::{dir_hash, invalid, metadata::MetadataChecksums, u16le, u32le, unsupported};
+use super::{dir_hash, integrity::Integrity, invalid, u16le, u32le, unsupported};
 use crate::fs_core::{Reservation, Resources};
 use std::io;
 #[derive(Clone, Copy, Debug, Default)]
@@ -23,7 +23,7 @@ pub(super) struct IndexOptions {
     pub unsigned_hash: bool,
 }
 pub(super) fn validate(
-    checksums: &MetadataChecksums,
+    checksums: &Integrity,
     options: IndexOptions,
     resources: &Resources,
     mut read: impl FnMut(usize, &mut [u8]) -> io::Result<()>,
@@ -124,7 +124,8 @@ pub(super) fn validate(
         }
         let limit = usize::from(u16le(&buffer, offset));
         let count = usize::from(u16le(&buffer, offset + 2));
-        if limit != (bs - offset - 8) / 8 || count == 0 || count > limit {
+        let checksum_tail = if checksums.has_metadata() { 8 } else { 0 };
+        if limit != (bs - offset - checksum_tail) / 8 || count == 0 || count > limit {
             return Err(invalid("ext directory index count/capacity"));
         }
         checksums.directory_index(inode, generation, &buffer[..bs], offset)?;
@@ -228,6 +229,7 @@ pub(super) fn validate(
 
 #[cfg(test)]
 mod tests {
+    use super::super::metadata::MetadataChecksums;
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
     fn r(bytes: u64) -> Resources {
@@ -315,7 +317,7 @@ mod tests {
     }
     fn inspect(b: &[[u8; 1024]; 3], resources: &Resources) -> io::Result<DirectoryIndex> {
         validate(
-            &MetadataChecksums { seed: 0x12345678 },
+            &MetadataChecksums { seed: 0x12345678 }.into(),
             options(),
             resources,
             |logical, bytes| {
@@ -323,6 +325,66 @@ mod tests {
                 Ok(())
             },
         )
+    }
+    #[test]
+    fn absent_checksum_native_index_capacity_topology_and_cancel() {
+        // Raw native directory layout is assembled independently; no checksum
+        // tail exists and each leaf's final record reaches the whole block end.
+        let mut image = [[0; 1024]; 3];
+        d(&mut image[0], 0, 2);
+        w(&mut image[0], 4, 12);
+        image[0][6..9].copy_from_slice(&[1, 2, b'.']);
+        d(&mut image[0], 12, 2);
+        w(&mut image[0], 16, 1012);
+        image[0][18..22].copy_from_slice(&[2, 2, b'.', b'.']);
+        image[0][28..30].copy_from_slice(&[1, 8]);
+        w(&mut image[0], 32, 124);
+        w(&mut image[0], 34, 2);
+        d(&mut image[0], 36, 1);
+        d(&mut image[0], 40, 0x80000000);
+        d(&mut image[0], 44, 2);
+        w(&mut image[1], 4, 1024);
+        d(&mut image[2], 0, 11);
+        w(&mut image[2], 4, 1024);
+        image[2][6..16].copy_from_slice(b"\x08\x01filename");
+        let policy = Integrity::superblock(&[0; 1024]).unwrap();
+        let resources = r(32768);
+        let inspect = |bytes: &[[u8; 1024]; 3], r: &Resources| {
+            validate(&policy, options(), r, |logical, buffer| {
+                buffer.copy_from_slice(&bytes[logical]);
+                Ok(())
+            })
+        };
+        let proof = inspect(&image, &resources).unwrap();
+        assert_eq!(
+            proof.nodes.iter().map(|n| n.kind).collect::<Vec<_>>(),
+            vec![1, 3, 3]
+        );
+        drop(proof);
+        for mutation in 0..4 {
+            let mut bad = image;
+            match mutation {
+                0 => d(&mut bad[0], 44, 1),
+                1 => w(&mut bad[0], 32, 123),
+                2 => w(&mut bad[2], 4, 1012),
+                _ => bad[2][8] = 0,
+            }
+            assert!(inspect(&bad, &resources).is_err());
+            assert_eq!(resources.memory.used(), 0);
+        }
+        let tiny = r(0);
+        assert!(inspect(&image, &tiny).is_err());
+        assert_eq!(tiny.memory.used(), 0);
+        let mut reads = 0;
+        let cancelled = validate(&policy, options(), &resources, |logical, buffer| {
+            reads += 1;
+            buffer.copy_from_slice(&image[logical]);
+            resources.cancellation.cancel();
+            Ok(())
+        });
+        assert!(cancelled.is_err());
+        assert_eq!(reads, 1);
+        assert_eq!(resources.memory.used(), 0);
     }
     #[test]
     fn complete_index_rechecksummed_key_alias_cycle_and_leaf_defects_are_bounded() {
@@ -380,7 +442,7 @@ mod tests {
             let mut opts = options();
             opts.logical_blocks = 4;
             validate(
-                &MetadataChecksums { seed: 0x12345678 },
+                &MetadataChecksums { seed: 0x12345678 }.into(),
                 opts,
                 r,
                 |n, dst| {

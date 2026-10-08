@@ -32,6 +32,7 @@ pub struct NtfsTreeSource {
     root: ObjectId,
     nodes: HashMap<ObjectId, Node>,
     excluded: Vec<NtfsDirectoryEntry>,
+    security_capture: Option<crate::fs_ntfs_security::NtfsSecureLimits>,
     _reservation: Reservation,
 }
 impl NtfsTreeSource {
@@ -173,8 +174,25 @@ impl NtfsTreeSource {
             root,
             nodes,
             excluded,
+            security_capture: None,
             _reservation: reservation,
         })
+    }
+    /// Require exact native security capture for every inventoried object.
+    /// Namespace exclusions remain explicit; this does not grant complete-volume
+    /// capture or ACL restore authority. Preflight fails before enabling the mode.
+    pub fn with_security_capture(
+        mut self,
+        limits: crate::fs_ntfs_security::NtfsSecureLimits,
+        r: &Resources,
+    ) -> Result<Self> {
+        r.cancellation.check()?;
+        for node in self.nodes.values() {
+            crate::fs_ntfs_security::lookup_ntfs_security(&self.volume, &node.record, limits, r)?;
+        }
+        r.cancellation.check()?;
+        self.security_capture = Some(limits);
+        Ok(self)
     }
     /// Exact native root names, selectors and identities intentionally excluded by policy.
     pub fn excluded_entries(&self) -> &[NtfsDirectoryEntry] {
@@ -205,7 +223,17 @@ impl TreeSource for NtfsTreeSource {
     }
     fn metadata(&self, id: &ObjectId, r: &Resources) -> Result<Budgeted<Metadata>> {
         self.revalidate(id, r)?;
-        let original = self.node(id)?.record.metadata(r)?;
+        let record = &self.node(id)?.record;
+        let original = match self.security_capture {
+            Some(limits) => crate::fs_ntfs_metadata::inspect_ntfs_native_metadata(
+                &self.volume,
+                record,
+                limits,
+                r,
+            )?
+            .into_metadata(r)?,
+            None => record.metadata(r)?,
+        };
         let names = self.node(id)?.record.names();
         let name_bytes = names
             .iter()
@@ -232,10 +260,10 @@ impl TreeSource for NtfsTreeSource {
             .ok_or_else(|| allocation("excluded metadata size"))?;
         let charge = (name_bytes as u64)
             .checked_add(excluded_bytes as u64)
-            .and_then(|n| n.checked_add(8192))
+            // The base metadata keeps its existing charge through try_map.
+            .and_then(|n| n.checked_add(4096))
             .ok_or_else(|| allocation("metadata charge"))?;
-        Budgeted::try_new(&r.memory, charge, || {
-            let mut metadata = original.get().clone();
+        original.try_map(charge, |mut metadata| {
             metadata
                 .attributes
                 .try_reserve_exact(2)

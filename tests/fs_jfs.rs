@@ -497,3 +497,42 @@ fn native_formatter_checker_and_debugger_receipt() {
     }
     fs::write(root.join("receipt.txt"),format!("status=passed\nprofile=Linux-v1-4KiB-inline-redone-log\nformatter-original-sha256={original}\ninserted-sha256={before}\nallocated-blocks=349\nraw-fixture-insertion=compiled independent constructor; sparse data, unwritten allocation, external extent and directory leaves, nested directory, two hardlinks\nindependent-oracle=fsck.jfs allocation/reference verification; jfs_debugfs native directory/inode output\nTSK=JFS unsupported, explicit attempted capability failure\npayload-oracle=known independent insertion bytes; no independent whole-file extraction tool\nexact-name-oracle=raw UTF16 fixture; debugger display truncates unpaired surrogate, not exact Unicode oracle\n")).unwrap();
 }
+
+#[test]
+fn independently_encoded_small_hardlinks_share_identity_payload_and_allocation() {
+    let r = resources();
+    let mut bytes = jfs_seed();
+    small_hardlink(&mut bytes);
+    let volume = JfsVolume::open(Arc::new(Source::new(bytes)), limits(), &r).unwrap();
+    let directory = NativeName::Utf16("Box".encode_utf16().collect());
+    let child = volume
+        .lookup(
+            &[
+                directory.clone(),
+                NativeName::Utf16("Child".encode_utf16().collect()),
+            ],
+            &r,
+        )
+        .unwrap();
+    let peer = volume
+        .lookup(
+            &[
+                directory,
+                NativeName::Utf16("Peer".encode_utf16().collect()),
+            ],
+            &r,
+        )
+        .unwrap();
+    assert_eq!(child, peer);
+    let proof = audit_jfs(&volume, audit_limits(), &r).unwrap();
+    assert!(proof.is_clean());
+    assert_eq!(proof.allocated_blocks(), 71);
+    for id in [&child, &peer] {
+        let file = volume.open_file(id, &r).unwrap();
+        let mut payload = [0; 7];
+        assert_eq!(file.read_at(0, &mut payload, &r).unwrap(), 7);
+        assert_eq!(&payload, b"nested!");
+    }
+    drop((volume, proof));
+    assert_eq!(r.memory.used(), 0);
+}

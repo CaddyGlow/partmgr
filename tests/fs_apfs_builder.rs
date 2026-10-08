@@ -229,14 +229,30 @@ fn fresh_native_construction_preserves_names_hardlinks_holes_and_forks() {
 #[cfg(unix)]
 #[ignore = "requires PARTMGR_APFS_BUILD_EVIDENCE and installed apfsck/TSK; enabled missing tools fail"]
 fn native_fresh_construction_checker_payload_and_fork_receipt() {
+    native_fresh_gate(false);
+}
+#[test]
+#[ignore = "requires explicit fresh named-xattr native evidence directory and checker/TSK"]
+fn native_named_xattr_fresh_construction_files_directories_and_exact_values() {
+    native_fresh_gate(true);
+}
+fn native_fresh_gate(named: bool) {
     use sha2::{Digest, Sha256};
     use std::{fs, path::PathBuf, process::Command};
     let out = PathBuf::from(
-        std::env::var_os("PARTMGR_APFS_BUILD_EVIDENCE")
-            .expect("enabled gate requires evidence directory"),
+        std::env::var_os(if named {
+            "PARTMGR_APFS_NAMED_BUILD_EVIDENCE"
+        } else {
+            "PARTMGR_APFS_BUILD_EVIDENCE"
+        })
+        .expect("enabled gate requires evidence directory"),
     );
     fs::create_dir(&out).unwrap();
-    let baked: [(&str, &[u8]); 16] = [
+    let baked: [(&str, &[u8]); 18] = [
+        (
+            "tests/fixtures/apfs_resource.rs",
+            include_bytes!("fixtures/apfs_resource.rs"),
+        ),
         ("src/storage.rs", include_bytes!("../src/storage.rs")),
         ("Cargo.toml", include_bytes!("../Cargo.toml")),
         ("Cargo.lock", include_bytes!("../Cargo.lock")),
@@ -261,6 +277,10 @@ fn native_fresh_construction_checker_payload_and_fork_receipt() {
         (
             "src/fs_apfs_audit.rs",
             include_bytes!("../src/fs_apfs_audit.rs"),
+        ),
+        (
+            "src/fs_apfs_retention.rs",
+            include_bytes!("../src/fs_apfs_retention.rs"),
         ),
         (
             "src/fs_apfs_tree.rs",
@@ -289,10 +309,15 @@ fn native_fresh_construction_checker_payload_and_fork_receipt() {
             Sha256::digest(fs::read(root.join(name)).unwrap()),
             "compiled source differs: {name}"
         );
+        let path = out.join("compiled-source").join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
         sources.push_str(&format!("{name} {:x}\n", Sha256::digest(bytes)));
     }
     fs::write(out.join("source-start.sha256"), &sources).unwrap();
     let binary = std::env::current_exe().unwrap();
+    let binary_bytes = fs::read(&binary).unwrap();
+    fs::write(out.join("compiled-test"), &binary_bytes).unwrap();
     fs::write(
         out.join("binary.sha256"),
         format!(
@@ -358,12 +383,41 @@ fn native_fresh_construction_checker_payload_and_fork_receipt() {
         memory: Budget::new(512 << 20),
         cancellation: Cancellation::default(),
     };
-    let source: Arc<dyn TreeSource> = Arc::new(common_fixture::Tree::new(1500));
+    let tree = Arc::new(common_fixture::Tree::new(if named { 3 } else { 1500 }));
+    if named {
+        tree.controls
+            .named
+            .store(true, std::sync::atomic::Ordering::Release);
+        tree.controls
+            .directory_named
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+    let source: Arc<dyn TreeSource> = tree.clone();
     let mut o = options();
     o.image_bytes = 64 << 20;
     o.limits.objects = 1600;
     o.limits.occurrences = 1700;
-    let plan = ApfsBuildPlan::plan(source.clone(), o, &r).unwrap();
+    let plan = if named {
+        ApfsBuildPlan::plan_with_named_xattrs(
+            source.clone(),
+            o,
+            ApfsCheckpointCapacity::default(),
+            ApfsNamedXattrLimits {
+                streams: 16,
+                name_bytes: 1024,
+            },
+            &r,
+        )
+    } else {
+        ApfsBuildPlan::plan(source.clone(), o, &r)
+    }
+    .unwrap();
+    assert_eq!(
+        tree.controls
+            .reads
+            .load(std::sync::atomic::Ordering::Relaxed),
+        0
+    );
     let image = out.join("authored.apfs");
     let file = fs::OpenOptions::new()
         .read(true)
@@ -375,7 +429,11 @@ fn native_fresh_construction_checker_payload_and_fork_receipt() {
     file.sync_all().unwrap();
     let mut target = NativeTarget { file, flushes: 0 };
     let report = plan.emit(&mut target, &r).unwrap();
-    for root in [21u64, 22, 23] {
+    for root in if named {
+        Vec::new()
+    } else {
+        vec![21u64, 22, 23]
+    } {
         let mut level = [0; 2];
         Storage::read_exact_at(&target, root * 4096 + 34, &mut level).unwrap();
         assert!(
@@ -490,6 +548,40 @@ fn native_fresh_construction_checker_payload_and_fork_receipt() {
         &["-P", "apfs", "-B", "19", "-f", "apfs", image_arg, "18"],
     );
     assert_eq!(copy.stdout, data.stdout);
+    if named {
+        for (inode, length) in [(16u64, 1usize), (17, 7001), (18, 1), (19, 1), (20, 1)] {
+            let attribute_id = if inode == 16 || inode == 18 { 2 } else { 1 };
+            let native = format!("{inode}-4354-{attribute_id}");
+            let label = format!("named-{inode}");
+            let actual = run(
+                &label,
+                &tsk.join("icat"),
+                &["-P", "apfs", "-B", "19", "-f", "apfs", image_arg, &native],
+            );
+            let inode_arg = inode.to_string();
+            let info = run(
+                &format!("named-inode-{inode}"),
+                &tsk.join("istat"),
+                &[
+                    "-P", "apfs", "-B", "19", "-f", "apfs", image_arg, &inode_arg,
+                ],
+            );
+            let expected_name = if inode == 17 {
+                "user/directory.é"
+            } else {
+                "alternate"
+            };
+            assert!(
+                String::from_utf8(info.stdout)
+                    .unwrap()
+                    .contains(expected_name)
+            );
+            let expected: Vec<u8> = (0..length).map(|at| ((at * 13 + 7) % 251) as u8).collect();
+            assert_eq!(actual.stdout, expected);
+            fs::write(out.join(format!("{label}.expected")), expected).unwrap();
+        }
+        assert_eq!(plan.named_stream_outcomes().len(), 5);
+    }
     assert_eq!(before, Sha256::digest(fs::read(&image).unwrap()));
     for (name, bytes) in baked {
         assert_eq!(
@@ -499,12 +591,14 @@ fn native_fresh_construction_checker_payload_and_fork_receipt() {
         );
     }
     assert_eq!(tools, tool_hashes());
+    assert_eq!(fs::read(&binary).unwrap(), binary_bytes);
     fs::write(out.join("source-end.sha256"), sources).unwrap();
     fs::write(out.join("tools-end.sha256"), tools).unwrap();
-    fs::write(out.join("receipt.txt"), format!("status=passed\norigin=framework native fresh construction; no formatter/template\nsource=independent common TreeSource; no source codec or native image input\npolicy=content-only defaults; whole-block holes/hardlinks/embedded resource forks retained\nimage_sha256={before:x}\nallocated_blocks={}\nvolume_allocated_blocks={}\nflushes={flushes}\nnative_target=exclusive unpublished file; sync_all barriers; closed then reopened read-only\nmacos_native_evidence=unavailable\ncow_recovery=not implemented\n", report.allocated_blocks, report.volume_allocated_blocks)).unwrap();
+    fs::write(out.join("receipt.txt"), format!("status=passed\norigin=framework native fresh construction; no formatter/template\nsource=independent common TreeSource; no source codec or native image input\npolicy=content-only defaults; whole-block holes/hardlinks/embedded resource forks retained\nimage_sha256={before:x}\nallocated_blocks={}\nvolume_allocated_blocks={}\nflushes={flushes}\nnative_target=exclusive unpublished file; sync_all barriers; closed then reopened read-only\nmacos_native_evidence=unavailable\ncow_recovery=outside this offline construction gate\n", report.allocated_blocks, report.volume_allocated_blocks)).unwrap();
     drop(proof);
     drop(plan);
     drop(source);
+    drop(tree);
     assert_eq!(r.memory.used(), 0);
 }
 
@@ -887,5 +981,165 @@ fn deferred_lengths_owner_cancellation_and_reopened_hash_binding_are_checked() {
     );
     assert_eq!(target.writes, 0);
     drop(plan);
+    assert_eq!(r.memory.used(), 0);
+}
+
+#[path = "fixtures/apfs_resource.rs"]
+mod resource_fixture;
+#[test]
+fn named_xattr_capture_requires_explicit_mapping_and_preserves_exact_deferred_values() {
+    let r = resources();
+    let c = ApfsContainer::open(
+        Arc::new(Bytes(resource_fixture::generic_seed(true, 0))),
+        read_limits(),
+        &r,
+    )
+    .unwrap();
+    let v = ApfsVolume::open(c, 1026, &r).unwrap();
+    let source: Arc<dyn TreeSource> =
+        Arc::new(ApfsTreeSource::inventory(v, audit_limits(), &r).unwrap());
+    let baseline = r.memory.used();
+    assert!(ApfsBuildPlan::plan(source.clone(), options(), &r).is_err());
+    assert_eq!(r.memory.used(), baseline);
+    let plan = ApfsBuildPlan::plan_with_named_xattrs(
+        source.clone(),
+        options(),
+        ApfsCheckpointCapacity::default(),
+        ApfsNamedXattrLimits {
+            streams: 2,
+            name_bytes: 128,
+        },
+        &r,
+    )
+    .unwrap();
+    assert_eq!(plan.named_stream_outcomes().len(), 2);
+    for outcome in plan.named_stream_outcomes() {
+        assert_eq!(
+            outcome.name,
+            NativeName::Bytes("user/external.é".as_bytes().to_vec())
+        );
+        assert_eq!(outcome.length, 8);
+        assert_eq!(outcome.decision, Preservation::Preserve);
+    }
+    let mut target = Target {
+        bytes: vec![0xa7; plan.image_bytes() as usize],
+        ..Default::default()
+    };
+    let report = plan.emit(&mut target, &r).unwrap();
+    let raw = Arc::new(Bytes(target.bytes));
+    assert!(
+        report
+            .audit(raw.clone(), read_limits(), audit_limits(), &r)
+            .unwrap()
+            .is_clean()
+    );
+    let v = ApfsVolume::open(
+        ApfsContainer::open(raw, read_limits(), &r).unwrap(),
+        1026,
+        &r,
+    )
+    .unwrap();
+    for name in [b"A\xc3\xa9-file".as_slice(), b"Clone".as_slice()] {
+        let object = v.lookup(&[NativeName::Bytes(name.to_vec())], &r).unwrap();
+        let file = v
+            .open_stream(
+                &object,
+                &StreamKind::Named(NativeName::Bytes("user/external.é".as_bytes().to_vec())),
+                &r,
+            )
+            .unwrap();
+        assert_eq!(read_all(&file, 8, &r).unwrap().bytes, b"resource");
+    }
+    drop((v, plan));
+    assert_eq!(r.memory.used(), baseline);
+    assert!(
+        ApfsBuildPlan::plan_with_named_xattrs(
+            source.clone(),
+            options(),
+            ApfsCheckpointCapacity::default(),
+            ApfsNamedXattrLimits {
+                streams: 1,
+                name_bytes: 128
+            },
+            &r
+        )
+        .is_err()
+    );
+    assert!(
+        ApfsBuildPlan::plan_with_named_xattrs(
+            source.clone(),
+            options(),
+            ApfsCheckpointCapacity::default(),
+            ApfsNamedXattrLimits {
+                streams: 2,
+                name_bytes: 1
+            },
+            &r
+        )
+        .is_err()
+    );
+    drop(source);
+    assert_eq!(r.memory.used(), 0);
+}
+
+#[test]
+fn root_and_directory_named_values_are_deferred_and_stale_plans_do_not_write() {
+    use std::sync::atomic::Ordering;
+    let r = resources();
+    let tree = Arc::new(common_fixture::Tree::new(3));
+    tree.controls.root_named.store(true, Ordering::Release);
+    tree.controls.directory_named.store(true, Ordering::Release);
+    let plan = ApfsBuildPlan::plan_with_named_xattrs(
+        tree.clone(),
+        options(),
+        ApfsCheckpointCapacity::default(),
+        ApfsNamedXattrLimits {
+            streams: 2,
+            name_bytes: 128,
+        },
+        &r,
+    )
+    .unwrap();
+    assert_eq!(tree.controls.reads.load(Ordering::Acquire), 0);
+    assert_eq!(plan.named_stream_outcomes().len(), 2);
+    let mut target = Target {
+        bytes: vec![0; plan.image_bytes() as usize],
+        ..Default::default()
+    };
+    let report = plan.emit(&mut target, &r).unwrap();
+    let raw = Arc::new(Bytes(target.bytes));
+    assert!(
+        report
+            .audit(raw.clone(), read_limits(), audit_limits(), &r)
+            .unwrap()
+            .is_clean()
+    );
+    let volume = ApfsVolume::open(
+        ApfsContainer::open(raw, read_limits(), &r).unwrap(),
+        1026,
+        &r,
+    )
+    .unwrap();
+    for path in [vec![], vec![NativeName::Bytes(b"Box".to_vec())]] {
+        let object = volume.lookup(&path, &r).unwrap();
+        let file = volume
+            .open_stream(
+                &object,
+                &StreamKind::Named(NativeName::Bytes("user/directory.é".as_bytes().to_vec())),
+                &r,
+            )
+            .unwrap();
+        let actual = read_all(&file, 7001, &r).unwrap();
+        let expected: Vec<u8> = (0..7001).map(|p| ((p * 13 + 7) % 251) as u8).collect();
+        assert_eq!(actual.bytes, expected);
+    }
+    tree.controls.stale.store(true, Ordering::Release);
+    let mut refused = Target {
+        bytes: vec![0; plan.image_bytes() as usize],
+        ..Default::default()
+    };
+    assert!(plan.emit(&mut refused, &r).is_err());
+    assert_eq!(refused.writes, 0);
+    drop((volume, plan, tree));
     assert_eq!(r.memory.used(), 0);
 }

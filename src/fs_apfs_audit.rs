@@ -7,6 +7,9 @@ use crate::{
     fs_core::*,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+#[path = "fs_apfs_retention.rs"]
+mod retention;
+pub use retention::{ApfsRetainedBlock, ApfsRetentionProof, prove_apfs_retention};
 /// Explicit global audit work, ownership and report ceilings.
 #[derive(Clone, Copy, Debug)]
 pub struct ApfsAuditLimits {
@@ -57,6 +60,7 @@ pub struct ApfsAuditReport {
     pending: Vec<bool>,
     internal_bitmap: Vec<bool>,
     internal_owners: Vec<bool>,
+    internal_live: Vec<bool>,
     work: u64,
     objects: usize,
     _lease: Reservation,
@@ -133,14 +137,14 @@ impl Audit<'_> {
         self.tick(count)?;
         for b in start..start + count {
             let mut owner = owner;
-            if owner.kind == 3 && owner.logical != u64::MAX {
+            if matches!(owner.kind, 3 | 4) && owner.logical != u64::MAX {
                 owner.logical = owner
                     .logical
                     .checked_add((b - start) * 4096)
                     .ok_or_else(|| bad("APFS ownership logical range"))?;
             }
             if self.owners[b as usize].kind != 0
-                && !(owner.kind == 3 && self.owners[b as usize] == owner)
+                && !(matches!(owner.kind, 3 | 4) && self.owners[b as usize] == owner)
             {
                 self.finding(ApfsAuditFinding::CrossLink { block: b })?;
             }
@@ -186,7 +190,7 @@ fn audit_checkpoint(
         ));
     }
     let charge = blocks
-        .checked_mul(192)
+        .checked_mul(193)
         .and_then(|n| n.checked_add((limits.objects as u64).checked_mul(4096)?))
         .and_then(|n| n.checked_add((limits.findings as u64).checked_mul(64)?))
         .and_then(|n| n.checked_add(256 * 1024))
@@ -327,8 +331,10 @@ fn audit_checkpoint(
     let chunks = u64le(sm, 56);
     let cib_count = u32le(sm, 64) as usize;
     let cab_count = u32le(sm, 68);
-    let expected_ip = (chunks + cib_count as u64 + u64::from(cab_count))
-        .checked_mul(3)
+    let expected_ip = chunks
+        .checked_add(cib_count as u64)
+        .and_then(|n| n.checked_add(u64::from(cab_count)))
+        .and_then(|n| n.checked_mul(3))
         .ok_or_else(|| bad("APFS internal-pool count overflow"))?;
     if ipcount != expected_ip {
         return Err(bad(
@@ -441,6 +447,8 @@ fn audit_checkpoint(
     {
         return Err(unsupported("APFS unreferenced checkpoint free queue"));
     }
+    let mut live_ip = vector(ipcount as usize)?;
+    live_ip.extend_from_slice(&ipowners);
     let mut pending = vector(blocks as usize)?;
     pending.resize(blocks as usize, false);
     for i in 0..3 {
@@ -615,8 +623,11 @@ fn audit_checkpoint(
     internal_bitmap.resize(blocks as usize, false);
     let mut internal_owners = vector(blocks as usize)?;
     internal_owners.resize(blocks as usize, false);
+    let mut internal_live = vector(blocks as usize)?;
+    internal_live.resize(blocks as usize, false);
     for (i, owned) in ipowners.iter().enumerate() {
         internal_owners[ipbase as usize + i] = *owned;
+        internal_live[ipbase as usize + i] = live_ip[i];
         internal_bitmap[ipbase as usize + i] = bit(&ipbitmap, i);
     }
     r.cancellation.check()?;
@@ -638,6 +649,7 @@ fn audit_checkpoint(
         pending,
         internal_bitmap,
         internal_owners,
+        internal_live,
         objects: total_objects,
         work: a
             .used
@@ -744,10 +756,21 @@ fn audit_volume(
                         for block in run.physical..run.physical + count {
                             a.tick(1)?;
                             let index = block as usize;
+                            // Reserved root owner2 is only justified by an actual
+                            // current root xattr mapping, processed before user inodes.
+                            if extent_origins[index] == 2
+                                && (stream.kind == StreamKind::Data
+                                    || node.id != 2 && observed_refs[index] == 0)
+                            {
+                                a.finding(ApfsAuditFinding::Reference { inode: node.id })?;
+                            }
                             if extent_origins[index] == 0 {
                                 a.finding(ApfsAuditFinding::Reference { inode: node.id })?;
                             }
-                            if extent_refs[index] > 1 && u64le(&node.raw, 48) & 0x410 == 0 {
+                            if stream.kind == crate::fs_core::StreamKind::Data
+                                && extent_refs[index] > 1
+                                && u64le(&node.raw, 48) & 0x410 == 0
+                            {
                                 a.finding(ApfsAuditFinding::Reference { inode: node.id })?;
                             }
                             if stream_owners[index] != stream.id {
@@ -765,7 +788,11 @@ fn audit_volume(
                                 block,
                                 1,
                                 NativeOwner {
-                                    kind: 3,
+                                    kind: if stream.kind != crate::fs_core::StreamKind::Data {
+                                        4
+                                    } else {
+                                        3
+                                    },
                                     volume: volume.inner.oid,
                                     object: extent_origins[index],
                                     logical: u64::MAX,
@@ -929,16 +956,12 @@ pub fn audit_apfs(
             remaining = remaining
                 .checked_sub(1)
                 .ok_or_else(|| budget("APFS historical union work"))?;
-            report.internal_owners[i] |= history.internal_owners[i];
-            if history.pending[i] && report.owners[i].kind != 0 && !report.pending[i] {
-                if report.findings.len() == limits.findings {
-                    return Err(budget("APFS historical retirement conflicts"));
-                }
-                report
-                    .findings
-                    .push(ApfsAuditFinding::CrossLink { block: i as u64 });
-            }
-            report.pending[i] |= history.pending[i];
+            // A historical retirement reservation is not a historical live reference.
+            // Each historical queue is checked against its own immutable bitmap above;
+            // only actual historical owners constrain allocation in the selected checkpoint.
+            // The selected checkpoint's pending entries remain allocated and protected.
+            report.internal_owners[i] |= history.internal_live[i];
+            report.internal_live[i] |= history.internal_live[i];
             if owner.kind == 0 {
                 continue;
             }
@@ -980,5 +1003,6 @@ pub fn audit_apfs(
         report.free.clear();
     }
     volume.revalidate(&volume.root_identity(), r)?;
+    report.work = limits.work - remaining;
     Ok(report)
 }

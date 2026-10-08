@@ -1,5 +1,13 @@
 # NTFS 3.1 strict baseline reader
 
+The additive [DATA/ADS and attribute-list profile](filesystem-ntfs-streams.md)
+now provides bounded exact named-stream reads and native attribute/timestamp
+views. Generic metadata also retains the STANDARD_INFORMATION MFT-change
+timestamp as `ntfs.STANDARD_INFORMATION.mft_changed.FILETIME`: eight exact
+little-endian FILETIME bytes (1601 UTC epoch, 100 ns resolution). It remains
+distinct from content modification and access timestamps. This addition does
+not establish complete metadata capture or native security restoration.
+
 `partmgr::fs_ntfs` opens actual NTFS volumes through `ReadAt`. This first reader slice implements boot geometry, indexed MFT reads, USA-protected base FILE records, native FILE_NAME occurrences, and resident or nonresident unnamed DATA. It advances the NTFS disk-capture prerequisite; [Native directory-index traversal and policy-scoped TreeSource](filesystem-ntfs-tree.md) now provide the next slice, with a [separate content-only optical gate](filesystem-ntfs-optical.md). A separate [complete bounded base-record allocation/reference audit](filesystem-ntfs-audit.md) now validates supported-profile ownership. Complete system-stream capture, advanced profiles and mutation remain future work under FILESYSTEM_PLAN.md.
 
 Supply the exact volume region, immutable for the entire volume/record/file lifetime, `NtfsReadLimits { attributes, runs, names }`, and shared `Resources`. `NtfsVolume::open` requires NTFS 3.1 VOLUME_INFORMATION with every volume flag clear. Dirty, upgrade, repair, and other flagged states fail as `Unsupported`; no replay or clean-marker rewriting occurs. A clear marker establishes this selected profile only. Ordinary reader opening does not validate the journal, hibernation state, allocation ownership, mirror or every record. Native directory traversal validates indexes when requested; the separate full-profile audit validates ownership and mirrors without granting journal replay or mutation capability.

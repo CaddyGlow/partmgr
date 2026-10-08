@@ -669,6 +669,17 @@ fn native_name(b: &[u8]) -> Result<Vec<u8>> {
     }
     copy(&b[..b.len() - 1])
 }
+fn native_xattr_name(b: &[u8]) -> Result<Vec<u8>> {
+    if b.len() < 2
+        || b.len() > 822
+        || b.last() != Some(&0)
+        || b[..b.len() - 1].contains(&0)
+        || std::str::from_utf8(&b[..b.len() - 1]).is_err()
+    {
+        return Err(bad("APFS native UTF8 xattr name"));
+    }
+    copy(&b[..b.len() - 1])
+}
 fn xfields(b: &[u8]) -> Result<Vec<(u8, Vec<u8>)>> {
     if b.is_empty() {
         return Ok(Vec::new());
@@ -1072,11 +1083,16 @@ impl ApfsVolume {
                     {
                         return Err(bad("APFS xattr record size"));
                     }
-                    let name = native_name(&item.key[10..])?;
+                    let name = native_xattr_name(&item.key[10..])?;
                     let flags = u16::from_le_bytes(item.value[..2].try_into().unwrap());
                     let size =
                         usize::from(u16::from_le_bytes(item.value[2..4].try_into().unwrap()));
-                    if size != item.value.len() - 4 || flags != 2 {
+                    if flags & 2 != 0 && size > 3804 {
+                        return Err(bad("APFS native embedded xattr size limit"));
+                    }
+                    if flags & 2 != 0 && size != item.value.len() - 4
+                        || !matches!(flags, 1 | 2 | 10)
+                    {
                         return Err(unsupported("APFS external/security/system xattr profile"));
                     }
                     if name == b"com.apple.decmpfs"
@@ -1088,7 +1104,39 @@ impl ApfsVolume {
                     let node = nodes
                         .get_mut(&id)
                         .ok_or_else(|| bad("APFS xattr owner absent"))?;
-                    if name == b"com.apple.ResourceFork" {
+                    if name == b"com.apple.ResourceFork" && flags & 8 != 0 {
+                        return Err(unsupported("APFS reserved resource flags mutation profile"));
+                    }
+                    if flags == 1 {
+                        if name == b"com.apple.ResourceFork" && node.directory {
+                            return Err(unsupported("APFS directory resource fork profile"));
+                        }
+                        if item.value.len() != 52 {
+                            return Err(bad("APFS external resource descriptor size"));
+                        }
+                        if u64le(&item.value, 28) != 0 {
+                            return Err(unsupported("APFS encrypted resource stream"));
+                        }
+                        let kind = if name == b"com.apple.ResourceFork" {
+                            node.attrs
+                                .push((b"apfs.resource-dstream".to_vec(), copy(&item.value)?));
+                            StreamKind::ResourceFork
+                        } else {
+                            let mut raw = vector(item.key.len() + item.value.len())?;
+                            raw.extend_from_slice(&item.key);
+                            raw.extend_from_slice(&item.value);
+                            node.attrs.push((b"apfs.xattr-dstream".to_vec(), raw));
+                            StreamKind::Named(NativeName::Bytes(copy(&name)?))
+                        };
+                        node.streams.push(Stream {
+                            kind,
+                            length: u64le(&item.value, 12),
+                            allocated: u64le(&item.value, 20),
+                            id: u64le(&item.value, 4),
+                            inline: None,
+                            runs: Arc::new(Vec::new()),
+                        });
+                    } else if name == b"com.apple.ResourceFork" {
                         node.streams.push(Stream {
                             kind: StreamKind::ResourceFork,
                             length: size as u64,
@@ -1098,6 +1146,12 @@ impl ApfsVolume {
                             runs: Arc::new(Vec::new()),
                         });
                     } else {
+                        if flags & 8 != 0 {
+                            let mut raw = vector(item.key.len() + item.value.len())?;
+                            raw.extend_from_slice(&item.key);
+                            raw.extend_from_slice(&item.value);
+                            node.attrs.push((b"apfs.xattr-record".to_vec(), raw));
+                        }
                         node.attrs.push((name, copy(&item.value[4..])?));
                     }
                 }
@@ -1108,8 +1162,16 @@ impl ApfsVolume {
             .into_iter()
             .map(|(id, runs)| (id, Arc::new(runs)))
             .collect();
-        let mut stream_users = BTreeMap::<u64, (u32, u64, u64, bool)>::new();
+        let mut stream_users = BTreeMap::<u64, (u32, u64, u64, bool, StreamKind)>::new();
         for node in nodes.values_mut() {
+            let has_resource = node
+                .streams
+                .iter()
+                .any(|stream| stream.kind == StreamKind::ResourceFork);
+            let flags = u64le(&node.raw, 48);
+            if (flags & 0x4000 != 0) != has_resource || flags & 0xc000 == 0xc000 {
+                return Err(bad("APFS native resource-fork inode flags"));
+            }
             for stream in &mut node.streams {
                 if stream.inline.is_some() {
                     continue;
@@ -1117,7 +1179,10 @@ impl ApfsVolume {
                 if stream.id < 16 || stream.id >= u64le(&header, 176) {
                     return Err(bad("APFS private stream identity bounds"));
                 }
-                if stream.id != node.id && u64le(&node.raw, 48) & 0x410 == 0 {
+                if stream.kind == StreamKind::Data
+                    && stream.id != node.id
+                    && u64le(&node.raw, 48) & 0x410 == 0
+                {
                     return Err(bad("APFS private stream without clone provenance"));
                 }
                 let usage = stream_users.entry(stream.id).or_insert((
@@ -1125,8 +1190,10 @@ impl ApfsVolume {
                     stream.length,
                     stream.allocated,
                     true,
+                    stream.kind.clone(),
                 ));
-                if usage.1 != stream.length || usage.2 != stream.allocated {
+                if usage.1 != stream.length || usage.2 != stream.allocated || usage.4 != stream.kind
+                {
                     return Err(bad("APFS cloned stream size disagreement"));
                 }
                 usage.3 &= u64le(&node.raw, 48) & 0x410 != 0;
@@ -1140,6 +1207,9 @@ impl ApfsVolume {
                     .unwrap_or_else(|| Arc::new(Vec::new()));
                 let mut end = 0;
                 for run in stream.runs.iter() {
+                    if stream.kind != StreamKind::Data && run.physical == 0 {
+                        return Err(unsupported("APFS sparse external resource profile"));
+                    }
                     if run.logical != end {
                         return Err(bad("APFS non-consecutive native stream extents"));
                     }
@@ -1159,9 +1229,15 @@ impl ApfsVolume {
                 }
             }
         }
-        for (&id, (count, _, _, flags)) in &stream_users {
+        for (&id, (count, _, _, flags, kind)) in &stream_users {
             w.tick(1, r)?;
             let refs = stream_refs.remove(&id);
+            if *kind != StreamKind::Data {
+                if *count != 1 || refs.is_some() {
+                    return Err(unsupported("APFS shared external xattr stream identity"));
+                }
+                continue;
+            }
             if refs.is_some_and(|n| n != *count)
                 || !shared_runs.get(&id).is_none_or(|runs| runs.is_empty()) && refs.is_none()
             {
@@ -1202,7 +1278,11 @@ impl ApfsVolume {
             }
             let refs = u32le(&item.value, 16);
             let owner = u64le(&item.value, 8);
-            if refs == 0 || refs > i32::MAX as u32 || owner < 16 || owner >= u64le(&header, 176) {
+            if refs == 0
+                || refs > i32::MAX as u32
+                || (owner < 16 && owner != 2)
+                || owner >= u64le(&header, 176)
+            {
                 return Err(bad("APFS physical extent owner/reference bounds"));
             }
             range(start, count, container.checkpoint().blocks)?;

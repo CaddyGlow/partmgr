@@ -14,6 +14,24 @@ Inventory bounds count the root and **every** index occurrence, including exclus
 
 Directory pages carry live reservations and source/sequence-scoped continuations. Metadata, stream lists and deferred file maps share the caller pool. Handles own the stable source and survive dropping inventory. Revalidation checks record sequence, kind and file length; generic sources cannot detect same-length changes, so the caller must hold source stability throughout capture and repeated reads. No host-tree extraction or full payload construction is part of inventory.
 
+`with_security_capture(NtfsSecureLimits, &Resources)` explicitly enables native
+security preservation for this tree profile. It preflights every inventoried
+object through volume-bound security lookup before enabling the mode. Subsequent
+metadata reads retain exact self-relative descriptor and owner SID bytes, with
+shared budget accounting and source/record identity validation. Unsupported
+security or cancellation fails explicitly. The default record-only path still
+reports security and ownership as uninspectable. Namespace exclusions remain;
+this option does not establish complete-volume capture or ACL restore/edit support.
+
+Seven ordinary tree tests include exact root/file descriptors, hardlink identity,
+cancellation and lease refunds. The separately enabled
+`native_security_tree_capture_exact_descriptor_oracle` compares actual root and
+file descriptors with ntfscat and independently reads native owner SID offsets.
+The frozen receipt is
+`/data/cache/partmgr-ntfs-acl-tree-native-v4/qualification.json`; its 26 artifact
+hashes and imported tree source/test files were independently verified. Native
+Windows snapshot capture and restore remain separate acceptance gates.
+
 Primary layout/traversal references are pinned Linux v6.17 NTFS3 [structures](https://github.com/torvalds/linux/blob/v6.17/fs/ntfs3/ntfs.h) and [index implementation](https://github.com/torvalds/linux/blob/v6.17/fs/ntfs3/index.c). Independent byte fixtures exercise resident and allocated indexes, hard-link occurrences, bounds, parent/sequence disagreement, malformed INDX fixups/VCNs, work limits, paging, child cycles, collation collisions, special-directory streams, I/O failures and lease refunds.
 
 ```sh

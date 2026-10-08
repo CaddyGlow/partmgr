@@ -733,6 +733,16 @@ fn verify_summary(
     minimum: i8,
     leaves: Vec<i8>,
 ) -> Result<i8> {
+    checked_summary(b, at, leaf_count, minimum, leaves, true)
+}
+fn checked_summary(
+    b: &[u8],
+    at: usize,
+    leaf_count: usize,
+    minimum: i8,
+    leaves: Vec<i8>,
+    agreement: bool,
+) -> Result<i8> {
     let first = (leaf_count - 1) / 3;
     let height = leaf_count.ilog2() / 2;
     if le32(b, at) != leaf_count as u32
@@ -744,10 +754,11 @@ fn verify_summary(
         return Err(bad("JFS buddy tree geometry"));
     }
     let expected = summaries(leaves, minimum)?;
-    if b[at + 17..at + 17 + expected.len()]
-        .iter()
-        .zip(&expected)
-        .any(|(a, b)| *a != *b as u8)
+    if agreement
+        && b[at + 17..at + 17 + expected.len()]
+            .iter()
+            .zip(&expected)
+            .any(|(a, b)| *a != *b as u8)
     {
         return Err(bad("JFS buddy summary differs from allocation bitmap"));
     }
@@ -872,6 +883,7 @@ pub(crate) struct Decoded {
     pub(crate) nodes: BTreeMap<u32, Inode>,
     pub(crate) system: Vec<Physical>,
     pub(crate) bitmap: Vec<bool>,
+    pub(crate) allocation_agreement: bool,
     #[cfg(test)]
     map_length: u64,
     #[cfg(test)]
@@ -895,6 +907,23 @@ pub(crate) fn decode(
     source: &dyn DecodeRead,
     limits: JfsReadLimits,
     r: &Resources,
+) -> Result<Decoded> {
+    decode_inner(source, limits, r, None)
+}
+#[cfg(test)]
+fn decode_recovery(
+    source: &dyn DecodeRead,
+    limits: JfsReadLimits,
+    r: &Resources,
+    changes: &[(u64, bool)],
+) -> Result<Decoded> {
+    decode_inner(source, limits, r, Some(changes))
+}
+fn decode_inner(
+    source: &dyn DecodeRead,
+    limits: JfsReadLimits,
+    r: &Resources,
+    changes: Option<&[(u64, bool)]>,
 ) -> Result<Decoded> {
     r.cancellation.check()?;
     let length = source.length()?;
@@ -1090,7 +1119,7 @@ pub(crate) fn decode(
     let numag = le32(&control, 20);
     let aglog = le32(&control, 52);
     if le64(&control, 0) != mapped
-        || free > mapped
+        || (changes.is_none() && free > mapped)
         || le32(&control, 16) != 0
         || le32(&control, 24) != 0
         || agsize != 8192
@@ -1108,6 +1137,19 @@ pub(crate) fn decode(
     {
         return Err(bad("JFS aggregate allocation descriptor"));
     }
+    if let Some(changes) = changes {
+        if changes.len() as u64 > mapped {
+            return Err(budget("JFS recovery allocation ceiling"));
+        }
+        w.tick(changes.len() as u64 * 3, r)?;
+        if changes.is_empty()
+            || changes.iter().any(|(block, _)| *block >= mapped)
+            || changes.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+        {
+            return Err(bad("JFS recovery allocation authorization"));
+        }
+    }
+    let mut change_cursor = 0;
     let mut bitmap = vector(mapped as usize)?;
     bitmap.resize(mapped as usize, false);
     let dmaps = mapped.div_ceil(8192);
@@ -1122,14 +1164,33 @@ pub(crate) fn decode(
         let covered = (mapped - first).min(8192);
         if u64::from(le32(&page, 0)) != covered
             || le64(&page, 8) != first
-            || page[2048..3072] != page[3072..4096]
+            || (changes.is_none() && page[2048..3072] != page[3072..4096])
         {
             return Err(bad("JFS dmap bounds/working-persistent maps"));
         }
         let mut leaves = vector(256)?;
         let mut pagefree = 0;
         for word in 0..256 {
-            let value = le32(&page, 3072 + word * 4);
+            let persistent = le32(&page, 3072 + word * 4);
+            let working = le32(&page, 2048 + word * 4);
+            let mut value = persistent;
+            let mut mask = 0u32;
+            if let Some(changes) = changes {
+                let start = first + word as u64 * 32;
+                while let Some(&(block, allocated)) = changes.get(change_cursor) {
+                    if block >= start + 32 {
+                        break;
+                    }
+                    w.tick(1, r)?;
+                    let bit = 0x80000000 >> (block - start);
+                    mask |= bit;
+                    value = if allocated { value | bit } else { value & !bit };
+                    change_cursor += 1;
+                }
+                if (working ^ persistent) & !mask != 0 {
+                    return Err(bad("JFS unauthorized recovery bitmap difference"));
+                }
+            }
             leaves.push(word_buddy(value));
             for bit in 0..32 {
                 let relative = word as u64 * 32 + bit;
@@ -1146,19 +1207,25 @@ pub(crate) fn decode(
                 }
             }
         }
-        if pagefree != le32(&page, 4) {
+        if changes.is_none() && pagefree != le32(&page, 4) {
             return Err(bad("JFS dmap free summary"));
         }
         totalfree += u64::from(pagefree);
-        roots[number as usize] = verify_summary(&page, 16, 256, 5, leaves)?;
+        roots[number as usize] = if changes.is_none() {
+            verify_summary(&page, 16, 256, 5, leaves)?
+        } else {
+            checked_summary(&page, 16, 256, 5, leaves, false)?
+        };
     }
-    if totalfree != free || (0..128).any(|i| le64(&control, 56 + i * 8) != agfree[i]) {
+    if changes.is_none()
+        && (totalfree != free || (0..128).any(|i| le64(&control, 56 + i * 8) != agfree[i]))
+    {
         return Err(bad("JFS aggregate/group free counts"));
     }
     let mut summary = [0; 4096];
     mapread(&blockmap, 3 * 4096, &mut summary, &mut w, r)?;
-    let buddy = verify_summary(&summary, 0, 1024, 13, roots)?;
-    if control[1088] != buddy as u8 {
+    let buddy = checked_summary(&summary, 0, 1024, 13, roots, changes.is_none())?;
+    if changes.is_none() && control[1088] != buddy as u8 {
         return Err(bad("JFS aggregate maximum buddy"));
     }
     for at in [4096, 8192] {
@@ -1280,6 +1347,7 @@ pub(crate) fn decode(
         nodes,
         system,
         bitmap,
+        allocation_agreement: changes.is_none(),
         #[cfg(test)]
         map_length,
         #[cfg(test)]
@@ -1337,6 +1405,9 @@ impl JfsVolume {
         }
     }
     pub(crate) fn node(&self, id: &ObjectId) -> Result<&Inode> {
+        if !self.inner.allocation_agreement {
+            return Err(unsupported("JFS recovery index has no payload authority"));
+        }
         if id.source != self.inner.scope || id.generation != 0 || id.native.len() != 8 {
             return Err(Error::new(
                 ErrorKind::StalePlan,

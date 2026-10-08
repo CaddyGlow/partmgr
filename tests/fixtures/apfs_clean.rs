@@ -109,7 +109,7 @@ pub fn leaf(
 pub fn key(id: u64, kind: u64) -> Vec<u8> {
     ((kind << 60) | id).to_le_bytes().to_vec()
 }
-fn inode(
+pub fn inode(
     parent: u64,
     id: u64,
     name: &[u8],
@@ -162,7 +162,7 @@ fn inode(
     }
     b
 }
-fn drec(parent: u64, id: u64, name: &[u8], dir: bool) -> (Vec<u8>, Vec<u8>) {
+pub fn drec(parent: u64, id: u64, name: &[u8], dir: bool) -> (Vec<u8>, Vec<u8>) {
     let mut k = key(parent, 9);
     k.extend_from_slice(&((name.len() + 1) as u16).to_le_bytes());
     k.extend_from_slice(name);

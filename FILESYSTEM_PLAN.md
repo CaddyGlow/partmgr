@@ -27,6 +27,88 @@ Do not promise compatibility with every historical or vendor-specific variant.
 This document proposes future work. API and crate names are illustrative.
 It does not authorize device erasure, deployment, or publication.
 
+## First priority: NTFS snapshots, complete metadata, ACLs, and forensics
+
+User priority: implement these capabilities before starting additional filesystem
+feature expansion. Finish or preserve evidence for already-running gates, then
+direct implementation and qualification effort here. This changes sequencing;
+the full multi-family scope remains required. NTFS forensic parsing, extraction,
+timelines, and recovery are part of this priority, not deferred family expansion.
+
+1. **Snapshot acquisition and stable capture.** Implement Windows VSS snapshot
+   creation, selection, enumeration, access, and lifecycle management, including
+   writer status and consistency reporting. Distinguish application-consistent,
+   crash-consistent, and caller-supplied stable sources. Bind snapshot identity,
+   acquisition time, volume identity, and stability to capture receipts; do not
+   claim that an immutable reader or unchanged source length creates a snapshot.
+   Support inspection of existing snapshot images through portable storage.
+   Define persistent/offline shadow-copy discovery and reading as a separately
+   qualified profile, including explicit unsupported historical layouts.
+2. **Complete native NTFS metadata.** Extend MFT and attribute-list handling to
+   preserve standard-information and filename timestamps/flags, exact native
+   names and references, hardlinks, alternate streams, extended attributes,
+   object IDs, reparse data, sparse/compressed/encrypted metadata, and reserved
+   volume/system streams. Report unsupported interpretation explicitly while
+   retaining validated opaque evidence where possible. Complete capture must
+   account for every object and metadata class; selected user-namespace or
+   content-only capture is not its acceptance criterion.
+3. **Security descriptors and ACLs.** Resolve security IDs through `$Secure`
+   (`$SDS`, `$SII`, `$SDH`) and supported per-record security attributes. Preserve
+   self-relative descriptor bytes, owner/group SIDs, descriptor control flags,
+   DACL/SACL presence and null-versus-empty semantics, ordered ACEs, inheritance,
+   object/callback ACE fields, and unknown ACE payloads. Bounds-check every
+   offset/length and validate descriptor/index consistency. Provide inspection,
+   lossless capture, and explicit restore/edit profiles; no lossy POSIX mapping
+   substitutes for native ACL preservation. Restore/edit must maintain native
+   sharing/index/hash and journal consistency with durable recovery.
+4. **NTFS forensic inspection and recovery.** Implement bounded MFT,
+   `$UsnJrnl:$J`/`$Max`, and `$LogFile` parsing and exact extraction, including
+   deleted records, attribute-list extensions, sequence reuse, damaged records,
+   sparse journal regions, and version-specific framing. Generate timelines from
+   both NTFS timestamp sets and journal events with source offsets, uncertainty,
+   and explicit timestamp semantics. Add metadata-assisted deleted-file recovery,
+   separately reported carving, and partition discovery/recovery with confidence
+   and overlap reporting. Keep read-only evidence extraction distinct from
+   explicit journal modification, native replay, and recoverable filesystem edits;
+   qualify each mutable profile with independent consistency and interruption tests.
+5. **End-to-end qualification.** Test snapshot acquisition through metadata/ACL
+   capture, extraction, and restore with independent native Windows fixtures:
+   inherited and explicit ACLs, null/empty DACLs, SACLs, unusual SIDs/ACE types,
+   ADS, hardlinks, reparse points, damaged indexes/descriptors, and interrupted
+   mutable operations. Compare exact descriptors and supported metadata using
+   independent native tools; retain source/tool/command/artifact bindings.
+   Windows privilege and VSS writer failures must remain causal, observable
+   outcomes. Host tests alone cannot prove VSS consistency or Windows restore.
+
+Expose snapshot, metadata inspection/capture, ACL inspection/preservation,
+restore, and editing as separate capabilities with explicit profile limits.
+If dependencies need new storage or snapshot contracts, write a concrete
+refactoring plan in the owning repository for the user's separate agent;
+published builds must continue resolving without sibling checkouts.
+
+### Execution order and current status
+
+First complete the shared MFT/attribute-list and ownership foundation. In parallel,
+advance VSS acquisition and native security lookup. Then connect complete metadata
+and ACL capture to snapshot-backed sources, followed by restore/edit qualification.
+Build forensic MFT/journal extraction and timelines on the same validated decoding
+foundation; qualify partition/file recovery and journal modification separately.
+Additional HFS+/APFS write expansion follows this NTFS priority. Their existing
+qualified operation profiles remain available; full write support is still a goal.
+
+| Capability | Current checkpoint | Required next gate |
+| --- | --- | --- |
+| Snapshot acquisition | Isolated Windows VSS implementation; portable tests and cross-compilation | Controlled native Windows lifecycle, writer consistency, failure and cleanup evidence; production integration |
+| Native metadata | Partial reader, native timestamps, ADS and bounded attribute-list handling | Complete MFT bootstrap, extension ownership, all metadata classes and system-object inventory |
+| ACL inspection/preservation | Descriptor parsing, bounded `$Secure` lookup and volume-aware metadata; opt-in tree capture | Extension-aware lookup and complete-volume capture; independent Windows fixtures |
+| ACL restore/edit | Planned | Native sharing/index/hash consistency, journal handling, durable interruption recovery |
+| Forensic journals | Bounded USN V2/V3 record decoder | Volume-bound journal extraction, forensic MFT and `$LogFile` profiles, timelines and native fixtures |
+| Partition/file recovery | Existing partition-table recovery is a limited baseline | Partition scanning, deleted-file reconstruction, carving and independent recovery evidence |
+
+These checkpoints do not establish full NTFS support. An isolated implementation,
+host test, or cross-compilation does not satisfy a native Windows acceptance gate.
+Track each capability and qualified on-disk profile independently.
+
 ## Current integration boundaries
 
 - `virtdisk` provides logical disk reads, separately opened writable handles,
@@ -43,6 +125,9 @@ It does not authorize device erasure, deployment, or publication.
 Published dependencies must resolve from crates.io. Neighboring checkouts are
 useful for integration development but must not be required for released builds.
 Record minimum dependency versions when new adapter APIs are required.
+User-reported release baseline: `mkiso-rs` repository v0.1.2, published
+`libmkiso` v0.1.3 on crates.io, and `virtdisk` v0.2. Verify required APIs against
+the published packages before changing dependency requirements.
 
 ## Architecture and dependency direction
 
@@ -631,6 +716,59 @@ boot correctness. Maintain separate native and QEMU/OVMF evidence gates.
 The project is complete for an advertised profile only when both successful
 operations and failure/recovery behavior pass its evidence gates. Partial family
 support must remain visible in capabilities and documentation.
+
+## Forensic inspection, extraction, timelines, and recovery
+
+This is an additional required workstream, not satisfied by ordinary clean-volume
+readers or transactional rollback. Cover every supported filesystem as its native
+evidence permits, with NTFS MFT and USN support first.
+
+- Provide bounded forensic readers for dirty, damaged, and partially overwritten
+  media. Keep strict filesystem readers intact; forensic findings must distinguish
+  verified structures, incomplete records, rejected candidates, and inferred data.
+- Parse and extract NTFS `$MFT`, `$MFTMirr`, `$UsnJrnl:$J` and `$Max`, and `$LogFile`
+  in separately advertised profiles. Preserve raw bytes, stream offsets, record
+  sequence numbers, native UTF-16 names, file/parent references, reason/source flags,
+  timestamp precision, and unknown fields. USN changes and transaction-log records
+  are distinct evidence sources; parsing does not establish replay correctness.
+- Enumerate allocated and deleted MFT records, extension records/attribute lists,
+  resident and mapped streams, sparse/compressed extents, ADS, hardlinks, and stale
+  references. Record fixup failures and conflicting mirror evidence explicitly.
+- Extract files and named streams to caller-selected destinations with manifests
+  binding source identity, source byte ranges, hashes, holes, missing extents,
+  allocation/reuse conflicts, and completeness. Deleted-file recovery must not
+  label reused or unavailable clusters as verified original file contents.
+- Generate timelines from MFT standard-information and filename timestamps, USN,
+  transaction logs, and equivalent family-specific evidence. Retain individual
+  events and provenance; express ambiguous paths, reused IDs, clock uncertainty,
+  and missing journal intervals. Offer deterministic streaming export and bounded
+  external sorting rather than requiring the complete timeline in memory.
+- Expand partition recovery beyond selecting surviving GPT copies: bounded scans
+  for GPT/MBR/EBR and filesystem signatures, checked candidate geometry, confidence
+  and conflicting/overlapping candidates, and explicit repair plans. Scanning is
+  read-only; repair commits use the existing owned durable write contracts.
+- Provide metadata-assisted file recovery and separately identified signature
+  carving. Preserve fragmentation, truncation, duplicate candidates, and false
+  positive evidence instead of silently fabricating contiguous complete files.
+- Support explicit journal/metadata extraction and modification on owned targets
+  or derived images. Every edit plan identifies exact records and preimages,
+  preserves unrelated bytes, validates native framing/checksums/fixups, and defines
+  rollback/recovery. Distinguish raw forensic patching from native valid journal
+  editing and replay; no generic byte patch grants native replay guarantees.
+- Add typed capability reporting for parse, extract, timeline, partition scan,
+  deleted-file recovery, carving, raw patch, native edit, and replay independently.
+  Include resource ceilings, cancellation, causal I/O errors, and portable raw/
+  container/partition sources through the existing `virtdisk` boundary.
+
+Acceptance requires independent fixtures with known operations/deletions, damaged
+and truncated records, reused file references/clusters, rolled-over journals,
+negative controls, exact extraction hashes, timeline provenance, and interruption
+tests for every mutable profile. Native Windows USN/MFT/log evidence must be
+qualified independently; host decoder tests alone do not prove Windows recovery.
+
+Current baseline: the strict NTFS reader exposes allocated mapped MFT records and
+selected streams; GPT recovery selects existing valid structures. Neither proves
+general forensic parsing, USN timelines, deleted-file recovery, or journal editing.
 
 ## Reference starting points
 

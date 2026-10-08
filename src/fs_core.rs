@@ -448,6 +448,37 @@ impl<T> Budgeted<T> {
     pub fn reserved_bytes(&self) -> u64 {
         self.reservation.bytes
     }
+
+    /// Transform an owned value while retaining its original memory charge.
+    /// Reserve additional retained allocations before the closure runs, using
+    /// the same pool. The closure must allocate fallibly and keep the total
+    /// retained allocations within the original plus additional byte charge.
+    /// Failure drops the input and refunds both reservations.
+    pub fn try_map<U>(
+        self,
+        additional_bytes: u64,
+        transform: impl FnOnce(T) -> Result<U>,
+    ) -> Result<Budgeted<U>> {
+        let total = self
+            .reservation
+            .bytes
+            .checked_add(additional_bytes)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::BudgetExhausted,
+                    "retained transformation charge overflow",
+                )
+            })?;
+        let mut extra = self.reservation.budget.reserve(additional_bytes)?;
+        let Self {
+            value,
+            mut reservation,
+        } = self;
+        let value = transform(value)?;
+        reservation.bytes = total;
+        extra.bytes = 0;
+        Ok(Budgeted { value, reservation })
+    }
 }
 impl<T> std::ops::Deref for Budgeted<T> {
     type Target = T;

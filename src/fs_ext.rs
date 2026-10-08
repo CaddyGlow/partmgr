@@ -25,6 +25,8 @@ mod indexed_directory;
 #[path = "fs_ext_journal.rs"]
 mod journal;
 // Native transaction codec is staged independently before owned-session wiring.
+#[path = "fs_ext_integrity.rs"]
+mod integrity;
 #[cfg(test)]
 #[path = "fs_ext_jbd.rs"]
 mod jbd;
@@ -215,7 +217,9 @@ impl ExtGeometry {
     }
     /// Whether the immutable profile validates native ext4 metadata CRC32C encodings.
     pub fn has_metadata_checksums(&self) -> bool {
-        self.modern.is_some()
+        self.modern
+            .as_ref()
+            .is_some_and(|p| p.checksums.has_metadata())
     }
     /// Whether an explicitly validated inactive internal JBD/JBD2 journal is present.
     pub fn has_journal(&self) -> bool {

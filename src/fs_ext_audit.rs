@@ -705,12 +705,8 @@ pub(crate) fn audit_decoder<R: ExtDecodeRead>(
         if g.modern
             .as_ref()
             .is_some_and(|proof| proof.orphan_inode == number)
-            && dword(&raw, 32) & 0x80000 == 0
         {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "ext orphan file requires checked extent mapping",
-            ));
+            volume.validate_modern_orphan(resources).map_err(convert)?;
         }
         if number < first_inode && number != 2 && !journal {
             if word(&raw, 0) != 0

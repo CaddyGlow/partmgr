@@ -48,7 +48,7 @@ pub(crate) fn recover(
     let preparation = preparation(&geometry, resources, |logical, bytes| {
         storage.read_exact_at(bootstrap.physical(logical)?, bytes)
     })?;
-    let replay = scan(
+    let replay = scan_owned(
         &geometry,
         maximum_records,
         limits.work,
@@ -161,9 +161,7 @@ pub(crate) fn recover(
     }
     let mut journal = preparation.journal_superblock;
     put32(&mut journal, 24, replay.next_sequence);
-    put32(&mut journal, 252, 0);
-    let checksum = crc32c(!0, &journal);
-    put32(&mut journal, 252, checksum);
+    journal_checksum(&geometry, &mut journal);
     write(storage, bootstrap.physical(0)?, &journal)?;
     resources.cancellation.check().map_err(io::Error::other)?;
     storage.flush()?;
@@ -194,17 +192,17 @@ pub(crate) fn recover(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
-    struct Fault {
-        visible: Vec<u8>,
-        durable: Vec<u8>,
-        events: usize,
-        cut: usize,
-        immediate: bool,
-        failed_flush_persists: bool,
-        torn: bool,
+    pub(crate) struct Fault {
+        pub(crate) visible: Vec<u8>,
+        pub(crate) durable: Vec<u8>,
+        pub(crate) events: usize,
+        pub(crate) cut: usize,
+        pub(crate) immediate: bool,
+        pub(crate) failed_flush_persists: bool,
+        pub(crate) torn: bool,
     }
     impl Storage for Fault {
         fn len(&self) -> io::Result<u64> {
@@ -433,7 +431,7 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.transactions, 2);
         let events = success.events;
-        assert_eq!(events, 24);
+        assert_eq!(events, 28);
         assert_eq!(r.memory.used(), 0);
         for immediate in [false, true] {
             for failed_flush_persists in [false, true] {

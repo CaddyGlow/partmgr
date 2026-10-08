@@ -48,6 +48,32 @@ pub enum ApfsBuildMetadata {
     /// Reject until a typed cross-format metadata preservation profile exists.
     RequirePreservation,
 }
+/// Explicit mapping of common named streams to ordinary native user xattrs.
+/// This does not reinterpret security/system streams or preserve opaque descriptors.
+#[derive(Clone, Copy, Debug)]
+pub struct ApfsNamedXattrLimits {
+    /// Maximum named streams across unique objects.
+    pub streams: usize,
+    /// Maximum total exact UTF8 name bytes.
+    pub name_bytes: usize,
+}
+/// Reviewable preservation of exact named-stream names and logical values.
+#[derive(Clone, Debug)]
+pub struct ApfsNamedStreamOutcome {
+    /// Bound source object, counting hardlink aliases once.
+    pub object: ObjectId,
+    /// Exact native source name.
+    pub name: NativeName,
+    /// Exact logical source length.
+    pub length: u64,
+    /// Logical names/bytes are preserved; other native metadata uses selected policy.
+    pub decision: Preservation,
+}
+struct NamedInput {
+    name: Vec<u8>,
+    file: Arc<dyn FileRead>,
+    length: u64,
+}
 /// Inspection status is retained without converting unavailable information to absence.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApfsMetadataInspection {
@@ -118,6 +144,7 @@ struct Input {
     data_length: u64,
     fork_length: u64,
     extents: Vec<LogicalExtent>,
+    named: Vec<NamedInput>,
 }
 struct Inventory {
     source: Arc<dyn TreeSource>,
@@ -125,6 +152,7 @@ struct Inventory {
     defaults: ApfsBuildDefaults,
     transformed_names: usize,
     outcomes: Vec<ApfsMetadataOutcome>,
+    named_outcomes: Vec<ApfsNamedStreamOutcome>,
     _lease: Reservation,
 }
 /// Additive authoring capacity for retained native COW checkpoints; existing plan defaults stay byte-compatible.
@@ -258,15 +286,36 @@ impl ApfsBuildPlan {
         capacity: ApfsCheckpointCapacity,
         r: &Resources,
     ) -> Result<Self> {
+        Self::plan_with_named_xattrs_inner(source, options, capacity, None, r)
+    }
+    /// Map representable common named streams to dense native user xattrs.
+    /// Exact byte names and deferred values are preserved, including directories.
+    /// System/security semantics and sparse/unwritten xattr allocation are rejected.
+    pub fn plan_with_named_xattrs(
+        source: Arc<dyn TreeSource>,
+        options: ApfsBuildOptions,
+        capacity: ApfsCheckpointCapacity,
+        named: ApfsNamedXattrLimits,
+        r: &Resources,
+    ) -> Result<Self> {
+        Self::plan_with_named_xattrs_inner(source, options, capacity, Some(named), r)
+    }
+    fn plan_with_named_xattrs_inner(
+        source: Arc<dyn TreeSource>,
+        options: ApfsBuildOptions,
+        capacity: ApfsCheckpointCapacity,
+        named: Option<ApfsNamedXattrLimits>,
+        r: &Resources,
+    ) -> Result<Self> {
         capacity.validate()?;
         r.cancellation.check()?;
         let blocks = options.image_bytes / BLOCK as u64;
         if !options.image_bytes.is_multiple_of(BLOCK as u64)
-            || !(256..=131073).contains(&blocks)
+            || !(256..=127 * 32768).contains(&blocks)
             || 1 + u64::from(capacity.descriptor_blocks)
                 + u64::from(capacity.data_blocks)
                 + 24
-                + 3 * (blocks.div_ceil(32768) + 1)
+                + 3 * (blocks.div_ceil(32768) + blocks.div_ceil(32768).div_ceil(126))
                 >= blocks
             || blocks > options.limits.blocks
             || options.limits.occurrences > u32::MAX as usize
@@ -295,7 +344,7 @@ impl ApfsBuildPlan {
         let mut work = Work {
             remaining: options.limits.work,
         };
-        let inventory = inventory(source, &options, r, &mut work)?;
+        let inventory = inventory(source, &options, named, r, &mut work)?;
         let layout = layout::construct(&inventory, &options, capacity, r, &mut work)?;
         Ok(Self {
             inventory,
@@ -321,11 +370,30 @@ impl ApfsBuildPlan {
     pub fn outcomes(&self) -> &[ApfsMetadataOutcome] {
         &self.inventory.outcomes
     }
+    /// Exact per-object named-stream preservation decisions, before emission.
+    pub fn named_stream_outcomes(&self) -> &[ApfsNamedStreamOutcome] {
+        &self.inventory.named_outcomes
+    }
+    fn payload_file(&self, p: &layout::Payload) -> &Arc<dyn FileRead> {
+        let input = &self.inventory.inputs[p.input];
+        match p.named {
+            Some(index) => &input.named[index].file,
+            None => input.data.as_ref().unwrap(),
+        }
+    }
     fn check(&self, r: &Resources) -> Result<()> {
         self.resources.cancellation.check()?;
         r.cancellation.check()?;
         for input in &self.inventory.inputs {
             self.inventory.source.revalidate(&input.identity, r)?;
+            for named in &input.named {
+                if named.file.identity() != &input.identity || named.file.len() != named.length {
+                    return Err(Error::new(
+                        ErrorKind::StalePlan,
+                        "APFS named xattr deferred binding changed",
+                    ));
+                }
+            }
             for (file, length) in [
                 (input.data.as_ref(), input.data_length),
                 (input.fork.as_ref(), input.fork_length),
@@ -393,7 +461,7 @@ impl ApfsBuildPlan {
         for p in &self.layout.payload {
             self.check_one(p.input, r)?;
             b.fill(0);
-            let file = self.inventory.inputs[p.input].data.as_ref().unwrap();
+            let file = self.payload_file(p);
             let n = (file.len() - p.logical).min(BLOCK as u64) as usize;
             read_file(file.as_ref(), p.logical, &mut b[..n], r)?;
             self.check_one(p.input, r)?;
@@ -410,7 +478,7 @@ impl ApfsBuildPlan {
         for p in &self.layout.payload {
             self.check_one(p.input, r)?;
             b.fill(0);
-            let file = self.inventory.inputs[p.input].data.as_ref().unwrap();
+            let file = self.payload_file(p);
             let n = (file.len() - p.logical).min(BLOCK as u64) as usize;
             read_file(file.as_ref(), p.logical, &mut b[..n], r)?;
             target
@@ -479,7 +547,7 @@ impl ApfsBuildPlan {
             {
                 let p = &self.layout.payload[payload];
                 self.check_one(p.input, r)?;
-                let file = self.inventory.inputs[p.input].data.as_ref().unwrap();
+                let file = self.payload_file(p);
                 let n = (file.len() - p.logical).min(BLOCK as u64) as usize;
                 read_file(file.as_ref(), p.logical, &mut b[..n], r)?;
                 payload += 1;
@@ -537,6 +605,14 @@ impl ApfsBuildPlan {
                 return Err(Error::new(
                     ErrorKind::StalePlan,
                     "APFS deferred data stream binding changed",
+                ));
+            }
+        }
+        for named in &input.named {
+            if named.file.identity() != &input.identity || named.file.len() != named.length {
+                return Err(Error::new(
+                    ErrorKind::StalePlan,
+                    "APFS named xattr deferred binding changed",
                 ));
             }
         }
@@ -753,6 +829,7 @@ fn canonical_inventory(inputs: Vec<Input>, work: &mut Work, r: &Resources) -> Re
 fn inventory(
     source: Arc<dyn TreeSource>,
     o: &ApfsBuildOptions,
+    named_limits: Option<ApfsNamedXattrLimits>,
     r: &Resources,
     w: &mut Work,
 ) -> Result<Inventory> {
@@ -776,7 +853,19 @@ fn inventory(
         .and_then(|x| x.checked_add((o.limits.occurrences as u64).checked_mul(8192)?))
         .and_then(|x| x.checked_add((o.limits.name_bytes as u64).checked_mul(4)?))
         .ok_or_else(|| budget("APFS inventory reservation overflow"))?;
-    let lease = r.memory.reserve(charge)?;
+    let named_charge = match named_limits {
+        Some(l) if l.streams <= u32::MAX as usize => (l.streams as u64)
+            .checked_mul(4096)
+            .and_then(|v| v.checked_add((l.name_bytes as u64).checked_mul(2)?))
+            .ok_or_else(|| budget("APFS named xattr reservation overflow"))?,
+        Some(_) => return Err(budget("APFS named xattr count ceiling")),
+        None => 0,
+    };
+    let lease = r.memory.reserve(
+        charge
+            .checked_add(named_charge)
+            .ok_or_else(|| budget("APFS inventory reservation overflow"))?,
+    )?;
     let root = source.root();
     if root.native.len() > 1024 {
         return Err(budget("APFS source identity byte ceiling"));
@@ -797,6 +886,7 @@ fn inventory(
         data_length: 0,
         fork_length: 0,
         extents: Vec::new(),
+        named: Vec::new(),
     });
     let mut ids = HashMap::new();
     ids.try_reserve(o.limits.objects)
@@ -810,6 +900,8 @@ fn inventory(
     let (mut occurrences, mut names) = (0usize, 0usize);
     let mut transformed_names = 0;
     let mut outcomes = Vec::new();
+    let mut named_outcomes = Vec::new();
+    let mut named_bytes = 0usize;
     let mut pages = 0usize;
     while let Some((index, depth)) = queue.pop_front() {
         w.tick(1, r)?;
@@ -892,6 +984,7 @@ fn inventory(
                         data_length: 0,
                         fork_length: 0,
                         extents: Vec::new(),
+                        named: Vec::new(),
                     });
                     if directory {
                         queue.push_back((child, depth + 1));
@@ -927,6 +1020,86 @@ fn inventory(
         let streams = source.streams(&input.identity, r)?;
         for info in streams.iter() {
             w.tick(1, r)?;
+            if let StreamKind::Named(name) = &info.kind {
+                let l = named_limits.ok_or_else(|| {
+                    unsupported("APFS named-stream mapping requires explicit user-xattr profile")
+                })?;
+                let NativeName::Bytes(bytes) = name else {
+                    return Err(unsupported(
+                        "APFS named xattr exact UTF8 byte name required",
+                    ));
+                };
+                if bytes.is_empty()
+                    || bytes.len() > 821
+                    || bytes.contains(&0)
+                    || std::str::from_utf8(bytes).is_err()
+                {
+                    return Err(invalid("APFS named xattr native name"));
+                }
+                if matches!(
+                    bytes.as_slice(),
+                    b"com.apple.ResourceFork"
+                        | b"com.apple.FinderInfo"
+                        | b"com.apple.decmpfs"
+                        | b"com.apple.system.Security"
+                ) || bytes.starts_with(b"com.apple.fs.")
+                {
+                    return Err(unsupported("APFS named system xattr semantics"));
+                }
+                named_bytes = named_bytes
+                    .checked_add(bytes.len())
+                    .ok_or_else(|| budget("APFS named xattr name overflow"))?;
+                if named_outcomes.len() >= l.streams
+                    || named_bytes > l.name_bytes
+                    || info.length > o.image_bytes
+                {
+                    return Err(budget("APFS named xattr inventory ceiling"));
+                }
+                if input.named.iter().any(|old| old.name == *bytes) {
+                    return Err(invalid("APFS duplicate named xattr stream"));
+                }
+                let file = source.open_stream(&input.identity, &info.kind, r)?;
+                if file.identity() != &input.identity || file.len() != info.length {
+                    return Err(Error::new(
+                        ErrorKind::StalePlan,
+                        "APFS named xattr source binding changed",
+                    ));
+                }
+                let mut end = 0;
+                file.visit_extents(r, &mut |e| {
+                    w.tick(1, r)?;
+                    if e.offset != end || e.length == 0 || e.kind != ExtentKind::Data {
+                        return Err(unsupported("APFS dense named xattr extent profile"));
+                    }
+                    end = end
+                        .checked_add(e.length)
+                        .filter(|n| *n <= info.length)
+                        .ok_or_else(|| invalid("APFS named xattr extents bounds"))?;
+                    Ok(())
+                })?;
+                if end != info.length {
+                    return Err(invalid("APFS named xattr extents incomplete"));
+                }
+                input
+                    .named
+                    .try_reserve(1)
+                    .map_err(|_| budget("APFS named xattr input allocation"))?;
+                named_outcomes
+                    .try_reserve(1)
+                    .map_err(|_| budget("APFS named xattr outcome allocation"))?;
+                input.named.push(NamedInput {
+                    name: bytes.clone(),
+                    file,
+                    length: info.length,
+                });
+                named_outcomes.push(ApfsNamedStreamOutcome {
+                    object: input.identity.clone(),
+                    name: name.clone(),
+                    length: info.length,
+                    decision: Preservation::Preserve,
+                });
+                continue;
+            }
             if info.length > o.image_bytes {
                 return Err(budget("APFS source stream exceeds target byte ceiling"));
             }
@@ -999,6 +1172,7 @@ fn inventory(
         defaults,
         transformed_names,
         outcomes,
+        named_outcomes,
         _lease: lease,
     })
 }

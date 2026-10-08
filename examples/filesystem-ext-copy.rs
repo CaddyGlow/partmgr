@@ -60,7 +60,17 @@ fn limits() -> FatAuditLimits {
         findings: 1024,
     }
 }
+#[path = "support/pipeline.rs"]
+mod copy_pipeline;
+use copy_pipeline::CopyPipeline;
+use partmgr::fs_pipeline::{Completion, FailureState, Layer, Recovery};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut pipeline = CopyPipeline::new();
+    let result = run(&mut pipeline);
+    pipeline.finish(result.as_ref().err().map(|error| error.as_ref()));
+    result
+}
+fn run(pipeline: &mut CopyPipeline) -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let first = args
         .next()
@@ -144,6 +154,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory: Budget::new(512 << 20),
         cancellation: Cancellation::default(),
     };
+    pipeline.raw(layout.is_some());
+    pipeline.begin(Layer::Source, FailureState::Unchanged, Recovery::None);
     let raw: Arc<dyn ReadAt> = Arc::new(RawDisk::open(source_path)?);
     let region: Arc<dyn ReadAt> = Arc::new(DiskView::new(raw, offset, length)?);
     let source: Arc<dyn TreeSource> = match source_profile.as_str() {
@@ -237,6 +249,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => return Err("source profile must be fat,ext2,ext,exfat".into()),
     };
+    pipeline.complete(
+        Layer::Source,
+        Completion::Validated,
+        "immutable source inventory and complete ownership audit",
+    );
+    pipeline.begin(Layer::Copy, FailureState::Unchanged, Recovery::None);
     let plan = ExtCopyPlan::new(source, image_options(image_bytes, names), &resources)?;
     let transformations = plan
         .outcomes()
@@ -261,6 +279,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "name_conversion={names:?} hardlinks=preserved uid=0 gid=0 file_mode=0644 directory_mode=0755 native_seconds=0"
     );
+    pipeline.complete(
+        Layer::Copy,
+        Completion::Validated,
+        "copy preflight; explicit content-only metadata and name policies",
+    );
+    pipeline.begin(
+        Layer::Filesystem,
+        FailureState::UnpublishedStaging,
+        Recovery::DiscardStaging,
+    );
     let parent = destination
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -278,8 +306,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         plan.emit(&mut storage, &resources),
     )?;
     drop(storage);
+    pipeline.complete(
+        Layer::Filesystem,
+        Completion::Durable,
+        "emission barriers and complete stream verification",
+    );
+    pipeline.begin(
+        Layer::Copy,
+        FailureState::UnpublishedStaging,
+        Recovery::DiscardStaging,
+    );
+    pipeline.complete(
+        Layer::Copy,
+        Completion::Validated,
+        "complete declared stream models; explicit content-only transformations",
+    );
     println!("filesystem_emit=completed region_offset={region_start} region_bytes={image_bytes}");
     if let Some(layout) = &layout {
+        pipeline.begin(
+            Layer::Partition,
+            FailureState::UnpublishedStaging,
+            Recovery::DiscardStaging,
+        );
         let source = RawDisk::open(staged.path())?;
         let table_plan = stage("partition table planning", initialize_plan(&source, layout))?;
         let mut table_storage = FileStorage::open(staged.path())?;
@@ -295,10 +343,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let matches = match inspected {
             DiskLayout::Gpt(table) => {
                 table_profile.as_deref() == Some("gpt")
-                    && table.entries()[0].range() == Some(partition)
+                    && table
+                        .entries()
+                        .first()
+                        .is_some_and(|entry| entry.range() == Some(partition))
             }
             DiskLayout::Mbr(table) => {
-                table_profile.as_deref() == Some("mbr") && table.entries()[0].range() == partition
+                table_profile.as_deref() == Some("mbr")
+                    && table
+                        .entries()
+                        .first()
+                        .is_some_and(|entry| entry.range() == partition)
             }
         };
         if !matches {
@@ -308,7 +363,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "partition_commit=completed partition_reopen=validated scheme={}",
             table_profile.as_deref().unwrap()
         );
+        pipeline.complete(
+            Layer::Partition,
+            Completion::Durable,
+            "table commit and reopened range validation",
+        );
     }
+    pipeline.begin(
+        Layer::Filesystem,
+        FailureState::UnpublishedStaging,
+        Recovery::DiscardStaging,
+    );
     let reopened: Arc<dyn ReadAt> = Arc::new(DiskView::new(
         Arc::new(RawDisk::open(staged.path())?),
         region_start,
@@ -339,23 +404,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "filesystem_flush=complete reopened_audit=complete verified_bytes={} files={}",
         report.verified_bytes, report.files
     );
+    pipeline.complete(
+        Layer::Filesystem,
+        Completion::Durable,
+        "emission barriers and complete reopened allocation audit",
+    );
     drop(audit);
     drop(volume);
     drop(plan);
-    staged.persist_noclobber(&destination)?;
+    copy_pipeline::publish(staged, &destination, parent, &mut pipeline.report)?;
     println!(
         "publication=completed destination={}",
         destination.display()
     );
-    std::fs::File::open(parent)?.sync_all().map_err(|error| {
-        std::io::Error::new(
-            error.kind(),
-            format!(
-                "image published at {}; publication-directory durability uncertain: {error}",
-                destination.display()
-            ),
-        )
-    })?;
     println!(
         "publication_directory_flush=complete boot=unverified partition={} container=raw",
         table_profile.as_deref().unwrap_or("standalone")

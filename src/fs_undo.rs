@@ -629,6 +629,105 @@ impl UndoRecoveryValidator for NoopRecoveryValidator {
 }
 /// Validate format-specific recovery fences without duplicating the journal codec.
 /// All wire checks finish before callbacks; all callbacks finish before target writes.
+struct ValidatedRecovery {
+    header: HeaderRecord,
+    body: Vec<u8>,
+    _charge: Reservation,
+}
+fn read_validated_recovery(
+    journal: &dyn Storage,
+    target_length: impl FnOnce() -> Result<u64>,
+    binding: UndoBinding,
+    limits: UndoLimits,
+    r: &Resources,
+    validator: &mut dyn UndoRecoveryValidator,
+) -> Result<Option<ValidatedRecovery>> {
+    let Some(h) = headers(journal, r)? else {
+        return Ok(None);
+    };
+    if h.binding != binding || h.length != target_length()? {
+        return Err(Error::new(
+            ErrorKind::StalePlan,
+            "external undo recovery binding/geometry mismatch",
+        ));
+    }
+    if h.count == 0
+        || h.count > limits.patches
+        || h.bytes > limits.body_bytes
+        || h.bytes < u64::from(h.count) * 18
+    {
+        return Err(limit("external undo recovery limits"));
+    }
+    let journal_length = length(journal)?;
+    if BODY
+        .checked_add(h.bytes)
+        .is_none_or(|end| end > journal_length)
+    {
+        return Err(invalid("external undo body outside journal"));
+    }
+    let size = usize::try_from(h.bytes).map_err(|_| limit("external undo host body limit"))?;
+    let charge = r.memory.reserve(
+        h.bytes
+            .checked_add(SCRATCH as u64 + 1024)
+            .ok_or_else(|| limit("external undo scratch overflow"))?,
+    )?;
+    let mut body = Vec::new();
+    body.try_reserve_exact(size)
+        .map_err(|_| limit("external undo recovery allocation"))?;
+    body.resize(size, 0);
+    for (i, chunk) in body.chunks_mut(SCRATCH).enumerate() {
+        r.cancellation.check()?;
+        read(journal, BODY + (i * SCRATCH) as u64, chunk)?;
+    }
+    if Sha256::digest(&body)[..] != h.digest {
+        return Err(invalid("external undo saved body digest"));
+    }
+    let mut cursor = 0;
+    let mut last_end = 0;
+    for _ in 0..h.count {
+        r.cancellation.check()?;
+        let (offset, old, _, next) = decode_patch(&body, cursor)?;
+        let end = offset
+            .checked_add(old.len() as u64)
+            .ok_or_else(|| invalid("external undo restored range overflow"))?;
+        if offset < last_end || end > h.length {
+            return Err(invalid("external undo restored ranges overlap/outside"));
+        }
+        last_end = end;
+        cursor = next;
+    }
+    if cursor != body.len() {
+        return Err(invalid("external undo trailing body bytes"));
+    }
+    cursor = 0;
+    for _ in 0..h.count {
+        r.cancellation.check()?;
+        let (offset, old, new, next) = decode_patch(&body, cursor)?;
+        validator.validate_range(offset, old, new)?;
+        cursor = next;
+    }
+    validator.finish()?;
+    Ok(Some(ValidatedRecovery {
+        header: h,
+        body,
+        _charge: charge,
+    }))
+}
+/// Read-only body/framing/semantic validation, without target or journal writes.
+pub(crate) fn validate_recovery(
+    journal: &dyn Storage,
+    target_length: u64,
+    binding: UndoBinding,
+    limits: UndoLimits,
+    r: &Resources,
+    validator: &mut dyn UndoRecoveryValidator,
+) -> Result<UndoStatus> {
+    match read_validated_recovery(journal, || Ok(target_length), binding, limits, r, validator)? {
+        Some(body) => Ok(body.header.status()),
+        None => inspect(journal, r),
+    }
+}
+
 pub(crate) fn recover_validated(
     target: &mut dyn Storage,
     journal: &mut dyn Storage,
@@ -640,71 +739,17 @@ pub(crate) fn recover_validated(
     let mut stage = "recovery preflight";
     let mut changed = false;
     let result = (|| {
-        let Some(h) = headers(journal, r)? else {
+        let Some(saved) =
+            read_validated_recovery(journal, || length(target), binding, limits, r, validator)?
+        else {
             return inspect(journal, r);
         };
-        if h.binding != binding || h.length != length(target)? {
-            return Err(Error::new(
-                ErrorKind::StalePlan,
-                "external undo recovery binding/geometry mismatch",
-            ));
-        }
-        if h.count == 0
-            || h.count > limits.patches
-            || h.bytes > limits.body_bytes
-            || h.bytes < u64::from(h.count) * 18
-        {
-            return Err(limit("external undo recovery limits"));
-        }
-        let journal_length = length(journal)?;
-        if BODY
-            .checked_add(h.bytes)
-            .is_none_or(|end| end > journal_length)
-        {
-            return Err(invalid("external undo body outside journal"));
-        }
-        let size = usize::try_from(h.bytes).map_err(|_| limit("external undo host body limit"))?;
-        let _charge = r.memory.reserve(
-            h.bytes
-                .checked_add(SCRATCH as u64 + 1024)
-                .ok_or_else(|| limit("external undo scratch overflow"))?,
-        )?;
-        let mut body = Vec::new();
-        body.try_reserve_exact(size)
-            .map_err(|_| limit("external undo recovery allocation"))?;
-        body.resize(size, 0);
-        for (i, chunk) in body.chunks_mut(SCRATCH).enumerate() {
-            r.cancellation.check()?;
-            read(journal, BODY + (i * SCRATCH) as u64, chunk)?;
-        }
-        if Sha256::digest(&body)[..] != h.digest {
-            return Err(invalid("external undo saved body digest"));
-        }
-        let mut cursor = 0;
-        let mut last_end = 0;
-        for _ in 0..h.count {
-            r.cancellation.check()?;
-            let (offset, old, _, next) = decode_patch(&body, cursor)?;
-            let end = offset
-                .checked_add(old.len() as u64)
-                .ok_or_else(|| invalid("external undo restored range overflow"))?;
-            if offset < last_end || end > h.length {
-                return Err(invalid("external undo restored ranges overlap/outside"));
-            }
-            last_end = end;
-            cursor = next;
-        }
-        if cursor != body.len() {
-            return Err(invalid("external undo trailing body bytes"));
-        }
-        cursor = 0;
-        for _ in 0..h.count {
-            r.cancellation.check()?;
-            let (offset, old, new, next) = decode_patch(&body, cursor)?;
-            validator.validate_range(offset, old, new)?;
-            cursor = next;
-        }
-        validator.finish()?;
+        let ValidatedRecovery {
+            header: h,
+            body,
+            _charge,
+        } = saved;
+        let mut cursor;
         r.cancellation.check()?;
         let mut scratch = [0; SCRATCH];
         if h.state == UndoState::Prepared {
@@ -988,4 +1033,55 @@ mod semantic_recovery_tests {
         assert_eq!((target.writes, journal.writes), writes);
         assert_eq!(r.memory.used(), 0);
     }
+}
+
+#[test]
+fn read_only_recovery_validation_of_empty_journal_refunds() {
+    struct Journal;
+    impl Storage for Journal {
+        fn len(&self) -> io::Result<u64> {
+            Ok(2048)
+        }
+        fn read_exact_at(&self, _: u64, out: &mut [u8]) -> io::Result<()> {
+            out.fill(0);
+            Ok(())
+        }
+        fn write_at(&mut self, _: u64, _: &[u8]) -> io::Result<usize> {
+            panic!("read-only validation wrote")
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            panic!("read-only validation flushed")
+        }
+    }
+    struct Validator;
+    impl UndoRecoveryValidator for Validator {
+        fn validate_range(&mut self, _: u64, _: &[u8], _: &[u8]) -> Result<()> {
+            panic!("empty journal yielded patch")
+        }
+        fn finish(&mut self) -> Result<()> {
+            panic!("empty journal yielded body")
+        }
+    }
+    let r = Resources {
+        memory: crate::fs_core::Budget::new(1 << 20),
+        cancellation: crate::fs_core::Cancellation::default(),
+    };
+    assert_eq!(
+        validate_recovery(
+            &Journal,
+            4096,
+            UndoBinding {
+                volume: [0; 32],
+                generation: 0,
+                transaction: [0; 16]
+            },
+            UndoLimits::default(),
+            &r,
+            &mut Validator
+        )
+        .unwrap()
+        .state,
+        UndoState::Empty
+    );
+    assert_eq!(r.memory.used(), 0);
 }

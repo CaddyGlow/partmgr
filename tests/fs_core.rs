@@ -1,6 +1,38 @@
 use partmgr::fs_core::*;
 
 #[test]
+fn retained_transform_reserves_before_work_and_refunds_all_paths() {
+    let budget = Budget::new(16);
+    let make = || Budgeted::try_new(&budget, 8, || Ok(vec![7u8; 8])).unwrap();
+    let value = make()
+        .try_map(8, |bytes| {
+            assert_eq!(budget.used(), 16);
+            Ok((bytes, 42))
+        })
+        .unwrap();
+    assert_eq!(value.get().0, [7; 8]);
+    assert_eq!(value.reserved_bytes(), 16);
+    drop(value);
+    assert_eq!(budget.used(), 0);
+    let failed = make().try_map(8, |_| -> Result<()> {
+        assert_eq!(budget.used(), 16);
+        Err(Error::new(
+            ErrorKind::InvalidData,
+            "rejected transformation",
+        ))
+    });
+    assert_eq!(failed.unwrap_err().kind, ErrorKind::InvalidData);
+    assert_eq!(budget.used(), 0);
+    for extra in [9, u64::MAX] {
+        let failed = make().try_map(extra, |_| -> Result<()> {
+            panic!("closure must not run before sufficient reservation")
+        });
+        assert_eq!(failed.unwrap_err().kind, ErrorKind::BudgetExhausted);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn native_names_do_not_normalize_or_replace_invalid_sequences() {
     let bytes = NativeName::Bytes(vec![0xff, b'a']);
     let utf16 = NativeName::Utf16(vec![0xd800, 0x0061]);

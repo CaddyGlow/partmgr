@@ -27,7 +27,17 @@ fn limits() -> FatAuditLimits {
         findings: 1024,
     }
 }
+#[path = "support/pipeline.rs"]
+mod copy_pipeline;
+use copy_pipeline::CopyPipeline;
+use partmgr::fs_pipeline::{Completion, FailureState, Layer, Recovery};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut pipeline = CopyPipeline::new();
+    let result = run(&mut pipeline);
+    pipeline.finish(result.as_ref().err().map(|error| error.as_ref()));
+    result
+}
+fn run(pipeline: &mut CopyPipeline) -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let first = args
         .next()
@@ -71,6 +81,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory: Budget::new(512 << 20),
         cancellation: Cancellation::default(),
     };
+    pipeline.raw(output.scheme.is_some());
+    pipeline.begin(Layer::Source, FailureState::Unchanged, Recovery::None);
     let raw: Arc<dyn ReadAt> = Arc::new(RawDisk::open(source_path)?);
     let region: Arc<dyn ReadAt> = Arc::new(DiskView::new(raw, offset, length)?);
     let source: Arc<dyn TreeSource> = match source_profile.as_str() {
@@ -168,6 +180,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if matches!(source_profile.as_str(), "ext2" | "ext") {
         options.names = CopyNamePolicy::StrictUtf8;
     }
+    pipeline.complete(
+        Layer::Source,
+        Completion::Validated,
+        "immutable source inventory and complete ownership audit",
+    );
+    pipeline.begin(Layer::Copy, FailureState::Unchanged, Recovery::None);
     let plan = ExfatCopyPlan::new(source, options, &resources)?;
     let transformations = plan
         .outcomes()
@@ -197,6 +215,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "fat_ascii_aliases_for_byte_names"
         }
     );
+    pipeline.complete(
+        Layer::Copy,
+        Completion::Validated,
+        "copy preflight; explicit content-only metadata and name policies",
+    );
+    pipeline.begin(
+        Layer::Filesystem,
+        FailureState::UnpublishedStaging,
+        Recovery::DiscardStaging,
+    );
     let parent = destination
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -209,11 +237,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         plan.emit(&mut storage, &resources),
     )?;
     drop(storage);
+    pipeline.complete(
+        Layer::Filesystem,
+        Completion::Durable,
+        "emission barriers and complete stream verification",
+    );
+    pipeline.begin(
+        Layer::Copy,
+        FailureState::UnpublishedStaging,
+        Recovery::DiscardStaging,
+    );
+    pipeline.complete(
+        Layer::Copy,
+        Completion::Validated,
+        "complete declared stream models; explicit content-only transformations",
+    );
     println!(
         "filesystem_emit=completed region_offset={} region_bytes={}",
         output.offset, image_bytes
     );
-    output.commit_table(staged.path())?;
+    if output.scheme.is_some() {
+        pipeline.begin(
+            Layer::Partition,
+            FailureState::UnpublishedStaging,
+            Recovery::DiscardStaging,
+        );
+        output.commit_table(staged.path())?;
+        pipeline.complete(
+            Layer::Partition,
+            Completion::Durable,
+            "table commit and reopened type/range validation",
+        );
+    }
+    pipeline.begin(
+        Layer::Filesystem,
+        FailureState::UnpublishedStaging,
+        Recovery::DiscardStaging,
+    );
     let reopened = output.reopen(staged.path())?;
     let read_limits = ExfatReadLimits {
         max_chain_clusters: usize::try_from(image_bytes / 512)?,
@@ -242,22 +302,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "filesystem_flush=complete reopened_audit=complete verified_bytes={} files={}",
         report.verified_bytes, report.files
     );
+    pipeline.complete(
+        Layer::Filesystem,
+        Completion::Durable,
+        "emission barriers and complete reopened allocation audit",
+    );
     drop(audit);
     drop(plan);
-    staged.persist_noclobber(&destination)?;
+    copy_pipeline::publish(staged, &destination, parent, &mut pipeline.report)?;
     println!(
         "publication=completed destination={}",
         destination.display()
     );
-    std::fs::File::open(parent)?.sync_all().map_err(|error| {
-        std::io::Error::new(
-            error.kind(),
-            format!(
-                "image published at {}; publication-directory durability uncertain: {error}",
-                destination.display()
-            ),
-        )
-    })?;
     println!(
         "publication_directory_flush=complete boot=unverified partition={} container=raw",
         output.scheme.as_deref().unwrap_or("standalone")

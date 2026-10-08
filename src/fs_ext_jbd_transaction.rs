@@ -138,6 +138,7 @@ pub(crate) fn commit(
         .ok_or_else(|| budget("native transaction physical footprint overflow"))?;
     if affected_blocks
         .checked_mul(initial.block_bytes)
+        .and_then(|bytes| bytes.checked_add(24))
         .is_none_or(|n| n as u64 > maximum_affected_bytes)
     {
         return Err(budget("native transaction physical affected byte ceiling"));
@@ -173,9 +174,7 @@ pub(crate) fn commit(
     publish_log(storage, &proof, &prepared, resources)?;
     let mut active = bootstrap.journal;
     put32(&mut active, 28, initial.first);
-    put32(&mut active, 252, 0);
-    let checksum = crc32c(!0, &active);
-    put32(&mut active, 252, checksum);
+    journal_checksum(&initial, &mut active);
     publish_control(storage, bootstrap.physical(0)?, &active)?;
     publish_control(
         storage,

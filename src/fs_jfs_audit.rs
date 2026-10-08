@@ -134,6 +134,12 @@ pub(crate) fn audit_decoded(
     r: &Resources,
 ) -> Result<JfsAuditReport> {
     r.cancellation.check()?;
+    if !inner.allocation_agreement {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "JFS recovery index has no allocation audit authority",
+        ));
+    }
     let g = &inner.geometry;
     let occurrences = inner
         .nodes

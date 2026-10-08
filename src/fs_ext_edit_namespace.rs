@@ -523,7 +523,18 @@ impl allocation::PlanningContext<'_> {
         }
         let (raw, _, _) = mapped_inode(&mut p, &inode, &data, length)?;
         let inode_at = p.inode_offset(number)?;
-        p.patch(inode_at, raw.to_vec(), Phase::Initialize)?;
+        if self.geometry.inode_size == 256 {
+            // Private native profile: caller supplies the exact classic prefix;
+            // the new extension is explicitly zeroed, with its required layout size.
+            // Existing inode extensions are never routed through this birth path.
+            let _birth = r.memory.reserve(256)?;
+            let mut body = zeros(256)?;
+            body[..128].copy_from_slice(&raw);
+            body[128..130].copy_from_slice(&self.geometry.minimum_extra_size.to_le_bytes());
+            p.patch(inode_at, body, Phase::Initialize)?;
+        } else {
+            p.patch(inode_at, raw.to_vec(), Phase::Initialize)?;
+        }
         insert(parent, bytes, number, if directory { 2 } else { 1 }, &mut p)?;
         if directory {
             p.link_count(parent.inode.number(), 1)?;
@@ -650,6 +661,12 @@ impl allocation::PlanningContext<'_> {
         if deletion_time == 0 {
             return Err(bad(
                 "ext2 final unlink requires explicit nonzero native deletion time",
+            ));
+        }
+        if deletion_time < self.geometry.inodes {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "ext deletion time aliases the native orphan inode-number domain",
             ));
         }
         let decoder = self.decoder(r)?;

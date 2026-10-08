@@ -3,6 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 pub(super) struct Payload {
     pub input: usize,
+    pub named: Option<usize>,
     pub logical: u64,
     pub physical: u64,
 }
@@ -28,6 +29,7 @@ struct Geometry {
     pool_base: u64,
     prefix: u64,
     chunks: u64,
+    cibs: u64,
 }
 impl Geometry {
     fn new(capacity: ApfsCheckpointCapacity, blocks: u64) -> Self {
@@ -35,7 +37,8 @@ impl Geometry {
         let metadata_base = data_base + u64::from(capacity.data_blocks);
         let pool_base = metadata_base + 24;
         let chunks = blocks.div_ceil(32768);
-        let prefix = pool_base + 3 * (chunks + 1);
+        let cibs = chunks.div_ceil(126);
+        let prefix = pool_base + 3 * (chunks + cibs);
         Self {
             capacity,
             data_base,
@@ -43,6 +46,7 @@ impl Geometry {
             pool_base,
             prefix,
             chunks,
+            cibs,
         }
     }
     fn at(self, old: u64) -> u64 {
@@ -254,11 +258,11 @@ pub(super) fn construct(
 ) -> Result<Layout> {
     let blocks = o.image_bytes / BLOCK as u64;
     if !o.image_bytes.is_multiple_of(BLOCK as u64)
-        || !(256..=131073).contains(&blocks)
+        || !(256..=127 * 32768).contains(&blocks)
         || blocks > o.limits.blocks
     {
         return Err(invalid(
-            "APFS authoring single-CIB geometry outside profile",
+            "APFS authoring direct two-CIB geometry outside profile",
         ));
     }
     if o.volume_label.is_empty()
@@ -380,6 +384,7 @@ pub(super) fn construct(
 
                     payload.push(Payload {
                         input: index,
+                        named: None,
                         logical: at,
                         physical: block,
                     });
@@ -403,6 +408,48 @@ pub(super) fn construct(
                     .ok_or_else(|| budget("APFS payload length overflow"))?;
             }
             records.push((key(id, 6), 1u32.to_le_bytes().to_vec()));
+        }
+        for (named_index, named) in input.named.iter().enumerate() {
+            work.tick(1, r)?;
+            let stream = sibling;
+            sibling = sibling
+                .checked_add(1)
+                .filter(|id| *id < 1u64 << 60)
+                .ok_or_else(|| budget("APFS named xattr identity ceiling"))?;
+            let blocks = named.length.div_ceil(BLOCK as u64);
+            for block_index in 0..blocks {
+                logical_blocks = logical_blocks
+                    .checked_add(1)
+                    .filter(|n| *n <= o.limits.blocks)
+                    .ok_or_else(|| budget("APFS total named payload block ceiling"))?;
+                let at = block_index * BLOCK as u64;
+                let block = a.physical(work, r)?;
+                payload.push(Payload {
+                    input: index,
+                    named: Some(named_index),
+                    logical: at,
+                    physical: block,
+                });
+                let mut k = key(stream, 8);
+                k.extend_from_slice(&at.to_le_bytes());
+                let mut v = zero(24)?;
+                q(&mut v, 0, BLOCK as u64);
+                q(&mut v, 8, block);
+                records.push((k, v));
+                let mut v = zero(20)?;
+                q(&mut v, 0, 1u64 << 60 | 1);
+                q(&mut v, 8, id);
+                d(&mut v, 16, 1);
+                physical.push((key(block, 2), v));
+            }
+            let mut value = zero(52)?;
+            w(&mut value, 0, 1);
+            w(&mut value, 2, 48);
+            q(&mut value, 4, stream);
+            q(&mut value, 12, named.length);
+            q(&mut value, 20, blocks * BLOCK as u64);
+            q(&mut value, 36, named.length);
+            records.push((name_key(id, 4, &named.name)?, value));
         }
         let fork_length = input.fork.as_ref().map_or(0, |f| f.len());
         if fork_length > 2048 {
@@ -549,7 +596,14 @@ pub(super) fn construct(
         .map_err(|_| budget("APFS raw bitmap index"))?;
     raw_bitmaps.push(a.at(25));
     for chunk in 0..a.geometry.chunks {
-        raw_bitmaps.push(a.geometry.pool_base + if chunk == 0 { 0 } else { chunk + 1 });
+        raw_bitmaps.push(
+            a.geometry.pool_base
+                + if chunk == 0 {
+                    0
+                } else {
+                    chunk + a.geometry.cibs
+                },
+        );
     }
     Ok(Layout {
         raw_bitmaps,
@@ -568,7 +622,16 @@ fn superblock(
     r: &Resources,
 ) -> Result<()> {
     work.tick(a.geometry.prefix * BLOCK as u64, r)?;
-    let main_queue_limit = match 1 + (a.blocks - 1) / 4544 {
+    // Native apfsprogs parameter profile: the sub-GiB linear rule does not
+    // extrapolate to large containers. Above four GiB the queue cap is 512.
+    let queue_limit = if a.blocks < 0x40000 {
+        1 + (a.blocks - 1) / 4544
+    } else if a.blocks < 0x100000 {
+        116 + (a.blocks - 261281) / 2272
+    } else {
+        512
+    };
+    let main_queue_limit = match queue_limit {
         2 => 3,
         n => n,
     };
@@ -593,7 +656,12 @@ fn superblock(
     q(&mut nx, 168, 1025);
     d(&mut nx, 180, a.blocks.div_ceil(131072).min(100) as u32);
     q(&mut nx, 184, 1026);
-    q(&mut nx, 1312, (main_queue_limit << 32) | (4u64 << 16) | 1);
+    let ephemeral_minimum = if a.blocks < 32768 {
+        main_queue_limit
+    } else {
+        8
+    };
+    q(&mut nx, 1312, (ephemeral_minimum << 32) | (4u64 << 16) | 1);
     seal(&mut nx);
     a.put(0, nx.clone())?;
     a.put(2, nx)?;
@@ -631,11 +699,11 @@ fn superblock(
     d(&mut sm, 44, 507);
     q(&mut sm, 48, a.blocks);
     q(&mut sm, 56, a.geometry.chunks);
-    d(&mut sm, 64, 1);
+    d(&mut sm, 64, a.geometry.cibs as u32);
     q(&mut sm, 72, a.blocks - allocated);
     d(&mut sm, 80, 384);
     d(&mut sm, 148, 16);
-    q(&mut sm, 152, 3 * (a.geometry.chunks + 1));
+    q(&mut sm, 152, 3 * (a.geometry.chunks + a.geometry.cibs));
     d(&mut sm, 160, 1);
     d(&mut sm, 164, 16);
     q(&mut sm, 168, a.at(25));
@@ -661,7 +729,9 @@ fn superblock(
             },
         );
     }
-    q(&mut sm, 384, a.at(42));
+    for i in 0..a.geometry.cibs {
+        q(&mut sm, 384 + i as usize * 8, a.geometry.pool_base + 1 + i);
+    }
     seal(&mut sm);
     a.put(a.at(10), sm)?;
     for (at, id) in [(11, 1028), (12, 1029)] {
@@ -682,33 +752,45 @@ fn superblock(
         )?;
     }
     let mut ip = zero(BLOCK)?;
-    for block in 0..a.geometry.chunks + 1 {
+    for block in 0..a.geometry.chunks + a.geometry.cibs {
         ip[block as usize / 8] |= 1 << (block % 8);
     }
     a.put(a.at(25), ip)?;
-    let mut cib = object(a.at(42), 0x40000007, 0)?;
-    d(&mut cib, 36, a.geometry.chunks as u32);
-    for chunk in 0..a.geometry.chunks {
-        let start = chunk * 32768;
-        let count = (a.blocks - start).min(32768);
-        let address = a.geometry.pool_base + if chunk == 0 { 0 } else { chunk + 1 };
-        let mut bitmap = zero(BLOCK)?;
-        let mut used = 0;
-        for relative in 0..count {
-            if a.used[(start + relative) as usize] {
-                bitmap[relative as usize / 8] |= 1 << (relative % 8);
-                used += 1;
+    for ci in 0..a.geometry.cibs {
+        let cib_address = a.geometry.pool_base + 1 + ci;
+        let first = ci * 126;
+        let entries = (a.geometry.chunks - first).min(126);
+        let mut cib = object(cib_address, 0x40000007, 0)?;
+        d(&mut cib, 32, ci as u32);
+        d(&mut cib, 36, entries as u32);
+        for relative_chunk in 0..entries {
+            let chunk = first + relative_chunk;
+            let start = chunk * 32768;
+            let count = (a.blocks - start).min(32768);
+            let address = a.geometry.pool_base
+                + if chunk == 0 {
+                    0
+                } else {
+                    chunk + a.geometry.cibs
+                };
+            let mut bitmap = zero(BLOCK)?;
+            let mut used = 0;
+            for relative in 0..count {
+                if a.used[(start + relative) as usize] {
+                    bitmap[relative as usize / 8] |= 1 << (relative % 8);
+                    used += 1;
+                }
             }
+            a.put(address, bitmap)?;
+            let at = 40 + relative_chunk as usize * 32;
+            q(&mut cib, at, 1);
+            q(&mut cib, at + 8, start);
+            d(&mut cib, at + 16, count as u32);
+            d(&mut cib, at + 20, (count - used) as u32);
+            q(&mut cib, at + 24, address);
         }
-        a.put(address, bitmap)?;
-        let at = 40 + chunk as usize * 32;
-        q(&mut cib, at, 1);
-        q(&mut cib, at + 8, start);
-        d(&mut cib, at + 16, count as u32);
-        d(&mut cib, at + 20, (count - used) as u32);
-        q(&mut cib, at + 24, address);
+        seal(&mut cib);
+        a.put(cib_address, cib)?;
     }
-    seal(&mut cib);
-    a.put(a.at(42), cib)?;
     Ok(())
 }

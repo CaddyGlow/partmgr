@@ -16,6 +16,17 @@ pub struct ApfsCreateMetadata {
 /// A projected native mutation using the same retained-history publication protocol as range replacement.
 pub type ApfsMutationPlan = ApfsRangePlan;
 
+struct InlineInput {
+    bytes: Vec<u8>,
+    binding: (ObjectId, u64),
+}
+struct ResourceEdit {
+    name: Option<Vec<u8>>,
+    offset: u64,
+    eof: u64,
+    truncate: bool,
+    replace: bool,
+}
 type Fields = Vec<(u8, u8, Vec<u8>)>;
 fn key(id: u64, kind: u64) -> Vec<u8> {
     ((kind << 60) | id).to_le_bytes().to_vec()
@@ -26,6 +37,42 @@ fn name_key(parent: u64, name: &[u8]) -> Vec<u8> {
     k.extend_from_slice(name);
     k.push(0);
     k
+}
+fn xattr_name(name: &[u8]) -> Result<()> {
+    if name.is_empty()
+        || name.len() > 821
+        || name.contains(&0)
+        || std::str::from_utf8(name).is_err()
+    {
+        return Err(invalid("APFS native xattr name bounds"));
+    }
+    if name == b"com.apple.ResourceFork"
+        || name == b"com.apple.FinderInfo"
+        || name == b"com.apple.decmpfs"
+        || name == b"com.apple.system.Security"
+        || name.starts_with(b"com.apple.fs.")
+    {
+        return Err(unavailable(
+            "APFS special xattr requires dedicated semantics",
+        ));
+    }
+    Ok(())
+}
+fn xattr_key(file: u64, name: &[u8]) -> Vec<u8> {
+    let mut k = key(file, 4);
+    k.extend_from_slice(&((name.len() + 1) as u16).to_le_bytes());
+    k.extend_from_slice(name);
+    k.push(0);
+    k
+}
+fn increment_generation(catalog: &mut Records, file: u64) -> Result<()> {
+    let at = inode_index(catalog, file)?;
+    let raw = &mut catalog[at].1;
+    let generation = u32le(raw, 64)
+        .checked_add(1)
+        .ok_or_else(|| budget("APFS xattr generation"))?;
+    d(raw, 64, generation);
+    Ok(())
 }
 fn name_valid(name: &[u8]) -> Result<()> {
     if name.is_empty()
@@ -40,7 +87,7 @@ fn name_valid(name: &[u8]) -> Result<()> {
     }
     Ok(())
 }
-fn fields(raw: &[u8]) -> Fields {
+pub(super) fn fields(raw: &[u8]) -> Fields {
     let count = u16::from_le_bytes(raw[92..94].try_into().unwrap()) as usize;
     let mut at = 96 + count * 4;
     (0..count)
@@ -248,6 +295,47 @@ impl FileRead for Empty {
         r.cancellation.check()
     }
 }
+struct EmbeddedGrowth {
+    id: ObjectId,
+    bytes: Vec<u8>,
+    length: u64,
+}
+impl FileRead for EmbeddedGrowth {
+    fn identity(&self) -> &ObjectId {
+        &self.id
+    }
+    fn len(&self) -> u64 {
+        self.length
+    }
+    fn read_at(&self, offset: u64, out: &mut [u8], r: &Resources) -> Result<usize> {
+        r.cancellation.check()?;
+        let count = out
+            .len()
+            .min(self.length.saturating_sub(offset).min(usize::MAX as u64) as usize);
+        out[..count].fill(0);
+        if offset < (self.bytes.len() as u64) {
+            let start = offset as usize;
+            let copy = count.min(self.bytes.len() - start);
+            out[..copy].copy_from_slice(&self.bytes[start..start + copy]);
+        }
+        Ok(count)
+    }
+    fn visit_extents(
+        &self,
+        r: &Resources,
+        visitor: &mut dyn FnMut(LogicalExtent) -> Result<()>,
+    ) -> Result<()> {
+        r.cancellation.check()?;
+        if self.length != 0 {
+            visitor(LogicalExtent {
+                offset: 0,
+                length: self.length,
+                kind: ExtentKind::Data,
+            })?;
+        }
+        Ok(())
+    }
+}
 struct Base {
     binding: Option<(ObjectId, u64)>,
     catalog: Records,
@@ -346,20 +434,19 @@ impl<S: Storage> ApfsEditor<S> {
             .ok_or_else(|| budget("APFS owned generation exhausted"))?;
         let c = self.volume.container();
         let blocks = c.checkpoint().blocks;
-        if c.checkpoint().volumes.len() != 1 || blocks > 131073 {
+        if c.checkpoint().volumes.len() != 1 || blocks > 127 * 32768 {
             return Err(unavailable(
-                "APFS initial COW single-volume/single-CIB profile",
+                "APFS initial COW single-volume/direct two-CIB profile",
             ));
         }
         for node in self.volume.inner.nodes.values() {
             for stream in &node.streams {
-                if stream.kind != StreamKind::Data && stream.inline.is_none() {
+                if !matches!(
+                    stream.kind,
+                    StreamKind::Data | StreamKind::ResourceFork | StreamKind::Named(_)
+                ) && stream.inline.is_none()
+                {
                     return Err(unavailable("APFS COW external resource stream"));
-                }
-                if stream.kind == StreamKind::Data && stream.id != node.id {
-                    return Err(unavailable(
-                        "APFS COW clone mutation requires sharing proof",
-                    ));
                 }
             }
         }
@@ -452,13 +539,25 @@ impl<S: Storage> ApfsEditor<S> {
     }
     fn namespace_finish(
         &self,
-        mut base: Base,
+        base: Base,
         payload: Vec<Payload>,
         input: Arc<dyn FileRead>,
         eof: u64,
         zero_from: Option<u64>,
         r: &Resources,
     ) -> Result<ApfsMutationPlan> {
+        self.namespace_finish_at(base, payload, input, (0, eof), zero_from, r)
+    }
+    fn namespace_finish_at(
+        &self,
+        mut base: Base,
+        payload: Vec<Payload>,
+        input: Arc<dyn FileRead>,
+        range: (u64, u64),
+        zero_from: Option<u64>,
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        let (offset, eof) = range;
         directory_counts(&mut base.catalog)?;
         self.assemble(
             Projection {
@@ -466,12 +565,13 @@ impl<S: Storage> ApfsEditor<S> {
                 catalog: base.catalog,
                 payload,
                 input,
-                offset: 0,
+                offset,
                 eof,
                 zero_from,
                 lease: base.lease,
                 resources: r.clone(),
                 counters: Some((base.next, base.files, base.dirs)),
+                reclamation: None,
             },
             r,
         )
@@ -627,8 +727,10 @@ impl<S: Storage> ApfsEditor<S> {
             ));
         }
         base.binding = Some((identity, eof));
-        base.catalog
-            .retain(|r| !(u64le(&r.0, 0) >> 60 == 8 && u64le(&r.0, 0) & 0x0fffffffffffffff == id));
+        let data_id = detach_data_stream(&mut base.catalog, id, &mut base.next)?;
+        base.catalog.retain(|r| {
+            !(u64le(&r.0, 0) >> 60 == 8 && u64le(&r.0, 0) & 0x0fffffffffffffff == data_id)
+        });
         let mut payload = Vec::new();
         payload
             .try_reserve_exact(count as usize)
@@ -659,7 +761,7 @@ impl<S: Storage> ApfsEditor<S> {
                 });
                 physical
             };
-            let mut k = key(id, 8);
+            let mut k = key(data_id, 8);
             k.extend_from_slice(&logical.to_le_bytes());
             let mut v = vec![0; 24];
             q(&mut v, 0, BLOCK as u64);
@@ -728,6 +830,622 @@ impl<S: Storage> ApfsEditor<S> {
         d(raw, 64, generation);
         put_fields(raw, fs)
     }
+    /// Set bounded embedded user xattr bytes, retiring an old external mapping.
+    /// Existing embedded reserved flag8 survives replacement; it is never created.
+    pub fn plan_set_xattr(
+        &self,
+        id: &ObjectId,
+        name: &[u8],
+        value: &[u8],
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        xattr_name(name)?;
+        if value.len() > 3804 {
+            return Err(unavailable("APFS external generic xattr authoring"));
+        }
+        let mut base = self.namespace_base(r)?;
+        let file = self.own_xattr_node(id)?;
+        let k = xattr_key(file, name);
+        let old = base.catalog.iter().find(|record| record.0 == k);
+        let mut flags = old.map_or(2, |record| {
+            u16::from_le_bytes(record.1[..2].try_into().unwrap())
+        });
+        if flags == 1 {
+            flags = 2;
+        }
+        if !matches!(flags, 2 | 10) {
+            return Err(unavailable("APFS non-user-embedded xattr mutation"));
+        }
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(value.len() + 4)
+            .map_err(|_| budget("APFS embedded xattr bytes"))?;
+        bytes.extend_from_slice(&flags.to_le_bytes());
+        bytes.extend_from_slice(&(value.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(value);
+        base.catalog.retain(|record| record.0 != k);
+        base.catalog.push((k, bytes));
+        increment_generation(&mut base.catalog, file)?;
+        self.namespace_finish(base, Vec::new(), self.empty_input(), 0, None, r)
+    }
+    /// Replace a user xattr with a dense deferred external stream.
+    pub fn plan_replace_xattr_stream(
+        &self,
+        id: &ObjectId,
+        name: &[u8],
+        input: Arc<dyn FileRead>,
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        xattr_name(name)?;
+        let base = self.namespace_base(r)?;
+        let file = self.own_xattr_node(id)?;
+        let eof = input.len();
+        self.external_resource(
+            base,
+            file,
+            input,
+            ResourceEdit {
+                name: Some(name.to_vec()),
+                offset: 0,
+                eof,
+                truncate: false,
+                replace: true,
+            },
+            r,
+        )
+    }
+    /// Replace bytes within an existing external user xattr, retaining its EOF.
+    pub fn plan_range_xattr_stream(
+        &self,
+        id: &ObjectId,
+        name: &[u8],
+        offset: u64,
+        input: Arc<dyn FileRead>,
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        xattr_name(name)?;
+        let base = self.namespace_base(r)?;
+        let file = self.own_xattr_node(id)?;
+        let kind = StreamKind::Named(NativeName::Bytes(name.to_vec()));
+        let old = self.volume.inner.nodes[&file]
+            .streams
+            .iter()
+            .find(|s| s.kind == kind)
+            .ok_or_else(|| invalid("APFS external xattr absent"))?;
+        if input.is_empty()
+            || offset
+                .checked_add(input.len())
+                .is_none_or(|end| end > old.length)
+        {
+            return Err(invalid("APFS external xattr range"));
+        }
+        self.external_resource(
+            base,
+            file,
+            input,
+            ResourceEdit {
+                name: Some(name.to_vec()),
+                offset,
+                eof: old.length,
+                truncate: false,
+                replace: false,
+            },
+            r,
+        )
+    }
+    /// Change an existing external user xattr EOF; growth is initialized to zero.
+    pub fn plan_truncate_xattr_stream(
+        &self,
+        id: &ObjectId,
+        name: &[u8],
+        eof: u64,
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        xattr_name(name)?;
+        let base = self.namespace_base(r)?;
+        let file = self.own_xattr_node(id)?;
+        let kind = StreamKind::Named(NativeName::Bytes(name.to_vec()));
+        if !self.volume.inner.nodes[&file]
+            .streams
+            .iter()
+            .any(|s| s.kind == kind)
+        {
+            return Err(invalid("APFS external xattr absent"));
+        }
+        self.external_resource(
+            base,
+            file,
+            self.empty_input(),
+            ResourceEdit {
+                name: Some(name.to_vec()),
+                offset: 0,
+                eof,
+                truncate: true,
+                replace: false,
+            },
+            r,
+        )
+    }
+    /// Remove a present user xattr, retiring its external allocation if present.
+    pub fn plan_remove_xattr(
+        &self,
+        id: &ObjectId,
+        name: &[u8],
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        xattr_name(name)?;
+        let mut base = self.namespace_base(r)?;
+        let file = self.own_xattr_node(id)?;
+        let k = xattr_key(file, name);
+        let record = base
+            .catalog
+            .iter()
+            .find(|record| record.0 == k)
+            .ok_or_else(|| invalid("APFS xattr absent"))?;
+        if !matches!(
+            u16::from_le_bytes(record.1[..2].try_into().unwrap()),
+            1 | 2 | 10
+        ) {
+            return Err(unavailable("APFS non-user-embedded xattr removal"));
+        }
+        base.catalog.retain(|record| record.0 != k);
+        increment_generation(&mut base.catalog, file)?;
+        self.namespace_finish(base, Vec::new(), self.empty_input(), 0, None, r)
+    }
+    fn own_xattr_node(&self, id: &ObjectId) -> Result<u64> {
+        let raw: [u8; 8] = id
+            .native
+            .as_slice()
+            .try_into()
+            .map_err(|_| invalid("APFS xattr identity length"))?;
+        let file = u64::from_be_bytes(raw);
+        let directory = self
+            .volume
+            .inner
+            .nodes
+            .get(&file)
+            .ok_or_else(|| invalid("APFS xattr object absent"))?
+            .directory;
+        self.own_node(id, directory)
+    }
+    /// Replace or create an embedded native resource fork (at most 3804 bytes).
+    /// Inline bytes are metadata: bounded input is read during planning, while
+    /// its immutable identity/length and cancellation binding survive commit.
+    pub fn plan_replace_resource_fork(
+        &self,
+        id: &ObjectId,
+        input: Arc<dyn FileRead>,
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        if input.len() > 3804 {
+            let base = self.namespace_base(r)?;
+            let file = self.own_node(id, false)?;
+            let eof = input.len();
+            return self.external_resource(
+                base,
+                file,
+                input,
+                ResourceEdit {
+                    name: None,
+                    offset: 0,
+                    eof,
+                    truncate: false,
+                    replace: true,
+                },
+                r,
+            );
+        }
+        let mut base = self.namespace_base(r)?;
+        let file = self.own_node(id, false)?;
+        let inline = self.resource_input(&input, r)?;
+        base.binding = Some(inline.binding);
+        self.project_resource(&mut base.catalog, file, inline.bytes)?;
+        self.namespace_finish(base, Vec::new(), input, 0, None, r)
+    }
+    /// Replace an existing resource-fork range without changing its EOF.
+    pub fn plan_range_resource_fork(
+        &self,
+        id: &ObjectId,
+        offset: u64,
+        input: Arc<dyn FileRead>,
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        if input.is_empty() {
+            return Err(invalid("APFS empty resource-fork range"));
+        }
+        let mut base = self.namespace_base(r)?;
+        let file = self.own_node(id, false)?;
+        if let Some(stream) = self.volume.inner.nodes[&file]
+            .streams
+            .iter()
+            .find(|s| s.kind == StreamKind::ResourceFork && s.inline.is_none())
+        {
+            let end = offset
+                .checked_add(input.len())
+                .filter(|end| *end <= stream.length)
+                .ok_or_else(|| invalid("APFS resource range exceeds EOF"))?;
+            if end == offset {
+                return Err(invalid("APFS empty resource range"));
+            }
+            return self.external_resource(
+                base,
+                file,
+                input,
+                ResourceEdit {
+                    name: None,
+                    offset,
+                    eof: stream.length,
+                    truncate: false,
+                    replace: false,
+                },
+                r,
+            );
+        }
+        let mut bytes = self.inline_resource(file)?;
+        let end = offset
+            .checked_add(input.len())
+            .filter(|end| *end <= bytes.len() as u64)
+            .ok_or_else(|| invalid("APFS resource-fork range exceeds unchanged EOF"))?;
+        let inline = self.resource_input(&input, r)?;
+        if inline.binding.1 != end - offset {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "APFS resource-fork range input length changed",
+            ));
+        }
+        bytes[offset as usize..end as usize].copy_from_slice(&inline.bytes);
+        base.binding = Some(inline.binding);
+        self.project_resource(&mut base.catalog, file, bytes)?;
+        self.namespace_finish(base, Vec::new(), input, 0, None, r)
+    }
+    /// Change an embedded resource-fork EOF, zeroing newly exposed bytes.
+    /// Zero EOF retains a present empty native resource fork.
+    pub fn plan_truncate_resource_fork(
+        &self,
+        id: &ObjectId,
+        eof: u64,
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        let mut base = self.namespace_base(r)?;
+        let file = self.own_node(id, false)?;
+        if self.volume.inner.nodes[&file]
+            .streams
+            .iter()
+            .any(|s| s.kind == StreamKind::ResourceFork && s.inline.is_none())
+        {
+            return self.external_resource(
+                base,
+                file,
+                self.empty_input(),
+                ResourceEdit {
+                    name: None,
+                    offset: 0,
+                    eof,
+                    truncate: true,
+                    replace: false,
+                },
+                r,
+            );
+        }
+        if eof > 3804 {
+            let bytes = self.inline_resource(file)?;
+            let input: Arc<dyn FileRead> = Arc::new(EmbeddedGrowth {
+                id: id.clone(),
+                bytes,
+                length: eof,
+            });
+            return self.external_resource(
+                base,
+                file,
+                input,
+                ResourceEdit {
+                    name: None,
+                    offset: 0,
+                    eof,
+                    truncate: false,
+                    replace: true,
+                },
+                r,
+            );
+        }
+        let mut bytes = self.inline_resource(file)?;
+        if eof == bytes.len() as u64 {
+            return Err(invalid("APFS unchanged resource-fork EOF"));
+        }
+        bytes
+            .try_reserve_exact((eof as usize).saturating_sub(bytes.len()))
+            .map_err(|_| budget("APFS bounded resource-fork projection"))?;
+        bytes.resize(eof as usize, 0);
+        self.project_resource(&mut base.catalog, file, bytes)?;
+        self.namespace_finish(base, Vec::new(), self.empty_input(), 0, None, r)
+    }
+    fn external_resource(
+        &self,
+        mut base: Base,
+        file: u64,
+        input: Arc<dyn FileRead>,
+        edit: ResourceEdit,
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        let ResourceEdit {
+            name,
+            offset,
+            eof,
+            truncate,
+            replace,
+        } = edit;
+        let count = eof.div_ceil(BLOCK as u64);
+        if count > self.limits.read.blocks || count > base.free.len().saturating_sub(8) as u64 {
+            return Err(budget("APFS resource allocation cap"));
+        }
+        if input.identity().native.len() > 4096 {
+            return Err(budget("APFS resource identity cap"));
+        }
+        let kind = match &name {
+            Some(name) => StreamKind::Named(NativeName::Bytes(name.clone())),
+            None => StreamKind::ResourceFork,
+        };
+        let old = self.volume.inner.nodes[&file]
+            .streams
+            .iter()
+            .find(|s| s.kind == kind);
+        if truncate && old.is_none_or(|s| s.length == eof) {
+            return Err(invalid("APFS unchanged resource EOF"));
+        }
+        let old_eof = old.map_or(0, |s| s.length);
+        let stream_id = match old.filter(|s| s.inline.is_none()) {
+            Some(s) => s.id,
+            None => next_id(&mut base.next)?,
+        };
+        let input_length = input.len();
+        let binding = (input.identity().clone(), input_length);
+        let end = offset
+            .checked_add(input_length)
+            .filter(|end| *end <= eof)
+            .ok_or_else(|| invalid("APFS external resource input range"))?;
+        base.binding = Some(binding);
+        base.catalog.retain(|record| {
+            !(u64le(&record.0, 0) >> 60 == 8
+                && u64le(&record.0, 0) & 0x0fffffffffffffff == stream_id)
+        });
+        let mut payload = Vec::new();
+        payload
+            .try_reserve_exact(count as usize)
+            .map_err(|_| budget("APFS resource recipes"))?;
+        for logical in (0..count).map(|n| n * BLOCK as u64) {
+            r.cancellation.check()?;
+            self.snapshot.work.charge(1)?;
+            let previous = old
+                .and_then(|s| {
+                    s.runs
+                        .iter()
+                        .find(|run| run.logical <= logical && logical < run.logical + run.length)
+                })
+                .map_or(0, |run| {
+                    run.physical + (logical - run.logical) / BLOCK as u64
+                });
+            let changed = replace
+                || previous == 0
+                || (!truncate && logical < end && logical + BLOCK as u64 > offset)
+                || (truncate && logical + BLOCK as u64 > old_eof.min(eof));
+            let physical = if changed {
+                let physical = base.free[payload.len()];
+                payload.push(Payload {
+                    logical,
+                    physical,
+                    previous: if replace { 0 } else { previous },
+                });
+                physical
+            } else {
+                previous
+            };
+            let mut k = key(stream_id, 8);
+            k.extend_from_slice(&logical.to_le_bytes());
+            let mut v = vec![0; 24];
+            q(&mut v, 0, BLOCK as u64);
+            q(&mut v, 8, physical);
+            base.catalog.push((k, v));
+        }
+        let mut k = key(file, 4);
+        let mut native_name = name
+            .clone()
+            .unwrap_or_else(|| b"com.apple.ResourceFork".to_vec());
+        native_name.push(0);
+        let name = native_name.as_slice();
+        k.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        k.extend_from_slice(name);
+        let old_value = base
+            .catalog
+            .iter()
+            .find(|record| record.0 == k)
+            .map(|record| record.1.clone());
+        if old_value
+            .as_ref()
+            .is_some_and(|v| u16::from_le_bytes(v[..2].try_into().unwrap()) & 8 != 0)
+        {
+            return Err(unavailable("APFS reserved xattr flag external conversion"));
+        }
+        let mut value = vec![0; 52];
+        w(&mut value, 0, 1);
+        let header_size = old_value
+            .as_ref()
+            .filter(|v| v.len() == 52 && u16::from_le_bytes(v[..2].try_into().unwrap()) == 1)
+            .map_or(48, |v| u16::from_le_bytes(v[2..4].try_into().unwrap()));
+        w(&mut value, 2, header_size);
+        q(&mut value, 4, stream_id);
+        q(&mut value, 12, eof);
+        q(&mut value, 20, count * BLOCK as u64);
+        let written = old_value
+            .as_ref()
+            .filter(|v| v.len() == 52 && u16::from_le_bytes(v[..2].try_into().unwrap()) == 1)
+            .map_or(0, |v| u64le(v, 36));
+        q(
+            &mut value,
+            36,
+            written
+                .checked_add(input_length)
+                .ok_or_else(|| budget("APFS resource write counter"))?,
+        );
+        if let Some(v) = old_value
+            .as_ref()
+            .filter(|v| v.len() == 52 && u16::from_le_bytes(v[..2].try_into().unwrap()) == 1)
+        {
+            q(&mut value, 44, u64le(v, 44));
+        }
+        base.catalog.retain(|record| record.0 != k);
+        base.catalog.push((k, value));
+        let at = inode_index(&base.catalog, file)?;
+        let raw = &mut base.catalog[at].1;
+        if name == b"com.apple.ResourceFork\0" {
+            let flags = (u64le(raw, 48) | 0x4000) & !0x8000;
+            q(raw, 48, flags);
+        }
+        let generation = u32le(raw, 64)
+            .checked_add(1)
+            .ok_or_else(|| budget("APFS resource generation"))?;
+        d(raw, 64, generation);
+        self.namespace_finish_at(
+            base,
+            payload,
+            input,
+            (offset, eof),
+            if truncate {
+                Some(old_eof.min(eof))
+            } else {
+                None
+            },
+            r,
+        )
+    }
+    /// Remove a present resource fork, distinct from truncating it to zero.
+    pub fn plan_remove_resource_fork(
+        &self,
+        id: &ObjectId,
+        r: &Resources,
+    ) -> Result<ApfsMutationPlan> {
+        let mut base = self.namespace_base(r)?;
+        let file = self.own_node(id, false)?;
+        if !self.volume.inner.nodes[&file]
+            .streams
+            .iter()
+            .any(|s| s.kind == StreamKind::ResourceFork)
+        {
+            return Err(invalid("APFS resource fork absent"));
+        }
+        base.catalog.retain(|record| {
+            !(u64le(&record.0, 0) == (4u64 << 60 | file)
+                && record.0[10..] == *b"com.apple.ResourceFork\0")
+        });
+        let at = inode_index(&base.catalog, file)?;
+        let raw = &mut base.catalog[at].1;
+        let flags = (u64le(raw, 48) & !0x4000) | 0x8000;
+        q(raw, 48, flags);
+        let generation = u32le(raw, 64)
+            .checked_add(1)
+            .ok_or_else(|| budget("APFS resource-fork write generation"))?;
+        d(raw, 64, generation);
+        self.namespace_finish(base, Vec::new(), self.empty_input(), 0, None, r)
+    }
+    fn inline_resource(&self, file: u64) -> Result<Vec<u8>> {
+        let stream = self.volume.inner.nodes[&file]
+            .streams
+            .iter()
+            .find(|stream| stream.kind == StreamKind::ResourceFork)
+            .ok_or_else(|| invalid("APFS resource fork absent"))?;
+        let bytes = stream
+            .inline
+            .as_ref()
+            .ok_or_else(|| unavailable("APFS external resource-fork mutation"))?;
+        if bytes.len() > 3804 {
+            return Err(invalid("APFS native embedded resource-fork limit"));
+        }
+        let mut copy = Vec::new();
+        copy.try_reserve_exact(bytes.len())
+            .map_err(|_| budget("APFS resource-fork copy"))?;
+        copy.extend_from_slice(bytes);
+        Ok(copy)
+    }
+    fn resource_input(&self, input: &Arc<dyn FileRead>, r: &Resources) -> Result<InlineInput> {
+        self.snapshot.work.resources.cancellation.check()?;
+        r.cancellation.check()?;
+        let length = input.len();
+        if length > 3804 || input.identity().native.len() > 4096 {
+            return Err(budget("APFS bounded resource-fork input"));
+        }
+        let identity = input.identity().clone();
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(length as usize)
+            .map_err(|_| budget("APFS resource-fork metadata input"))?;
+        bytes.resize(length as usize, 0);
+        let mut done = 0;
+        while done < bytes.len() {
+            self.snapshot.work.resources.cancellation.check()?;
+            r.cancellation.check()?;
+            if input.identity() != &identity || input.len() != length {
+                return Err(Error::new(
+                    ErrorKind::StalePlan,
+                    "APFS resource-fork input changed",
+                ));
+            }
+            self.snapshot.work.charge((bytes.len() - done) as u64)?;
+            let count = input.read_at(done as u64, &mut bytes[done..], r)?;
+            if count == 0 || count > bytes.len() - done {
+                return Err(Error::io(
+                    "APFS resource-fork short input",
+                    io::ErrorKind::UnexpectedEof.into(),
+                ));
+            }
+            done += count;
+        }
+        self.snapshot.work.resources.cancellation.check()?;
+        r.cancellation.check()?;
+        if input.identity() != &identity || input.len() != length {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "APFS resource-fork input changed",
+            ));
+        }
+        Ok(InlineInput {
+            bytes,
+            binding: (identity, length),
+        })
+    }
+    fn project_resource(&self, catalog: &mut Records, file: u64, bytes: Vec<u8>) -> Result<()> {
+        if bytes.len() > 3804 {
+            return Err(invalid("APFS native embedded resource-fork limit"));
+        }
+        let mut resource_key = key(file, 4);
+        let name = b"com.apple.ResourceFork\0";
+        resource_key.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        resource_key.extend_from_slice(name);
+        let mut value = Vec::new();
+        value
+            .try_reserve_exact(4 + bytes.len())
+            .map_err(|_| budget("APFS embedded resource-fork record"))?;
+        value.extend_from_slice(&2u16.to_le_bytes());
+        value.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
+        value.extend_from_slice(&bytes);
+        if let Some(record) = catalog.iter_mut().find(|record| record.0 == resource_key) {
+            record.1 = value;
+        } else {
+            catalog
+                .try_reserve(1)
+                .map_err(|_| budget("APFS resource-fork catalog entry"))?;
+            catalog.push((resource_key, value));
+        }
+        let at = inode_index(catalog, file)?;
+        let raw = &mut catalog[at].1;
+        if name == b"com.apple.ResourceFork\0" {
+            let flags = (u64le(raw, 48) | 0x4000) & !0x8000;
+            q(raw, 48, flags);
+        }
+        let generation = u32le(raw, 64)
+            .checked_add(1)
+            .ok_or_else(|| budget("APFS resource-fork write generation"))?;
+        d(raw, 64, generation);
+        Ok(())
+    }
     /// Change DATA EOF, retaining old history and zeroing any newly exposed boundary bytes.
     pub fn plan_truncate(
         &self,
@@ -749,8 +1467,9 @@ impl<S: Storage> ApfsEditor<S> {
         if count > self.limits.read.blocks {
             return Err(budget("APFS truncate DATA cap"));
         }
+        let data_id = detach_data_stream(&mut base.catalog, file, &mut base.next)?;
         base.catalog.retain(|r| {
-            !(u64le(&r.0, 0) >> 60 == 8 && u64le(&r.0, 0) & 0x0fffffffffffffff == file)
+            !(u64le(&r.0, 0) >> 60 == 8 && u64le(&r.0, 0) & 0x0fffffffffffffff == data_id)
         });
         let mut payload = Vec::new();
         let mut sparse = 0;
@@ -792,7 +1511,7 @@ impl<S: Storage> ApfsEditor<S> {
             if physical == 0 {
                 sparse += BLOCK as u64;
             }
-            let mut k = key(file, 8);
+            let mut k = key(data_id, 8);
             k.extend_from_slice(&logical.to_le_bytes());
             let mut v = vec![0; 24];
             q(&mut v, 0, BLOCK as u64);
@@ -934,7 +1653,7 @@ impl<S: Storage> ApfsEditor<S> {
         } else {
             base.catalog.retain(|r| {
                 !(u64le(&r.0, 0) & 0x0fffffffffffffff == id
-                    && matches!(u64le(&r.0, 0) >> 60, 3 | 4 | 5 | 6 | 8)
+                    && matches!(u64le(&r.0, 0) >> 60, 3..=5)
                     || u64le(&r.0, 0) >> 60 == 12 && u64le(&r.1, 0) == id)
             });
             if node.directory {

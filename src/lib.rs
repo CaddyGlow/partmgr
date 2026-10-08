@@ -88,6 +88,12 @@ pub mod recovery;
 
 /// Strict clean NTFS 3.1 base-record and positional unnamed-data reader.
 pub mod fs_ntfs;
+/// Volume-bound native NTFS metadata and lossless security capture.
+pub mod fs_ntfs_metadata;
+/// Lossless bounded inspection of native self-relative security descriptors.
+pub mod fs_ntfs_security;
+/// Bounded read-only USN V2/V3 evidence decoding; no replay or recovery claim.
+pub mod fs_ntfs_usn;
 
 /// Bounded native NTFS user-namespace tree inventory.
 pub mod fs_ntfs_tree;
@@ -110,6 +116,8 @@ pub mod fs_hfs_tree;
 pub mod fs_hfsplus;
 /// Complete allocation and catalog-reference audit for supported HFS+/HFSX profiles.
 pub mod fs_hfsplus_audit;
+/// Fresh unpublished HFS+/HFSX construction from deferred common trees.
+pub mod fs_hfsplus_builder;
 /// Complete native HFS+/HFSX tree inventory and deferred data/resource forks.
 pub mod fs_hfsplus_tree;
 

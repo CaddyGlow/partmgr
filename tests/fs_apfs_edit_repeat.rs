@@ -677,3 +677,153 @@ fn checksum_valid_internal_pool_size_must_match_native_topology() {
     );
     assert_eq!(r.memory.used(), 0);
 }
+
+#[test]
+fn independent_retention_classifies_live_history_separately_from_pending_and_refunds() {
+    let r = resources();
+    let bytes = Arc::new(Mutex::new(repeat::repeated_seed()));
+    let mut editor = ApfsEditor::open(
+        Disk {
+            bytes: bytes.clone(),
+            writes: Arc::new(AtomicUsize::new(0)),
+        },
+        1026,
+        limits(512),
+        &r,
+    )
+    .unwrap();
+    for generation in 0..2 {
+        let id = editor.file_identity(16, &r).unwrap();
+        let plan = editor
+            .plan_range(
+                &id,
+                4091 + generation * 4099,
+                Arc::new(Input(
+                    ObjectId {
+                        source: 999,
+                        generation,
+                        native: b"retention oracle".to_vec(),
+                    },
+                    0x91 + generation as u8,
+                )),
+                &r,
+            )
+            .unwrap();
+        let anchor = editor.recovery_anchor();
+        editor.commit_range(plan, &anchor, &r).unwrap();
+    }
+    drop(editor);
+    assert_eq!(r.memory.used(), 0);
+    let raw = bytes.lock().unwrap().clone();
+    let container =
+        ApfsContainer::open(Arc::new(Bytes(raw.clone())), limits(512).read, &r).unwrap();
+    let volume = ApfsVolume::open(container, 1026, &r).unwrap();
+    let baseline = r.memory.used();
+    let proof = prove_apfs_retention(&volume, 2, limits(512).audit, &r).unwrap();
+    assert_eq!(
+        proof
+            .retained_checkpoints()
+            .iter()
+            .map(|p| p.1)
+            .collect::<Vec<_>>(),
+        [2, 3]
+    );
+    assert_eq!(
+        proof
+            .retirement_candidates()
+            .iter()
+            .map(|p| p.1)
+            .collect::<Vec<_>>(),
+        [1]
+    );
+    let states: Vec<_> = (0..512).map(|b| proof.block(b).unwrap()).collect();
+    assert!(states.iter().any(|s| s.pending && s.live));
+    assert!(states.iter().any(|s| s.older_live && !s.live));
+    assert!(
+        states
+            .iter()
+            .any(|s| s.internal_pending && !s.internal_live)
+    );
+    assert!(proof.block(512).is_none());
+    drop(proof);
+    assert_eq!(r.memory.used(), baseline);
+    for horizon in [0, 3, 4] {
+        assert_eq!(
+            prove_apfs_retention(&volume, horizon, limits(512).audit, &r)
+                .err()
+                .unwrap()
+                .kind,
+            ErrorKind::InvalidData
+        );
+        assert_eq!(r.memory.used(), baseline);
+    }
+    let mut capped = limits(512).audit;
+    capped.work = 1;
+    assert_eq!(
+        prove_apfs_retention(&volume, 2, capped, &r)
+            .err()
+            .unwrap()
+            .kind,
+        ErrorKind::BudgetExhausted
+    );
+    assert_eq!(r.memory.used(), baseline);
+    let cancelled = resources();
+    cancelled.cancellation.cancel();
+    assert_eq!(
+        prove_apfs_retention(&volume, 2, limits(512).audit, &cancelled)
+            .err()
+            .unwrap()
+            .kind,
+        ErrorKind::Cancelled
+    );
+    assert_eq!(cancelled.memory.used(), 0);
+    assert_eq!(*bytes.lock().unwrap(), raw);
+    drop(volume);
+    assert_eq!(r.memory.used(), 0);
+    let mut editor = ApfsEditor::open(
+        Disk {
+            bytes: bytes.clone(),
+            writes: Arc::new(AtomicUsize::new(0)),
+        },
+        1026,
+        limits(512),
+        &r,
+    )
+    .unwrap();
+    let plan = editor.plan_checkpoint_retirement(2, &r).unwrap();
+    let candidates = plan.checkpoints().to_vec();
+    let anchor = editor.recovery_anchor();
+    let receipt = editor
+        .commit_checkpoint_retirement(plan, &anchor, &r)
+        .unwrap();
+    assert_eq!(receipt.retired_checkpoints, 1);
+    assert_eq!(receipt.checkpoint_xid, 3);
+    assert_eq!(receipt.released_blocks, 0);
+    let after = bytes.lock().unwrap().clone();
+    for (block, pair) in raw
+        .chunks_exact(4096)
+        .zip(after.chunks_exact(4096))
+        .enumerate()
+    {
+        if candidates
+            .iter()
+            .any(|(address, _)| *address == block as u64)
+        {
+            assert_eq!(pair.1, &[0; 4096]);
+        } else {
+            assert_eq!(
+                pair.0, pair.1,
+                "retirement modified unrelated block {block}"
+            );
+        }
+    }
+    assert!(
+        editor
+            .plan_checkpoint_retirement(2, &r)
+            .unwrap()
+            .checkpoints()
+            .is_empty()
+    );
+    drop(editor);
+    assert_eq!(r.memory.used(), 0);
+}

@@ -20,6 +20,9 @@ use std::{
     sync::Arc,
 };
 use virtdisk::{DiskView, RawDisk, ReadAt};
+#[path = "support/pipeline.rs"]
+#[allow(dead_code)]
+mod copy_pipeline;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut report = PipelineReport::new();
     let result = run(&mut report);
@@ -264,24 +267,7 @@ fn run(pipeline: &mut PipelineReport) -> Result<(), Box<dyn std::error::Error>> 
         "filesystem_flush=complete reopened_audit=complete verified_bytes={} files={} output_volume_oid={}",
         report.image_bytes, report.files, report.volume_oid
     );
-    pipeline.observe(
-        Layer::Publication,
-        "no-clobber artifact publication; directory barrier pending",
-        Completion::Published,
-        FailureState::Uncertain,
-        Recovery::InspectAffectedLayers,
-        staged.persist_noclobber(&destination),
-    )?;
-    pipeline.observe(
-Layer::Publication, "published artifact and publication-directory barrier confirmed", Completion::Durable, FailureState::PublishedDurabilityUncertain, Recovery::InspectPublishedArtifact, std::fs::File::open(parent).and_then(|file| file.sync_all()).map_err(|error| {
-        std::io::Error::new(
-            error.kind(),
-            format!(
-                "image published at {}; publication-directory durability uncertain: {error}",
-                destination.display()
-            ),
-        )
-    }))?;
+    copy_pipeline::publish(staged, &destination, parent, pipeline)?;
     println!(
         "publication=completed destination={} publication_directory_flush=complete partition={} offset={} length={} container=raw boot=unverified",
         destination.display(),

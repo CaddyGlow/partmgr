@@ -1323,3 +1323,98 @@ fn sharing_limits_cancellation_deferred_metadata_staleness_and_refunds() {
     drop((file, v));
     assert_eq!(r.memory.used(), 0);
 }
+
+#[path = "fixtures/apfs_resource.rs"]
+mod resource_fixture;
+#[test]
+fn external_resource_unique_streams_have_exact_physical_refs_and_deferred_forks() {
+    for shared in [false, true] {
+        for defect in 0..7 {
+            let r = resources();
+            let c = ApfsContainer::open(
+                Arc::new(Bytes(resource_fixture::seed(shared, defect))),
+                limits(),
+                &r,
+            )
+            .unwrap();
+            let opened = ApfsVolume::open(c, 1026, &r);
+            if (1..=4).contains(&defect) {
+                assert!(opened.is_err(), "defect {defect}");
+            } else {
+                let v = opened.unwrap();
+                let report = audit_apfs(&v, audit_limits(), &r).unwrap();
+                assert_eq!(
+                    report.is_clean(),
+                    matches!(defect, 0 | 6),
+                    "{:?}",
+                    report.findings()
+                );
+                if defect == 5 {
+                    assert!(report.free_ranges().is_empty());
+                }
+                for name in [b"A\xc3\xa9-file".as_slice(), b"Clone".as_slice()] {
+                    let id = v.lookup(&[NativeName::Bytes(name.to_vec())], &r).unwrap();
+                    let opened_fork = v.open_stream(&id, &StreamKind::ResourceFork, &r);
+                    if defect == 5 {
+                        assert!(opened_fork.is_err());
+                        continue;
+                    }
+                    let fork = opened_fork.unwrap();
+                    let mut bytes = [0; 8];
+                    assert_eq!(fork.read_at(0, &mut bytes, &r).unwrap(), 8);
+                    assert_eq!(&bytes, b"resource");
+                }
+            }
+            assert_eq!(r.memory.used(), 0);
+        }
+    }
+}
+
+#[test]
+fn external_named_xattrs_retain_exact_name_and_physical_reference_proof() {
+    for shared in [false, true] {
+        let r = resources();
+        let c = ApfsContainer::open(
+            Arc::new(Bytes(resource_fixture::generic_seed(shared, 0))),
+            limits(),
+            &r,
+        )
+        .unwrap();
+        let v = ApfsVolume::open(c, 1026, &r).unwrap();
+        let report = audit_apfs(&v, audit_limits(), &r).unwrap();
+        assert!(report.is_clean(), "{:?}", report.findings());
+        let kind = StreamKind::Named(NativeName::Bytes("user/external.é".as_bytes().to_vec()));
+        for name in [b"A\xc3\xa9-file".as_slice(), b"Clone".as_slice()] {
+            let id = v.lookup(&[NativeName::Bytes(name.to_vec())], &r).unwrap();
+            let stream = v.open_stream(&id, &kind, &r).unwrap();
+            let mut bytes = [0; 8];
+            assert_eq!(stream.read_at(0, &mut bytes, &r).unwrap(), 8);
+            assert_eq!(&bytes, b"resource");
+            assert!(v.open_stream(&id, &StreamKind::ResourceFork, &r).is_err());
+        }
+        drop((report, v));
+        assert_eq!(r.memory.used(), 0);
+    }
+}
+
+#[test]
+fn reserved_root_physical_owner_cannot_authorize_data_or_free_space() {
+    let r = resources();
+    let mut image = fixture::shared_seed(true);
+    let (_, mut ext) = fixture::shared_records(true);
+    for (_, value) in &mut ext {
+        fixture::p64(value, 8, 2);
+    }
+    image[23 * 4096..24 * 4096].copy_from_slice(&fixture::leaf(23, 1, 0x40000000, 15, &ext, false));
+    let c = ApfsContainer::open(Arc::new(Bytes(image)), limits(), &r).unwrap();
+    let v = ApfsVolume::open(c, 1026, &r).unwrap();
+    let proof = audit_apfs(&v, audit_limits(), &r).unwrap();
+    assert!(!proof.is_clean());
+    assert!(proof.free_ranges().is_empty());
+    let id = v
+        .lookup(&[NativeName::Bytes(b"A\xc3\xa9-file".to_vec())], &r)
+        .unwrap();
+    assert!(v.open_file(&id, &r).is_err());
+    drop((proof, v));
+    assert_eq!(r.memory.used(), 0);
+}

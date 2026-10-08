@@ -15,6 +15,8 @@ pub struct Controls {
     pub special: AtomicBool,
     pub cycle: AtomicBool,
     pub named: AtomicBool,
+    pub directory_named: AtomicBool,
+    pub root_named: AtomicBool,
     pub changed_length: AtomicBool,
     pub reverse: AtomicBool,
     pub versions: AtomicBool,
@@ -214,7 +216,20 @@ impl TreeSource for Tree {
         let n = self.number(id, r)?;
         Budgeted::try_new(&r.memory, 1024, || {
             if n == 0 || n == self.files + 1 {
-                return Ok(Vec::new());
+                return Ok(
+                    if (n == 0 && self.controls.root_named.load(Ordering::Acquire))
+                        || (n != 0 && self.controls.directory_named.load(Ordering::Acquire))
+                    {
+                        vec![StreamInfo {
+                            kind: StreamKind::Named(NativeName::Bytes(
+                                "user/directory.é".as_bytes().to_vec(),
+                            )),
+                            length: 7001,
+                        }]
+                    } else {
+                        Vec::new()
+                    },
+                );
             }
             let length = if n == 1 || n == 3 {
                 16397
@@ -261,6 +276,7 @@ impl TreeSource for Tree {
             identity: id.clone(),
             length,
             fork: *kind == StreamKind::ResourceFork,
+            named: matches!(kind, StreamKind::Named(_)),
             controls: self.controls.clone(),
             resources: r.clone(),
             _lease: lease,
@@ -271,6 +287,7 @@ struct File {
     identity: ObjectId,
     length: u64,
     fork: bool,
+    named: bool,
     controls: Arc<Controls>,
     resources: Resources,
     _lease: Reservation,
@@ -297,6 +314,8 @@ impl FileRead for File {
             let p = at + i as u64;
             *b = if self.fork {
                 b"resource"[p as usize]
+            } else if self.named {
+                ((p * 13 + 7) % 251) as u8
             } else if self.length == 7 {
                 b"nested!"[p as usize]
             } else if (4096..8192).contains(&p) || (12288..16384).contains(&p) {
@@ -324,7 +343,7 @@ impl FileRead for File {
                 kind: ExtentKind::Data,
             });
         }
-        if self.length == 16397 && !self.fork {
+        if self.length == 16397 && !self.fork && !self.named {
             for (offset, length, kind) in [
                 (0, 4096, ExtentKind::Data),
                 (4096, 4096, ExtentKind::Hole),

@@ -44,7 +44,7 @@ pub(super) fn validate<R: ExtDecodeRead>(
         return Err(unsupported("ext resize inode encoding/ownership profile"));
     }
     let count = u32::from(proof.reserved_gdt);
-    if count == 0 || count > pointers {
+    if count > pointers {
         return Err(unsupported("ext resize reserved-GDT count profile"));
     }
     let descriptor_blocks = (proof.descriptors.len() as u64 * u64::from(proof.descriptor_size))

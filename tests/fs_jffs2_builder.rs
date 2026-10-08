@@ -784,7 +784,7 @@ fn native_mtd_utils_and_independent_extraction_direct_builder() {
         extractor.clone(),
         python.clone(),
         parser,
-        executable.clone(),
+        executable,
     ];
     let proof_hashes = proof_tools.iter().map(|p| hash(p)).collect::<Vec<_>>();
     for (p, h) in proof_tools.iter().zip(&proof_hashes) {

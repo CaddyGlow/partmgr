@@ -244,13 +244,7 @@ fn retained_files_check_length_and_cancellation_even_at_eof() {
         ErrorKind::StalePlan
     );
     source.length.fetch_sub(1, Ordering::AcqRel);
-    let other = ReadImage::open(
-        source.clone(),
-        fat_options(),
-        AllocationPolicy::RequireClean,
-        &r,
-    )
-    .unwrap();
+    let other = ReadImage::open(source, fat_options(), AllocationPolicy::RequireClean, &r).unwrap();
     assert!(other.metadata(&root, &r).is_err());
     drop(other);
     drop(image);

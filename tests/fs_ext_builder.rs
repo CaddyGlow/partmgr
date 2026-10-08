@@ -425,7 +425,7 @@ fn deferred_indexed_short_reads_materialize_holes_and_cancellation() {
         options(1024),
         vec![ExtBuildObject {
             identity: id(1),
-            source: Some(ExtBuildSource::File(f.clone())),
+            source: Some(ExtBuildSource::File(f)),
         }],
         vec![ExtBuildLink {
             object: id(1),

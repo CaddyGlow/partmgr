@@ -254,7 +254,7 @@ fn successful_append_and_gc_preserve_names_hardlinks_tombstones_and_outside_rang
         .replace(&root, b"payload", b"replacement", 31, &r)
         .unwrap();
     let j = state(vec![0; plan.journal_length() as usize]);
-    let report = editor.commit(plan, &mut Backend(j.clone()), &r).unwrap();
+    let report = editor.commit(plan, &mut Backend(j), &r).unwrap();
     assert!(!report.mutation_uncertain);
     assert_payload(&s.lock().unwrap().bytes, b"replacement", &r);
     assert_eq!(&s.lock().unwrap().bytes[3 * 4096..], &original[3 * 4096..]);
@@ -2077,7 +2077,7 @@ fn prepared_namespace_with_resize(
 ) -> (Arc<Mutex<State>>, Arc<Mutex<State>>, Resources) {
     let r = resources();
     let original = seed();
-    let s = state(original.clone());
+    let s = state(original);
     let mut editor =
         Jffs2Editor::open(flash(&s, &r), [7; 32], Jffs2Endian::Little, limits(), &r).unwrap();
     let root = editor.identity(1).unwrap();
@@ -3060,16 +3060,9 @@ fn multi_gc_trial(
             );
             let writes = s.lock().unwrap().writes;
             assert_eq!(
-                recover(
-                    &mut f,
-                    &mut Backend(j.clone()),
-                    [7; 32],
-                    Jffs2Endian::Little,
-                    l,
-                    &r
-                )
-                .unwrap()
-                .accepted_bytes,
+                recover(&mut f, &mut Backend(j), [7; 32], Jffs2Endian::Little, l, &r)
+                    .unwrap()
+                    .accepted_bytes,
                 0
             );
             assert_eq!(s.lock().unwrap().writes, writes);

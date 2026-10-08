@@ -645,7 +645,7 @@ fn independent_common_tree_build_is_deterministic_and_constructs_multilevel_inde
     );
     drop(reordered);
     tree.controls.versions.store(true, Ordering::Release);
-    let versioned = ApfsBuildPlan::plan(tree.clone(), options(), &r).unwrap();
+    let versioned = ApfsBuildPlan::plan(tree, options(), &r).unwrap();
     let mut different = Target {
         bytes: vec![0x42; versioned.image_bytes() as usize],
         ..Default::default()
@@ -891,7 +891,7 @@ fn explicit_name_conversion_collisions_specials_and_streams_are_not_silently_los
     tree.controls.utf16.store(true, Ordering::Release);
     let mut o = options();
     o.names = ApfsBuildNames::Utf16ToUtf8;
-    let plan = ApfsBuildPlan::plan(tree.clone(), o, &r).unwrap();
+    let plan = ApfsBuildPlan::plan(tree, o, &r).unwrap();
     let mut target = Target {
         bytes: vec![0xa7; plan.image_bytes() as usize],
         ..Default::default()

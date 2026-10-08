@@ -182,7 +182,7 @@ mod tests {
         changed[1][15] = 98;
         reseal(&g, &mut changed);
         assert!(inspect(&changed).is_err());
-        let mut changed = blocks.clone();
+        let mut changed = blocks;
         changed[3][640..656].fill(0);
         assert_eq!(
             inspect(&changed).err().unwrap().kind(),

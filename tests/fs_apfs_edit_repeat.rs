@@ -309,7 +309,7 @@ fn repeated_framework(evidence: Option<&std::path::Path>) {
     let writes = Arc::new(AtomicUsize::new(0));
     let mut disk = Disk {
         bytes: bytes.clone(),
-        writes: writes.clone(),
+        writes,
     };
     let build = ApfsBuildPlan::plan_with_checkpoint_capacity(
         Arc::new(tree::Tree::new(3)),

@@ -1121,7 +1121,7 @@ impl NtfsVolume {
         if !root.is_directory() {
             return Err(bad("NTFS root is not a directory"));
         }
-        Ok(root.identity.clone())
+        Ok(root.identity)
     }
     fn scoped_record(&self, object: &ObjectId, r: &Resources) -> Result<NtfsRecord> {
         if object.source != self.context.scope || object.native.len() != 8 {

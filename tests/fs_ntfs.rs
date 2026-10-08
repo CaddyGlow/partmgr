@@ -1263,8 +1263,7 @@ fn explicit_stream_profile_bootstraps_split_mft_and_keeps_classic_gate() {
         assert_eq!(r.memory.used(), 0);
     }
     {
-        let v =
-            NtfsVolume::open_stream_profile(source.clone(), limits(), stream_limits(), &r).unwrap();
+        let v = NtfsVolume::open_stream_profile(source, limits(), stream_limits(), &r).unwrap();
         assert_eq!(v.record_count(), 32);
         let file = v.open_file(24, &r).unwrap();
         let mut bytes = [0; 5];
@@ -1330,7 +1329,7 @@ fn fresh_native_attribute_selectors_are_scoped_and_do_not_accept_caller_maps() {
                 .kind,
             ErrorKind::Unsupported
         );
-        let mut stale = owner.clone();
+        let mut stale = owner;
         stale.generation += 1;
         assert_eq!(
             v.open_native_attribute_stream(&stale, 0x50, &[], stream_limits(), &r)

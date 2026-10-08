@@ -547,7 +547,7 @@ fn independent_depth_two_extent_writer_preserves_sparse_holes_and_refunds() {
     let bytes = fragmented_fixture();
     let storage = recovery::tests::Fault {
         visible: bytes.clone(),
-        durable: bytes.clone(),
+        durable: bytes,
         events: 0,
         cut: usize::MAX,
         immediate: true,

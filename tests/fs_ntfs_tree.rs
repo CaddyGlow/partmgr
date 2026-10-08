@@ -289,7 +289,7 @@ fn native_index_hardlinks_pages_deferred_and_refunds() {
     let r = r();
     let image = Arc::new(Image::new(fixture()));
     {
-        let volume = NtfsVolume::open(image.clone(), limits(), &r).unwrap();
+        let volume = NtfsVolume::open(image, limits(), &r).unwrap();
         let root = volume.root_identity(&r).unwrap();
         let dir = volume.directory(&root, index_limits(), &r).unwrap();
         assert_eq!(dir.entries().len(), 2);

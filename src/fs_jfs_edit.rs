@@ -3945,7 +3945,7 @@ fn native_owned_uid_publication_home_error_recovery_and_checker() {
             fragmented_source.clone(),
             None,
         ),
-        ("owned-fragmented-empty", 0, fragmented_source.clone(), None),
+        ("owned-fragmented-empty", 0, fragmented_source, None),
         (
             "owned-external-replace",
             9000,
@@ -3958,7 +3958,7 @@ fn native_owned_uid_publication_home_error_recovery_and_checker() {
             external_source.clone(),
             Some(4090),
         ),
-        ("owned-external-empty", 0, external_source.clone(), None),
+        ("owned-external-empty", 0, external_source, None),
     ] {
         let image = root.join(format!("{label}.img"));
         fs::copy(&baseline, &image).unwrap();
@@ -5247,7 +5247,7 @@ fn committed_native_cow_replay_preserves_namespace_payload_and_refunds() {
     prepared_history[page + 6..page + 8].copy_from_slice(&prepared_eor.to_le_bytes());
     prepared_history[page + 4094..page + 4096].copy_from_slice(&prepared_eor.to_le_bytes());
     let mut recovery_calls = 0usize;
-    for history in [committed.clone(), prepared_history] {
+    for history in [committed, prepared_history] {
         let mut normal_recovery = Backend {
             bytes: history.clone(),
             durable: history.clone(),

@@ -1,3 +1,5 @@
+#[path = "common/reader_contract.rs"]
+mod reader_contract;
 use partmgr::{
     fs_core::*,
     fs_xfs::*,
@@ -83,6 +85,7 @@ fn independent_crc_sparse_hardlinks_metadata_and_complete_audit() {
     assert_eq!(report.allocated_inodes(), 5);
     assert!(!report.free_ranges().is_empty());
     let f = v.open_file(67, &r).unwrap();
+    reader_contract::assert_eof_contract(&f, &r);
     let mut b = vec![9; 16384];
     f.read_at(0, &mut b, &r).unwrap();
     assert!(b[..4096].iter().all(|b| *b == 0));

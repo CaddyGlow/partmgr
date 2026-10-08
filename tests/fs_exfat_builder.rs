@@ -578,7 +578,7 @@ fn native_32_64mib_nested_unicode_and_repeat_images() {
 fn file_read_reauthoring_multi_cluster_upcase_and_changed_source_verification() {
     let r = resources();
     let payload = vec![13; 150001];
-    let source = Arc::new(Source::new(payload.clone()));
+    let source = Arc::new(Source::new(payload));
     let tree = entries(source.clone());
     let p = plan(2 << 20, &tree, &r).unwrap();
     let mut image = Image::new(2 << 20);

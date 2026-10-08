@@ -1,7 +1,7 @@
 //! Complete common native tree inventory for the explicitly audited APFS Linux profiles.
 use crate::{
-    fs_apfs::{ApfsVolume, bad, budget, vector},
-    fs_apfs_audit::{ApfsAuditLimits, audit_apfs},
+    fs_apfs::{ApfsAuditedReader, ApfsVolume, bad, budget, vector},
+    fs_apfs_audit::ApfsAuditLimits,
     fs_core::*,
 };
 use std::sync::Arc;
@@ -9,28 +9,19 @@ use std::sync::Arc;
 /// Unsupported inode payload and security profiles fail before inventory publication.
 pub struct ApfsTreeSource {
     volume: ApfsVolume,
+    audited: ApfsAuditedReader,
 }
 impl ApfsTreeSource {
     /// Require complete clean allocation/reference audit and caller-selected inventory caps.
+    /// The caller must keep source bytes immutable for the lifetime of this tree.
+    /// Payload reads reuse this audit; use `revalidate` for a full validation boundary.
     pub fn inventory(volume: ApfsVolume, limits: ApfsAuditLimits, r: &Resources) -> Result<Self> {
-        let proof = audit_apfs(&volume, limits, r)?;
-        if !proof.is_clean() {
-            return Err(bad("APFS tree requires clean complete profile audit"));
-        }
-        Ok(Self { volume })
+        let audited = volume.audited_reader(limits, r)?;
+        Ok(Self { volume, audited })
     }
     /// Indexed immutable source volume.
     pub fn volume(&self) -> &ApfsVolume {
         &self.volume
-    }
-    fn token(&self, id: &ObjectId, index: usize) -> Result<Vec<u8>> {
-        let n: u64 = index.try_into().map_err(|_| budget("APFS page cursor"))?;
-        let mut v = vector(48)?;
-        v.extend_from_slice(&id.source.to_be_bytes());
-        v.extend_from_slice(&id.generation.to_be_bytes());
-        v.extend_from_slice(&id.native);
-        v.extend_from_slice(&n.to_be_bytes());
-        Ok(v)
     }
 }
 impl TreeSource for ApfsTreeSource {
@@ -55,22 +46,9 @@ impl TreeSource for ApfsTreeSource {
         }
         self.volume.revalidate(id, r)?;
         let count = self.volume.directory_len(id)?;
-        let start = if let Some(t) = continuation {
-            if t.len() != 48 || t[..40] != self.token(id, 0)?[..40] {
-                return Err(Error::new(
-                    ErrorKind::StalePlan,
-                    "foreign APFS page continuation",
-                ));
-            }
-            usize::try_from(u64::from_be_bytes(t[40..48].try_into().unwrap()))
-                .map_err(|_| bad("APFS cursor size"))?
-        } else {
-            0
-        };
-        if start > count {
-            return Err(bad("APFS page cursor bounds"));
-        }
-        let n = maximum.min(count - start);
+        let range = crate::fs_pagination::range(id, continuation, maximum, count)?;
+        let start = range.start;
+        let n = range.len();
         let lease = r.memory.reserve(
             (n as u64)
                 .checked_mul(2048)
@@ -79,7 +57,7 @@ impl TreeSource for ApfsTreeSource {
         )?;
         let out = self.volume.directory_entries(id, start..start + n, r)?;
         let next = if start + n < count {
-            Some(self.token(id, start + n)?)
+            Some(crate::fs_pagination::token(id, start + n)?)
         } else {
             None
         };
@@ -115,9 +93,10 @@ impl TreeSource for ApfsTreeSource {
         kind: &StreamKind,
         r: &Resources,
     ) -> Result<Arc<dyn FileRead>> {
-        Ok(Arc::new(self.volume.open_stream(id, kind, r)?))
+        Ok(Arc::new(self.audited.open_stream(id, kind, r)?))
     }
     fn revalidate(&self, id: &ObjectId, r: &Resources) -> Result<()> {
-        self.volume.revalidate(id, r)
+        self.volume.node(id)?;
+        self.audited.revalidate(r)
     }
 }

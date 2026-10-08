@@ -35,7 +35,7 @@ fn read_gpt(
     allow_opaque: bool,
 ) -> io::Result<GptLayout> {
     let primary = read_header(source, size, total, 1, total - 1)?;
-    let backup = read_header(source, size, total, total - 1, 1)?;
+    let mut backup = read_header(source, size, total, total - 1, 1)?;
     if !allow_opaque && (u32le(&primary.raw, 12) != 92 || u32le(&backup.raw, 12) != 92) {
         return Err(unsupported("unknown GPT header extension"));
     }
@@ -86,12 +86,22 @@ fn read_gpt(
         });
     }
     check_overlap(partitions.iter().filter_map(|p| p.range))?;
+    // Both copies were compared above; retain their common array only once.
+    backup.table = Vec::new();
+    let mutation_supported = u32le(&primary.raw, 12) == 92
+        && u32le(&backup.raw, 12) == 92
+        && partitions.iter().all(|e| {
+            e.raw[128..].iter().all(|b| *b == 0)
+                && (e.range.is_none() || u64le(&e.raw, 48) & 0x0000_ffff_ffff_fff8 == 0)
+        });
     Ok(GptLayout {
         geometry: Geometry::new(source.len(), size)?,
         mbr,
         primary,
         backup,
         entries: partitions,
+        mutation_supported,
+        defer_checksums: false,
     })
 }
 /// Checked logical disk geometry.
@@ -205,7 +215,7 @@ impl Entry {
             ]
     }
 }
-/// Validated GPT retaining both complete header sectors and arrays.
+/// Validated GPT retaining both complete header sectors and their identical array.
 #[derive(Clone)]
 pub struct GptLayout {
     geometry: Geometry,
@@ -213,6 +223,54 @@ pub struct GptLayout {
     primary: Header,
     backup: Header,
     entries: Vec<Entry>,
+    defer_checksums: bool,
+    mutation_supported: bool,
+}
+/// Mutation-only view of an atomic GPT edit batch.
+/// Raw headers and arrays become available after the batch succeeds.
+pub struct GptBatch<'a> {
+    layout: &'a mut GptLayout,
+}
+impl GptBatch<'_> {
+    /// Change boundaries without moving data.
+    pub fn set_range(&mut self, slot: u32, range: LbaRange) -> io::Result<()> {
+        self.layout.set_range(slot, range)
+    }
+    /// Delete an entry without changing its payload.
+    pub fn delete(&mut self, slot: u32) -> io::Result<()> {
+        self.layout.delete(slot)
+    }
+    /// Change a partition name.
+    pub fn rename(&mut self, slot: u32, name: &str) -> io::Result<()> {
+        self.layout.rename(slot, name)
+    }
+    /// Change a partition type and identity.
+    pub fn set_identity(
+        &mut self,
+        slot: u32,
+        kind: crate::guid::Guid,
+        id: crate::guid::Guid,
+    ) -> io::Result<()> {
+        self.layout.set_identity(slot, kind, id)
+    }
+    /// Replace partition attributes.
+    pub fn set_attributes(
+        &mut self,
+        slot: u32,
+        attributes: crate::guid::GptAttributes,
+    ) -> io::Result<()> {
+        self.layout.set_attributes(slot, attributes)
+    }
+    /// Create a partition in an unused slot.
+    pub fn create(
+        &mut self,
+        slot: u32,
+        kind: crate::guid::Guid,
+        id: crate::guid::Guid,
+        range: LbaRange,
+    ) -> io::Result<()> {
+        self.layout.create(slot, kind, id, range)
+    }
 }
 impl GptLayout {
     /// Original logical geometry.
@@ -264,12 +322,7 @@ impl GptLayout {
     }
     /// Whether understood header semantics allow safe mutation.
     pub fn mutation_supported(&self) -> bool {
-        u32le(&self.primary.raw, 12) == 92
-            && u32le(&self.backup.raw, 12) == 92
-            && self.entries.iter().all(|e| {
-                e.raw[128..].iter().all(|b| *b == 0)
-                    && (e.range.is_none() || u64le(&e.raw, 48) & 0x0000_ffff_ffff_fff8 == 0)
-            })
+        self.mutation_supported
     }
 }
 /// Validated basic MBR retaining its full logical sector.
@@ -447,59 +500,89 @@ impl GptLayout {
             return Err(unsupported("unknown GPT header extension cannot be edited"));
         }
         let index = slot.checked_sub(1).ok_or_else(|| invalid("invalid slot"))? as usize;
-        let mut proposed = self.entries.clone();
-        let entry = proposed
-            .get_mut(index)
-            .ok_or_else(|| invalid("invalid slot"))?;
+        let mut entry = self
+            .entries
+            .get(index)
+            .ok_or_else(|| invalid("invalid slot"))?
+            .clone();
         if entry.range.is_some() && !entry.standalone_volume() {
             return Err(unsupported(
                 "dynamic partition mutation requires a volume manager",
             ));
         }
         change(&mut entry.raw)?;
-        if guid(&entry.raw, 0) != [0; 16] {
-            let mut probe = entry.clone();
-            probe.range = Some(LbaRange { start: 1, end: 2 });
-            if !probe.standalone_volume() {
+        if guid(&entry.raw, 0) == [0; 16] {
+            entry.range = None;
+        } else {
+            if u64le(&entry.raw, 48) & 0x0000_ffff_ffff_fff8 != 0 {
+                return Err(unsupported("reserved GPT attribute bits"));
+            }
+            let id = guid(&entry.raw, 16);
+            if id == [0; 16]
+                || ((self.entries[index].range.is_none()
+                    || guid(&self.entries[index].raw, 16) != id)
+                    && self.entries.iter().enumerate().any(|(i, peer)| {
+                        i != index && peer.range.is_some() && guid(&peer.raw, 16) == id
+                    }))
+            {
+                return Err(invalid("nil or duplicate partition ID"));
+            }
+            let range = LbaRange::from_inclusive(u64le(&entry.raw, 32), u64le(&entry.raw, 40))?;
+            if range.start < self.primary.first || range.end > self.primary.last + 1 {
+                return Err(invalid("partition outside usable range"));
+            }
+            entry.range = Some(range);
+            if !entry.standalone_volume() {
                 return Err(unsupported(
                     "dynamic partition mutation requires a volume manager",
                 ));
             }
+            if self.entries[index].range != Some(range)
+                && self.entries.iter().enumerate().any(|(i, peer)| {
+                    i != index
+                        && peer
+                            .range
+                            .is_some_and(|r| range.start < r.end && r.start < range.end)
+                })
+            {
+                return Err(invalid("overlapping partitions"));
+            }
         }
-        let mut ids = HashSet::new();
-        for e in &mut proposed {
-            if guid(&e.raw, 0) == [0; 16] {
-                e.range = None;
-                continue;
-            }
-            if u64le(&e.raw, 48) & 0x0000_ffff_ffff_fff8 != 0 {
-                return Err(unsupported("reserved GPT attribute bits"));
-            }
-            let id = guid(&e.raw, 16);
-            if id == [0; 16] || !ids.insert(id) {
-                return Err(invalid("nil or duplicate partition ID"));
-            }
-            let r = LbaRange::from_inclusive(u64le(&e.raw, 32), u64le(&e.raw, 40))?;
-            if r.start < self.primary.first || r.end > self.primary.last + 1 {
-                return Err(invalid("partition outside usable range"));
-            }
-            e.range = Some(r);
+        let start = index * self.primary.entry_size as usize;
+        let end = start + entry.raw.len();
+        self.primary.table[start..end].copy_from_slice(&entry.raw);
+        self.entries[index] = entry;
+        if !self.defer_checksums {
+            self.refresh_checksums();
         }
-        check_overlap(proposed.iter().filter_map(|e| e.range))?;
-        self.entries = proposed;
-        self.primary.table = self
-            .entries
-            .iter()
-            .flat_map(|e| e.raw.iter().copied())
-            .collect();
-        self.backup.table = self.primary.table.clone();
+        Ok(())
+    }
+    fn refresh_checksums(&mut self) {
+        let table_crc = crc32(&self.primary.table).to_le_bytes();
         for h in [&mut self.primary, &mut self.backup] {
-            h.raw[88..92].copy_from_slice(&crc32(&h.table).to_le_bytes());
+            h.raw[88..92].copy_from_slice(&table_crc);
             h.raw[16..20].fill(0);
             let n = u32le(&h.raw, 12) as usize;
             let crc = crc32(&h.raw[..n]);
             h.raw[16..20].copy_from_slice(&crc.to_le_bytes());
         }
+    }
+    /// Apply several edits atomically, calculating table checksums once on success.
+    /// Each intermediate layout must remain valid. An error leaves this layout unchanged.
+    pub fn edit_batch(
+        &mut self,
+        edit: impl FnOnce(&mut GptBatch<'_>) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let mut proposed = self.clone();
+        proposed.defer_checksums = true;
+        edit(&mut GptBatch {
+            layout: &mut proposed,
+        })?;
+        proposed.defer_checksums = self.defer_checksums;
+        if !proposed.defer_checksums {
+            proposed.refresh_checksums();
+        }
+        *self = proposed;
         Ok(())
     }
     /// Change boundaries only; this does not resize filesystems or move data.
@@ -669,7 +752,11 @@ impl GptLayout {
                 disk_guid: disk_id.to_gpt_bytes(),
                 count,
                 entry_size,
-                table: table.clone(),
+                table: if current == 1 {
+                    table.clone()
+                } else {
+                    Vec::new()
+                },
                 raw,
                 table_lba,
             }
@@ -686,6 +773,8 @@ impl GptLayout {
             mbr,
             primary: make_header(1, total - 1, 2),
             backup: make_header(total - 1, 1, total - 1 - sectors),
+            defer_checksums: false,
+            mutation_supported: true,
             entries: (1..=count)
                 .map(|slot| Entry {
                     slot,

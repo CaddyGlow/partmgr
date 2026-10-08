@@ -667,8 +667,7 @@ fn creation_commit_cuts(native: Option<&CreationNativeCuts>, populated: bool) {
                     }
                 }
                 let proof =
-                    Prepared::open(Model::new(target.bytes.clone(), clock.clone()), limits, &r)
-                        .unwrap();
+                    Prepared::open(Model::new(target.bytes.clone(), clock), limits, &r).unwrap();
                 drop(proof);
                 if let Some(gate) = native {
                     gate.check(binary, directory, &target.bytes);

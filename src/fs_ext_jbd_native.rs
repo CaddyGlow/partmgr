@@ -156,7 +156,7 @@ fn native_jbd2_codec_e2fsck_replay_and_payload() {
         .map(|n| ((n * 71 + n / 251) % 256) as u8)
         .collect();
     fs::write(out.join("old-payload.bin"), &payload).unwrap();
-    let mut expected = payload.clone();
+    let mut expected = payload;
     for (at, byte) in expected.iter_mut().enumerate() {
         *byte ^= ((at / 37) as u8).wrapping_add(1);
     }

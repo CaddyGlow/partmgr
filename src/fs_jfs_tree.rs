@@ -23,15 +23,6 @@ impl JfsTreeSource {
     pub fn volume(&self) -> &JfsVolume {
         &self.volume
     }
-    fn token(&self, id: &ObjectId, index: usize) -> Result<Vec<u8>> {
-        let n: u64 = index.try_into().map_err(|_| budget("JFS page cursor"))?;
-        let mut v = vector(40)?;
-        v.extend_from_slice(&id.source.to_be_bytes());
-        v.extend_from_slice(&id.generation.to_be_bytes());
-        v.extend_from_slice(&id.native);
-        v.extend_from_slice(&n.to_be_bytes());
-        Ok(v)
-    }
 }
 impl TreeSource for JfsTreeSource {
     fn root(&self) -> ObjectId {
@@ -55,22 +46,9 @@ impl TreeSource for JfsTreeSource {
         }
         self.volume.revalidate(id, r)?;
         let count = self.volume.directory_len(id)?;
-        let start = if let Some(t) = continuation {
-            if t.len() != 40 || t[..32] != self.token(id, 0)?[..32] {
-                return Err(Error::new(
-                    ErrorKind::StalePlan,
-                    "foreign JFS page continuation",
-                ));
-            }
-            usize::try_from(u64::from_be_bytes(t[32..40].try_into().unwrap()))
-                .map_err(|_| bad("JFS cursor size"))?
-        } else {
-            0
-        };
-        if start > count {
-            return Err(bad("JFS page cursor bounds"));
-        }
-        let n = maximum.min(count - start);
+        let range = crate::fs_pagination::range(id, continuation, maximum, count)?;
+        let start = range.start;
+        let n = range.len();
         let lease = r.memory.reserve(
             (n as u64)
                 .checked_mul(768)
@@ -79,7 +57,7 @@ impl TreeSource for JfsTreeSource {
         )?;
         let out = self.volume.directory_entries(id, start..start + n, r)?;
         let next = if start + n < count {
-            Some(self.token(id, start + n)?)
+            Some(crate::fs_pagination::token(id, start + n)?)
         } else {
             None
         };

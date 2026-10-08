@@ -1495,14 +1495,17 @@ impl JfsVolume {
             let NativeName::Utf16(name) = name else {
                 return Err(unsupported("JFS native UTF16 lookup"));
             };
-            let entries = self.directory(&id, r)?;
-            id = entries
-                .get()
-                .iter()
-                .find(|e| matches!(&e.name,NativeName::Utf16(n) if n==name))
-                .ok_or_else(|| bad("JFS name missing"))?
-                .object
-                .clone();
+            self.revalidate(&id, r)?;
+            self.directory_len(&id)?;
+            let mut found = None;
+            for entry in &self.node(&id)?.entries {
+                r.cancellation.check()?;
+                if &entry.name == name {
+                    found = Some(entry.ino);
+                    break;
+                }
+            }
+            id = self.identity(found.ok_or_else(|| bad("JFS name missing"))?);
         }
         self.revalidate(&id, r)?;
         Ok(id)
@@ -1604,6 +1607,9 @@ impl FileRead for JfsFile {
     }
     fn read_at(&self, at: u64, b: &mut [u8], r: &Resources) -> Result<usize> {
         self.volume.revalidate(&self.identity, r)?;
+        if at >= self.file.len() || b.is_empty() {
+            return Ok(0);
+        }
         let n = self
             .file
             .read_at(at, b)

@@ -1348,7 +1348,7 @@ fn authorized_checkpoint_retirement_cuts_preserve_current_payload_and_all_alloca
 fn repeated_reclamation_reuses_native_retirements_beyond_previous_pool_capacity() {
     let r = resources();
     let bytes = Arc::new(Mutex::new(warm_two(&r)));
-    let mut editor = ApfsEditor::open(Disk(bytes.clone()), 1026, limits(), &r).unwrap();
+    let mut editor = ApfsEditor::open(Disk(bytes), 1026, limits(), &r).unwrap();
     for generation in 0..12 {
         let id = editor.file_identity(16, &r).unwrap();
         let value = 0xa0 + generation as u8;
@@ -2070,7 +2070,7 @@ fn independently_split_native_catalog_reopens_mutates_and_rejects_dangling_child
     let r = resources();
     let raw = independent::indexed_seed();
     let bytes = Arc::new(Mutex::new(sparse(&raw)));
-    let mut editor = ApfsEditor::open(Disk(bytes.clone()), 1026, limits(), &r).unwrap();
+    let mut editor = ApfsEditor::open(Disk(bytes), 1026, limits(), &r).unwrap();
     let id = editor.file_identity(16, &r).unwrap();
     let input = Arc::new(Input(
         ObjectId {

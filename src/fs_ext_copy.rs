@@ -1,6 +1,7 @@
 //! Deferred common-tree capture into unpublished classic ext2 with preserved hardlinks.
 use crate::{
     fs_copy::{CopyLimits, FileInput, MetadataOutcome},
+    fs_copy::{CopyPages, MetadataStatus, visit_metadata_fields},
     fs_core::*,
     fs_ext_builder::{
         ExtBuildLimits, ExtBuildLink, ExtBuildMetadata, ExtBuildObject, ExtBuildOptions,
@@ -52,22 +53,22 @@ pub struct ExtCopyPlan {
     outcomes: Vec<MetadataOutcome>,
     _reservation: Reservation,
 }
-fn outcome<T>(
+fn outcome(
     object: &ObjectId,
     class: &'static str,
-    field: &MetadataField<T>,
+    field: MetadataStatus,
     out: &mut Vec<MetadataOutcome>,
 ) {
     let decision = match field {
-        MetadataField::Absent => Preservation::Transform {
+        MetadataStatus::Absent => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
             report: "source class absent; destination defaults or omission applied".into(),
         },
-        MetadataField::Uninspectable { .. } => Preservation::Transform {
+        MetadataStatus::Uninspectable => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
             report: "source class uninspectable; preservation is unverified and not claimed".into(),
         },
-        MetadataField::Known(_) | MetadataField::Opaque { .. } => Preservation::Transform {
+        MetadataStatus::Present => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
             report: "source metadata omitted; deterministic ext2 defaults applied".into(),
         },
@@ -177,7 +178,7 @@ impl ExtCopyPlan {
             .try_reserve(limits.objects)
             .map_err(|_| budget("ext2 copy directory queue"))?;
         directories.push_back(root.clone());
-        let mut pages = 0usize;
+        let mut pages = CopyPages::new(limits);
         while let Some(directory) = directories.pop_front() {
             source.revalidate(&directory, r)?;
             if !source.streams(&directory, r)?.is_empty() {
@@ -185,20 +186,7 @@ impl ExtCopyPlan {
             }
             let mut continuation = None;
             loop {
-                r.cancellation.check()?;
-                if pages == limits.pages {
-                    return Err(budget("ext2 copy page limit"));
-                }
-                pages += 1;
-                let page = source.directory_page(
-                    &directory,
-                    continuation.as_deref(),
-                    limits.page_entries,
-                    r,
-                )?;
-                if page.entries.len() > limits.page_entries {
-                    return Err(invalid("ext2 copy oversized source page"));
-                }
+                let page = pages.next(source.as_ref(), &directory, continuation.as_deref(), r)?;
                 for entry in &page.entries {
                     if entry.object.source != root.source || entry.object.native.len() > 256 {
                         return Err(invalid("ext2 copy foreign or oversized identity"));
@@ -268,12 +256,6 @@ impl ExtCopyPlan {
                     });
                 }
                 continuation = page.next.clone();
-                if continuation
-                    .as_ref()
-                    .is_some_and(|token| token.len() > 1024)
-                {
-                    return Err(unsupported("ext2 copy oversized continuation token"));
-                }
                 if continuation.is_none() {
                     break;
                 }
@@ -291,30 +273,9 @@ impl ExtCopyPlan {
         for object in &objects {
             source.revalidate(object, r)?;
             let metadata = source.metadata(object, r)?;
-            outcome(object, "created", &metadata.created, &mut outcomes);
-            outcome(object, "modified", &metadata.modified, &mut outcomes);
-            outcome(object, "accessed", &metadata.accessed, &mut outcomes);
-            outcome(object, "owner", &metadata.owner, &mut outcomes);
-            outcome(object, "mode", &metadata.mode, &mut outcomes);
-            outcome(object, "security", &metadata.security, &mut outcomes);
-            outcome(
-                object,
-                "native_flags",
-                &metadata.native_flags,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "symlink_target",
-                &metadata.symlink_target,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "reparse_data",
-                &metadata.reparse_data,
-                &mut outcomes,
-            );
+            visit_metadata_fields(&metadata, |class, status| {
+                outcome(object, class, status, &mut outcomes);
+            });
             outcomes.push(MetadataOutcome {
                 object: object.clone(),
                 class: "attributes",

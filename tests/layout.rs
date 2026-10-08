@@ -418,3 +418,37 @@ fn reserved_attributes_raw_inspection_and_new_slot_prefix() {
     assert_eq!(disk.entries()[1].attributes().bits(), 0);
     assert_eq!(disk.entries()[1].raw_name(), [0; 36]);
 }
+
+#[test]
+fn batch_edits_match_sequential_edits_and_rollback_on_failure() {
+    let DiskLayout::Gpt(original) = DiskLayout::inspect(&Memory(gpt(512)), 512).unwrap() else {
+        panic!()
+    };
+    let mut sequential = original.clone();
+    sequential.rename(1, "changed").unwrap();
+    sequential
+        .set_range(1, LbaRange::new(45, 101).unwrap())
+        .unwrap();
+    let mut batched = original;
+    batched
+        .edit_batch(|disk| {
+            disk.rename(1, "changed")?;
+            disk.set_range(1, LbaRange::new(45, 101).unwrap())
+        })
+        .unwrap();
+    assert_eq!(batched.array(), sequential.array());
+    assert_eq!(batched.primary_header(), sequential.primary_header());
+    assert_eq!(batched.backup_header(), sequential.backup_header());
+    let before = batched.array().to_vec();
+    let header = batched.primary_header().to_vec();
+    assert!(
+        batched
+            .edit_batch(|disk| {
+                disk.rename(1, "must rollback")?;
+                disk.set_range(1, LbaRange::new(0, 100).unwrap())
+            })
+            .is_err()
+    );
+    assert_eq!(batched.array(), before);
+    assert_eq!(batched.primary_header(), header);
+}

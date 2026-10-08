@@ -1,3 +1,5 @@
+#[path = "common/reader_contract.rs"]
+mod reader_contract;
 use partmgr::{fs_core::*, fs_jfs::*, fs_jfs_audit::*, fs_jfs_tree::*};
 use std::{
     io,
@@ -77,12 +79,23 @@ fn independent_fixture() {
     let proof = audit_jfs(&volume, audit_limits(), &r).unwrap();
     assert!(proof.is_clean(), "{:?}", proof.findings());
     assert_eq!(proof.allocated_blocks(), 71);
+    // Retained-index lookup needs no directory-sized memory reservation.
+    volume
+        .lookup(
+            &[NativeName::Utf16(name())],
+            &Resources {
+                memory: Budget::new(0),
+                cancellation: Cancellation::default(),
+            },
+        )
+        .unwrap();
     let file = volume
         .open_file(
             &volume.lookup(&[NativeName::Utf16(name())], &r).unwrap(),
             &r,
         )
         .unwrap();
+    reader_contract::assert_eof_contract(&file, &r);
     let mut out = vec![0xaa; 4 * BLOCK + 7];
     file.read_at(0, &mut out, &r).unwrap();
     assert!(out[BLOCK..2 * BLOCK].iter().all(|v| *v == 0));

@@ -58,6 +58,49 @@ impl std::error::Error for UncertainMutation {
     }
 }
 
+// Format adapters choose error categories and when to validate geometry; the
+// range arithmetic and captured parent length are shared by every owned region.
+#[derive(Clone, Copy)]
+pub(crate) struct RegionBounds {
+    pub(crate) start: u64,
+    pub(crate) length: u64,
+    parent_length: u64,
+}
+impl RegionBounds {
+    pub(crate) fn new(start: u64, length: u64, parent_length: u64) -> Self {
+        Self {
+            start,
+            length,
+            parent_length,
+        }
+    }
+    pub(crate) fn check_parent(
+        self,
+        storage: &(impl Storage + ?Sized),
+        changed: impl FnOnce() -> io::Error,
+    ) -> io::Result<()> {
+        if storage.len()? != self.parent_length {
+            return Err(changed());
+        }
+        Ok(())
+    }
+    pub(crate) fn position(
+        self,
+        offset: u64,
+        count: u64,
+        outside: impl FnOnce() -> io::Error,
+        overflow: impl FnOnce() -> io::Error,
+    ) -> io::Result<u64> {
+        if offset
+            .checked_add(count)
+            .is_none_or(|end| end > self.length)
+        {
+            return Err(outside());
+        }
+        self.start.checked_add(offset).ok_or_else(overflow)
+    }
+}
+
 /// An owned fixed region of an exclusive backend.
 ///
 /// Construction validates byte bounds, not filesystem or partition correctness.
@@ -66,9 +109,7 @@ impl std::error::Error for UncertainMutation {
 /// publication-directory durability remains an orchestration responsibility.
 pub struct BoundedSession<S> {
     backend: S,
-    start: u64,
-    length: u64,
-    parent_length: u64,
+    bounds: RegionBounds,
     geometry: SectorGeometry,
     uncertain: bool,
 }
@@ -88,9 +129,7 @@ impl<S: Storage> BoundedSession<S> {
         }
         Ok(Self {
             backend,
-            start,
-            length,
-            parent_length,
+            bounds: RegionBounds::new(start, length, parent_length),
             geometry,
             uncertain: false,
         })
@@ -106,24 +145,19 @@ impl<S: Storage> BoundedSession<S> {
         self.uncertain
     }
     fn absolute(&self, offset: u64, count: u64) -> io::Result<u64> {
-        if offset
-            .checked_add(count)
-            .is_none_or(|end| end > self.length)
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "operation exceeds session",
-            ));
-        }
-        if self.backend.len()? != self.parent_length {
-            return Err(io::Error::new(
+        let absolute = self.bounds.position(
+            offset,
+            count,
+            || io::Error::new(io::ErrorKind::InvalidInput, "operation exceeds session"),
+            || io::Error::new(io::ErrorKind::InvalidInput, "session offset overflow"),
+        )?;
+        self.bounds.check_parent(&self.backend, || {
+            io::Error::new(
                 io::ErrorKind::InvalidData,
                 "backend geometry changed during session",
-            ));
-        }
-        self.start
-            .checked_add(offset)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "session offset overflow"))
+            )
+        })?;
+        Ok(absolute)
     }
     fn failed(&mut self, operation: &'static str, source: io::Error) -> io::Error {
         self.uncertain = true;
@@ -157,7 +191,7 @@ impl<S: Storage> BoundedSession<S> {
 impl<S: Storage> Storage for BoundedSession<S> {
     fn len(&self) -> io::Result<u64> {
         self.absolute(0, 0)?;
-        Ok(self.length)
+        Ok(self.bounds.length)
     }
     fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
         let absolute = self.absolute(offset, out.len() as u64)?;

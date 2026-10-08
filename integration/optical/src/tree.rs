@@ -3,7 +3,7 @@ use crate::read::{OpticalReadEntry, OpticalReadIndex};
 use libmkiso::{preservation::Field, topology::Parent};
 use partmgr::fs_core::*;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -118,6 +118,56 @@ impl OpticalTreeSource {
                 children.insert(id(&e.identity)?, Vec::new());
             }
         }
+        // Count ordinary children before filling pages, and validate names without
+        // allocating copies or repeatedly scanning an ever-growing sibling list.
+        let mut counts = HashMap::new();
+        counts.try_reserve(children.len()).map_err(alloc)?;
+        let mut names = HashSet::new();
+        names.try_reserve(index.entries().len()).map_err(alloc)?;
+        for e in index.entries().iter().filter(|e| e.stream.is_none()) {
+            resources.cancellation.check()?;
+            let parent = match e
+                .parent
+                .ok_or_else(|| bad("ordinary optical entry lacks parent"))?
+            {
+                Parent::Root => &index.root_identity,
+                Parent::Entry(n) => {
+                    let p = index
+                        .entries()
+                        .get(n)
+                        .ok_or_else(|| bad("optical parent index out of range"))?;
+                    if p.kind != ObjectKind::Directory || p.stream.is_some() {
+                        return Err(bad("optical parent is not ordinary directory"));
+                    }
+                    &p.identity
+                }
+            };
+            if !children.contains_key(parent) {
+                return Err(bad("optical parent missing from tree"));
+            }
+            if !names.insert((parent, &e.leaf)) {
+                return Err(bad("duplicate optical native directory name"));
+            }
+            *counts.entry(parent).or_insert(0usize) += 1;
+        }
+        for (parent, count) in counts {
+            children
+                .get_mut(parent)
+                .ok_or_else(|| bad("optical parent missing from tree"))?
+                .try_reserve_exact(count)
+                .map_err(alloc)?;
+        }
+        drop(names);
+        // Cache ancestry depths so shared parent chains are traversed only once.
+        let mut depths = Vec::new();
+        depths
+            .try_reserve_exact(index.entries().len())
+            .map_err(alloc)?;
+        depths.resize(index.entries().len(), 0usize);
+        let mut chain = Vec::new();
+        chain
+            .try_reserve_exact(index.entries().len())
+            .map_err(alloc)?;
         for (i, e) in index.entries().iter().enumerate() {
             resources.cancellation.check()?;
             if let Some(stream) = &e.stream {
@@ -152,7 +202,7 @@ impl OpticalTreeSource {
                         return Err(bad("ambiguous optical owned stream"));
                     }
                 } else {
-                    list.try_reserve_exact(1).map_err(alloc)?;
+                    list.try_reserve(1).map_err(alloc)?;
                     list.push((kind, i));
                 }
                 continue;
@@ -176,24 +226,23 @@ impl OpticalTreeSource {
             let list = children
                 .get_mut(parent)
                 .ok_or_else(|| bad("optical parent missing from tree"))?;
-            if list.iter().any(|old| index.entries()[*old].leaf == e.leaf) {
-                return Err(bad("duplicate optical native directory name"));
-            }
-            list.try_reserve_exact(1).map_err(alloc)?;
             list.push(i);
-            // Every occurrence must reach the explicit root through native parents.
+            chain.clear();
             let mut current = i;
-            let mut hops = 0;
-            loop {
-                hops += 1;
-                if hops > index.entries().len().min(index.max_depth.saturating_add(1)) {
+            let mut depth = loop {
+                if depths[current] == usize::MAX {
                     return Err(bad("optical parent cycle"));
                 }
+                if depths[current] != 0 {
+                    break depths[current];
+                }
+                depths[current] = usize::MAX;
+                chain.push(current);
                 match index.entries()[current]
                     .parent
                     .ok_or_else(|| bad("optical parent chain missing"))?
                 {
-                    Parent::Root => break,
+                    Parent::Root => break 0,
                     Parent::Entry(n) => {
                         if n >= index.entries().len() {
                             return Err(bad("optical parent chain outside index"));
@@ -201,6 +250,13 @@ impl OpticalTreeSource {
                         current = n;
                     }
                 }
+            };
+            for node in chain.iter().rev() {
+                depth += 1;
+                if depth > index.entries().len().min(index.max_depth.saturating_add(1)) {
+                    return Err(bad("optical parent cycle"));
+                }
+                depths[*node] = depth;
             }
         }
         Ok(Self {

@@ -1,3 +1,5 @@
+#[path = "common/reader_contract.rs"]
+mod reader_contract;
 use partmgr::{fs_core::*, fs_hfs::*, fs_hfs_audit::*, fs_hfs_tree::*};
 use std::{
     io,
@@ -91,6 +93,16 @@ fn native_btree_overflow_two_forks_tree_metadata_and_refunds() {
     let id = volume
         .lookup(&[NativeName::Bytes(b"dAtA".to_vec())], &r)
         .unwrap();
+    // Retained-index lookup needs no directory-sized memory reservation.
+    volume
+        .lookup(
+            &[NativeName::Bytes(b"dAtA".to_vec())],
+            &Resources {
+                memory: Budget::new(0),
+                cancellation: Cancellation::default(),
+            },
+        )
+        .unwrap();
     let file = volume.open_fork(&id, &StreamKind::Data, &r).unwrap();
     let mut b = [0; 31];
     assert_eq!(file.read_at(3 * 512 - 8, &mut b, &r).unwrap(), 31);
@@ -99,7 +111,7 @@ fn native_btree_overflow_two_forks_tree_metadata_and_refunds() {
         .collect();
     assert_eq!(b.as_slice(), expected);
     assert_eq!(file.read_at(file.len(), &mut b, &r).unwrap(), 0);
-    assert!(file.read_at(file.len() + 1, &mut b, &r).is_err());
+    reader_contract::assert_eof_contract(&file, &r);
     let tree = HfsTreeSource::inventory(volume, audit_limits(), &r).unwrap();
     // A one-entry page must fit without charging a complete directory inventory.
     let page_resources = Resources {
@@ -476,7 +488,7 @@ fn native_hfsutils_catalog_two_forks_overflow_and_unchanged_validation() {
     std::fs::write(&image, &fragmented).unwrap();
     let r = resources();
     let source = Arc::new(Source::new(fragmented.clone()));
-    let v = HfsVolume::open(source.clone(), limits(), &r).unwrap();
+    let v = HfsVolume::open(source, limits(), &r).unwrap();
     let proof = audit_hfs(&v, audit_limits(), &r).unwrap();
     assert!(proof.is_clean(), "{:?}", proof.findings());
     let allocated = proof.allocated_blocks();

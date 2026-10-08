@@ -96,7 +96,7 @@ fn native_mtd_zlib_rtime_both_endian_lazy_random_reads_crc_and_jefferson_complet
     let paths = [
         tools.join("mkfs.jffs2"),
         tools.join("jffs2dump"),
-        extractor.clone(),
+        extractor,
         python.clone(),
         parser,
         binary,

@@ -89,33 +89,28 @@ fn zeros(n: usize) -> Result<Vec<u8>> {
 }
 struct Region<S> {
     store: S,
-    region: ExfatEditRegion,
-    observed: u64,
+    bounds: crate::fs_storage::RegionBounds,
 }
 impl<S: Storage> Region<S> {
     fn at(&self, at: u64, n: usize) -> io::Result<u64> {
-        if self.store.len()? != self.observed {
-            return Err(io::Error::other(Error::new(
+        self.bounds.check_parent(&self.store, || {
+            io::Error::other(Error::new(
                 ErrorKind::StalePlan,
                 "exFAT target length changed",
-            )));
-        }
-        if at
-            .checked_add(n as u64)
-            .is_none_or(|end| end > self.region.length)
-        {
-            return Err(io::ErrorKind::UnexpectedEof.into());
-        }
-        self.region
-            .offset
-            .checked_add(at)
-            .ok_or_else(|| io::ErrorKind::UnexpectedEof.into())
+            ))
+        })?;
+        self.bounds.position(
+            at,
+            n as u64,
+            || io::ErrorKind::UnexpectedEof.into(),
+            || io::ErrorKind::UnexpectedEof.into(),
+        )
     }
 }
 impl<S: Storage> Storage for Region<S> {
     fn len(&self) -> io::Result<u64> {
         self.at(0, 0)?;
-        Ok(self.region.length)
+        Ok(self.bounds.length)
     }
     fn read_exact_at(&self, at: u64, b: &mut [u8]) -> io::Result<()> {
         self.store.read_exact_at(self.at(at, b.len())?, b)?;
@@ -258,8 +253,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
         }
         Ok(Region {
             store,
-            region,
-            observed,
+            bounds: crate::fs_storage::RegionBounds::new(region.offset, region.length, observed),
         })
     }
     /// Open exclusively owned target and disjoint external journal after complete clean audit.
@@ -697,7 +691,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
         };
         let plan = UndoPlan::new_staged(
             binding,
-            self.target.region.length,
+            self.target.bounds.length,
             batch.patches,
             &batch.stages,
             self.limits.undo,

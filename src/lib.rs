@@ -17,6 +17,8 @@ pub mod error;
 pub mod extended;
 mod fs_apfs_disk;
 mod fs_build_io;
+mod fs_discovery;
+mod fs_pagination;
 mod gpt;
 /// Typed partition identifiers, names, and attributes.
 pub mod guid;

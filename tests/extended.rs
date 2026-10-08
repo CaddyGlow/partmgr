@@ -78,7 +78,7 @@ fn transactional_edit_topology_commit_and_payload_preservation() {
     assert_eq!(reread.logical().len(), 3);
     assert!(memory.0[11 * 512..31 * 512].iter().all(|b| *b == 0xa7));
     assert!(memory.0[62 * 512..87 * 512].iter().all(|b| *b == 0xc2));
-    let mut edited = reread.clone();
+    let mut edited = reread;
     edited.delete(0).unwrap();
     edited
         .plan_against(&memory)

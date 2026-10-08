@@ -1418,17 +1418,41 @@ impl ApfsVolume {
         }
         let mut id = self.root_identity();
         for name in path {
-            let entries = self.directory(&id, r)?;
-            id = entries
-                .get()
-                .iter()
-                .find(|e| &e.name == name)
-                .ok_or_else(|| bad("APFS native name missing"))?
-                .object
-                .clone();
+            self.revalidate(&id, r)?;
+            self.directory_len(&id)?;
+            let NativeName::Bytes(name) = name else {
+                return Err(bad("APFS native name missing"));
+            };
+            let mut found = None;
+            for entry in &self.node(&id)?.entries {
+                r.cancellation.check()?;
+                if &entry.name == name {
+                    found = Some(entry.inode);
+                    break;
+                }
+            }
+            id = self.identity(found.ok_or_else(|| bad("APFS native name missing"))?);
         }
         self.revalidate(&id, r)?;
         Ok(id)
+    }
+    /// Establish a complete ownership proof for repeated reads of caller-guaranteed
+    /// immutable bytes. Use the returned handle's explicit revalidation boundary
+    /// when beginning or ending an operation that depends on that guarantee.
+    pub fn audited_reader(
+        &self,
+        limits: crate::fs_apfs_audit::ApfsAuditLimits,
+        r: &Resources,
+    ) -> Result<ApfsAuditedReader> {
+        let proof = crate::fs_apfs_audit::audit_apfs(self, limits, r)?;
+        if !proof.is_complete() || !proof.is_clean() {
+            return Err(bad("APFS file requires complete clean ownership audit"));
+        }
+        Ok(ApfsAuditedReader {
+            volume: self.clone(),
+            proof: Arc::new(proof),
+            limits,
+        })
     }
     /// Open indexed ordinary data without constructing its complete payload.
     pub fn open_file(&self, id: &ObjectId, r: &Resources) -> Result<ApfsFile> {
@@ -1436,13 +1460,9 @@ impl ApfsVolume {
     }
     /// Open indexed ordinary data or an explicitly enumerated embedded resource fork.
     pub fn open_stream(&self, id: &ObjectId, kind: &StreamKind, r: &Resources) -> Result<ApfsFile> {
-        self.revalidate(id, r)?;
-        // This initial profile deliberately requires the complete native ownership proof
-        // before a deferred map can expose bytes. Future local-proof caching must retain
-        // the same immutable source bindings and caller-selected ceilings.
+        self.node(id)?;
         let limits = self.container().inner.limits;
-        let proof = crate::fs_apfs_audit::audit_apfs(
-            self,
+        let audited = self.audited_reader(
             crate::fs_apfs_audit::ApfsAuditLimits {
                 blocks: limits.blocks,
                 objects: limits.objects.max(limits.records),
@@ -1452,10 +1472,21 @@ impl ApfsVolume {
             },
             r,
         )?;
-        if !proof.is_clean() {
+        self.open_stream_with_proof(id, kind, r, None, &audited.proof)
+    }
+    fn open_stream_with_proof(
+        &self,
+        id: &ObjectId,
+        kind: &StreamKind,
+        r: &Resources,
+        retained: Option<Arc<crate::fs_apfs_audit::ApfsAuditReport>>,
+        proof: &crate::fs_apfs_audit::ApfsAuditReport,
+    ) -> Result<ApfsFile> {
+        r.cancellation.check()?;
+        self.container().inner.source.stable()?;
+        if !proof.is_clean() || !proof.is_complete() {
             return Err(bad("APFS file requires complete clean ownership audit"));
         }
-        drop(proof);
         let node = self.node(id)?;
         let stream = node
             .streams
@@ -1520,6 +1551,7 @@ impl ApfsVolume {
             identity: id.clone(),
             stream,
             mapped,
+            audited: retained,
             _lease: lease,
         })
     }
@@ -1588,13 +1620,55 @@ impl ApfsVolume {
         })
     }
 }
+/// Source-bound complete ownership proof for repeated immutable payload reads.
+/// Metadata is fully rechecked at creation and explicit revalidation boundaries;
+/// payload reads check cancellation and source geometry before and after access.
+/// The caller must uphold the container's immutable-byte guarantee throughout.
+pub struct ApfsAuditedReader {
+    volume: ApfsVolume,
+    proof: Arc<crate::fs_apfs_audit::ApfsAuditReport>,
+    limits: crate::fs_apfs_audit::ApfsAuditLimits,
+}
+impl ApfsAuditedReader {
+    /// Source volume whose ownership proof this handle retains.
+    pub fn volume(&self) -> &ApfsVolume {
+        &self.volume
+    }
+    /// Fully recheck indexed metadata and repeat the complete ownership audit.
+    pub fn revalidate(&self, r: &Resources) -> Result<()> {
+        let proof = crate::fs_apfs_audit::audit_apfs(&self.volume, self.limits, r)?;
+        if !proof.is_complete() || !proof.is_clean() {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "APFS audited ownership changed",
+            ));
+        }
+        Ok(())
+    }
+    /// Open a stream using the retained source-bound complete ownership proof.
+    pub fn open_stream(&self, id: &ObjectId, kind: &StreamKind, r: &Resources) -> Result<ApfsFile> {
+        self.volume
+            .open_stream_with_proof(id, kind, r, Some(self.proof.clone()), &self.proof)
+    }
+}
 /// Deferred immutable data or embedded resource-fork reader retaining indexing/source leases.
 pub struct ApfsFile {
     volume: ApfsVolume,
     identity: ObjectId,
     stream: usize,
     mapped: Option<ExtentFile>,
+    audited: Option<Arc<crate::fs_apfs_audit::ApfsAuditReport>>,
     _lease: Reservation,
+}
+impl ApfsFile {
+    fn check_binding(&self, r: &Resources) -> Result<()> {
+        r.cancellation.check()?;
+        if self.audited.is_some() {
+            self.volume.container().inner.source.stable()
+        } else {
+            self.volume.revalidate(&self.identity, r)
+        }
+    }
 }
 impl FileRead for ApfsFile {
     fn identity(&self) -> &ObjectId {
@@ -1604,7 +1678,10 @@ impl FileRead for ApfsFile {
         self.volume.node(&self.identity).unwrap().streams[self.stream].length
     }
     fn read_at(&self, at: u64, b: &mut [u8], r: &Resources) -> Result<usize> {
-        self.volume.revalidate(&self.identity, r)?;
+        self.check_binding(r)?;
+        if at >= self.len() || b.is_empty() {
+            return Ok(0);
+        }
         let n = if let Some(file) = &self.mapped {
             file.read_at(at, b)
                 .map_err(|e| Error::io("APFS deferred data", e))?
@@ -1620,7 +1697,7 @@ impl FileRead for ApfsFile {
             }
             n
         };
-        self.volume.revalidate(&self.identity, r)?;
+        self.check_binding(r)?;
         Ok(n)
     }
     fn visit_extents(
@@ -1628,7 +1705,7 @@ impl FileRead for ApfsFile {
         r: &Resources,
         f: &mut dyn FnMut(LogicalExtent) -> Result<()>,
     ) -> Result<()> {
-        self.volume.revalidate(&self.identity, r)?;
+        self.check_binding(r)?;
         if let Some(file) = &self.mapped {
             for e in file.extents() {
                 r.cancellation.check()?;
@@ -1649,7 +1726,7 @@ impl FileRead for ApfsFile {
                 kind: ExtentKind::Data,
             })?;
         }
-        self.volume.revalidate(&self.identity, r)
+        self.check_binding(r)
     }
 }
 

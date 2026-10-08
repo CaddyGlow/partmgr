@@ -1401,7 +1401,7 @@ mod tests {
             16
         );
         assert_eq!(out, [0x71; 16]);
-        let mut expected = original.clone();
+        let mut expected = original;
         expected[31 * 1024 + 23..31 * 1024 + 93].fill(0x71);
         assert_eq!(session.storage.bytes[..100 * 1024], expected[..100 * 1024]);
         assert_eq!(

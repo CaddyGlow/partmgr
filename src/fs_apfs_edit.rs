@@ -25,25 +25,25 @@ pub use cow::{
     ApfsReclamationReceipt, ApfsRecoveryAnchor,
 };
 pub use retention::{ApfsCheckpointRetirementPlan, ApfsCheckpointRetirementReceipt};
-/// Independent metadata snapshot and restart ceilings, in addition to decoder/audit limits.
+/// Independent metadata snapshot and discovery ceilings, in addition to decoder/audit limits.
 #[derive(Clone, Copy, Debug)]
 pub struct ApfsEditLimits {
     /// Maximum copied native metadata blocks. Payload blocks are not prefetched.
     pub metadata_blocks: usize,
-    /// Maximum decoder attempts, including the successful attempt.
+    /// Maximum newly discovered metadata pages plus one successful discovery.
     pub attempts: usize,
     /// Aggregate conservative decoder/audit reservations plus actual positional bytes.
     pub work: u64,
-    /// Immutable decoder limits for each attempt.
+    /// Immutable decoder limits for discovery and final retained decoding.
     pub read: ApfsReadLimits,
-    /// Complete all-volume/history ownership proof limits for each attempt.
+    /// Complete all-volume/history ownership proof limits for each decoding.
     pub audit: ApfsAuditLimits,
 }
 #[derive(Debug)]
-struct MissingBlock(u64);
+struct MissingBlock;
 impl fmt::Display for MissingBlock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "uncopied APFS metadata block {}", self.0)
+        f.write_str("uncopied APFS immutable metadata block")
     }
 }
 impl std::error::Error for MissingBlock {}
@@ -68,7 +68,7 @@ struct Snapshot {
     length: u64,
     blocks: Vec<(u64, Arc<[u8; BLOCK]>)>,
     work: Arc<WorkCounter>,
-    // One reservation covers every retained block and both simultaneously live index tables.
+    // One reservation covers every retained block and its preallocated metadata index.
     _lease: Arc<Reservation>,
 }
 impl ReadAt for Snapshot {
@@ -94,7 +94,7 @@ impl ReadAt for Snapshot {
         let index = self
             .blocks
             .binary_search_by_key(&block, |entry| entry.0)
-            .map_err(|_| io::Error::other(MissingBlock(block)))?;
+            .map_err(|_| io::Error::other(MissingBlock))?;
         out.copy_from_slice(self.blocks[index].1.as_ref());
         Ok(())
     }
@@ -234,96 +234,91 @@ impl<S: Storage> ApfsEditor<S> {
             .work
             .checked_add(limits.audit.work)
             .ok_or_else(|| {
-                Error::new(ErrorKind::BudgetExhausted, "APFS restart ceiling overflow")
+                Error::new(ErrorKind::BudgetExhausted, "APFS decoder ceiling overflow")
             })?;
-        for _ in 0..limits.attempts {
+        let decode = |source: Arc<dyn ReadAt>| {
+            let container = ApfsContainer::open(source, limits.read, r)?;
+            let volume = ApfsVolume::open(container, volume_oid, r)?;
+            let proof = audit_apfs(&volume, limits.audit, r)?;
+            if !proof.is_complete() || !proof.is_clean() {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "APFS owned session requires complete clean proof",
+                ));
+            }
+            Ok((volume, proof))
+        };
+        let discover = |blocks| {
             work.charge(attempt_charge)?;
-            let mut copied = Vec::new();
-            copied.try_reserve_exact(blocks.len()).map_err(|_| {
-                Error::new(ErrorKind::BudgetExhausted, "APFS immutable snapshot index")
-            })?;
-            copied.extend(blocks.iter().cloned());
+            let discover_work = work.clone();
+            let blocks = crate::fs_discovery::discover::<BLOCK>(
+                &target,
+                length,
+                blocks,
+                (limits.metadata_blocks, limits.attempts),
+                r,
+                Arc::new(move |n| discover_work.charge(n)),
+                move |source| decode(source).map(|_| ()),
+            )?;
+            work.charge(attempt_charge)?;
             let snapshot = Arc::new(Snapshot {
                 length,
-                blocks: copied,
+                blocks,
                 work: work.clone(),
                 _lease: lease.clone(),
             });
-            let decoded = (|| {
-                let c = ApfsContainer::open(snapshot.clone(), limits.read, r)?;
-                let volume = ApfsVolume::open(c, volume_oid, r)?;
-                let proof = audit_apfs(&volume, limits.audit, r)?;
-                if !proof.is_complete() || !proof.is_clean() {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "APFS owned session requires complete clean proof",
-                    ));
-                }
-                Ok((volume, proof))
-            })();
-            match decoded {
-                Ok((volume, proof)) => {
-                    let sequence = SCOPES
-                        .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
-                        .map_err(|_| {
-                            Error::new(ErrorKind::BudgetExhausted, "APFS owned scope exhausted")
-                        })?;
-                    let editor = Self {
-                        target,
-                        scope: (17u128 << 64) | u128::from(sequence),
-                        recovery_required: false,
-                        generation: 0,
-                        snapshot,
-                        volume,
-                        proof,
-                        limits,
-                    };
-                    editor.revalidate_subset(r, !seeded)?;
-                    return Ok(editor);
-                }
+            let (volume, proof) = decode(snapshot.clone())?;
+            Ok((snapshot, volume, proof))
+        };
+        let (snapshot, volume, proof) = if metadata.is_some() {
+            // Commit-generated indexes normally already contain every dependency.
+            // Decode their checked immutable copies once; only our missing-page
+            // sentinel permits bounded discovery from an incomplete index.
+            work.charge(attempt_charge)?;
+            let snapshot = Arc::new(Snapshot {
+                length,
+                blocks,
+                work: work.clone(),
+                _lease: lease.clone(),
+            });
+            match decode(snapshot.clone()) {
+                Ok((volume, proof)) => (snapshot, volume, proof),
                 Err(error) => {
-                    // Only our exact typed sentinel authorizes another Storage read.
                     let missing = error
                         .source
                         .as_ref()
                         .and_then(io::Error::get_ref)
-                        .and_then(|cause| cause.downcast_ref::<MissingBlock>())
-                        .map(|m| m.0);
-                    let Some(block) = missing else {
+                        .is_some_and(|cause| cause.is::<MissingBlock>());
+                    if !missing {
                         return Err(error);
-                    };
-                    if blocks.len() == limits.metadata_blocks {
-                        return Err(Error::new(
-                            ErrorKind::BudgetExhausted,
-                            "APFS metadata block ceiling",
-                        ));
                     }
-                    if target
-                        .len()
-                        .map_err(|e| Error::io("APFS snapshot length", e))?
-                        != length
-                    {
-                        return Err(Error::new(
-                            ErrorKind::StalePlan,
-                            "APFS owned length changed",
-                        ));
-                    }
-                    work.charge(BLOCK as u64)?;
-                    let mut bytes = [0u8; BLOCK];
-                    target
-                        .read_exact_at(block * BLOCK as u64, &mut bytes)
-                        .map_err(|e| Error::io("APFS owned metadata copy", e))?;
-                    let at = blocks
-                        .binary_search_by_key(&block, |entry| entry.0)
-                        .unwrap_err();
-                    blocks.insert(at, (block, Arc::new(bytes)));
+                    let snapshot = Arc::try_unwrap(snapshot).map_err(|_| {
+                        Error::new(
+                            ErrorKind::InvalidOperation,
+                            "APFS incomplete snapshot escaped decoder",
+                        )
+                    })?;
+                    discover(snapshot.blocks)?
                 }
             }
-        }
-        Err(Error::new(
-            ErrorKind::BudgetExhausted,
-            "APFS metadata restart ceiling",
-        ))
+        } else {
+            discover(blocks)?
+        };
+        let sequence = SCOPES
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
+            .map_err(|_| Error::new(ErrorKind::BudgetExhausted, "APFS owned scope exhausted"))?;
+        let editor = Self {
+            target,
+            scope: (17u128 << 64) | u128::from(sequence),
+            recovery_required: false,
+            generation: 0,
+            snapshot,
+            volume,
+            proof,
+            limits,
+        };
+        editor.revalidate_subset(r, !seeded)?;
+        Ok(editor)
     }
     /// Rebind length and every retained metadata byte to the exclusive owned storage.
     pub fn revalidate(&self, r: &Resources) -> Result<()> {
@@ -391,7 +386,7 @@ impl<S: Storage> ApfsEditor<S> {
     pub fn copied_metadata_blocks(&self) -> usize {
         self.snapshot.blocks.len()
     }
-    /// Conservative charged restart work plus exact copied/readback positional bytes.
+    /// Conservative charged discovery/final decode work plus positional metadata bytes.
     pub fn work_used(&self) -> u64 {
         self.snapshot.work.used.load(Ordering::Acquire)
     }

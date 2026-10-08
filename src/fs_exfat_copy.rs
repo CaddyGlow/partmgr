@@ -5,6 +5,7 @@
 //! kinds, hard links and additional streams fail before any destination writes.
 use crate::{
     fs_copy::{CopyLimits, CopyNamePolicy, FileInput, MetadataOutcome, native_name},
+    fs_copy::{CopyPages, MetadataStatus, visit_metadata_fields},
     fs_core::*,
     fs_exfat_builder::{
         ExfatBuildEntry, ExfatBuildLimits, ExfatBuildMetadataPolicy, ExfatBuildOptions,
@@ -49,22 +50,22 @@ pub struct ExfatCopyPlan {
     outcomes: Vec<MetadataOutcome>,
     _reservation: Reservation,
 }
-fn outcome<T>(
+fn outcome(
     object: &ObjectId,
     class: &'static str,
-    field: &MetadataField<T>,
+    field: MetadataStatus,
     out: &mut Vec<MetadataOutcome>,
 ) {
     let decision = match field {
-        MetadataField::Absent => Preservation::Transform {
+        MetadataStatus::Absent => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
             report: "source class absent; destination defaults or omission applied".into(),
         },
-        MetadataField::Uninspectable { .. } => Preservation::Transform {
+        MetadataStatus::Uninspectable => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
             report: "source class uninspectable; preservation is unverified and not claimed".into(),
         },
-        MetadataField::Known(_) | MetadataField::Opaque { .. } => Preservation::Transform {
+        MetadataStatus::Present => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
             report: "source metadata omitted; deterministic exFAT defaults applied".into(),
         },
@@ -159,7 +160,7 @@ impl ExfatCopyPlan {
         seen.insert(root.clone());
         objects.push(root.clone());
         directories.push_back(root.clone());
-        let mut pages = 0;
+        let mut pages = CopyPages::new(limits);
         while let Some(directory) = directories.pop_front() {
             if !source.streams(&directory, resources)?.get().is_empty() {
                 return Err(Error::new(
@@ -169,26 +170,12 @@ impl ExfatCopyPlan {
             }
             let mut continuation = None;
             loop {
-                resources.cancellation.check()?;
-                if pages == limits.pages {
-                    return Err(Error::new(
-                        ErrorKind::BudgetExhausted,
-                        "copy directory page limit exceeded",
-                    ));
-                }
-                pages += 1;
-                let page = source.directory_page(
+                let page = pages.next(
+                    source.as_ref(),
                     &directory,
                     continuation.as_deref(),
-                    limits.page_entries,
                     resources,
                 )?;
-                if page.entries.len() > limits.page_entries {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "source exceeded requested directory page size",
-                    ));
-                }
                 for entry in &page.entries {
                     if objects.len() == limits.objects {
                         return Err(Error::new(
@@ -262,15 +249,6 @@ impl ExfatCopyPlan {
                     objects.push(entry.object.clone());
                 }
                 continuation = page.next.clone();
-                if continuation
-                    .as_ref()
-                    .is_some_and(|token| token.len() > 1024)
-                {
-                    return Err(Error::new(
-                        ErrorKind::Unsupported,
-                        "copy continuation exceeds bounded token profile",
-                    ));
-                }
                 if continuation.is_none() {
                     break;
                 }
@@ -280,30 +258,9 @@ impl ExfatCopyPlan {
             source.revalidate(object, resources)?;
             let metadata = source.metadata(object, resources)?;
             let metadata = metadata.get();
-            outcome(object, "created", &metadata.created, &mut outcomes);
-            outcome(object, "modified", &metadata.modified, &mut outcomes);
-            outcome(object, "accessed", &metadata.accessed, &mut outcomes);
-            outcome(object, "owner", &metadata.owner, &mut outcomes);
-            outcome(object, "mode", &metadata.mode, &mut outcomes);
-            outcome(object, "security", &metadata.security, &mut outcomes);
-            outcome(
-                object,
-                "native_flags",
-                &metadata.native_flags,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "symlink_target",
-                &metadata.symlink_target,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "reparse_data",
-                &metadata.reparse_data,
-                &mut outcomes,
-            );
+            visit_metadata_fields(metadata, |class, status| {
+                outcome(object, class, status, &mut outcomes);
+            });
             outcomes.push(MetadataOutcome {
                 object: object.clone(),
                 class: "attributes",

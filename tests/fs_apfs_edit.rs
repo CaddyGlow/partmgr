@@ -508,3 +508,49 @@ fn torn_boot_recovery_itself_is_restartable_and_anchor_damage_refuses_before_mut
     assert_eq!(state.lock().unwrap().writes, 0);
     assert_eq!(r.memory.used(), 0);
 }
+
+#[test]
+fn metadata_discovery_runs_once_with_non_send_exclusive_storage() {
+    struct LocalTarget {
+        target: Target,
+        _local: std::rc::Rc<()>,
+    }
+    impl Storage for LocalTarget {
+        fn len(&self) -> io::Result<u64> {
+            self.target.len()
+        }
+        fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
+            self.target.read_exact_at(offset, out)
+        }
+        fn write_at(&mut self, offset: u64, bytes: &[u8]) -> io::Result<usize> {
+            self.target.write_at(offset, bytes)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.target.flush()
+        }
+    }
+    let r = resources();
+    let (target, _) = target();
+    let reads = target.reads.clone();
+    let mut cap = limits();
+    let two_decodes = 2 * (cap.read.work + cap.audit.work);
+    cap.work = two_decodes + 4 * 1024 * 1024;
+    let session = ApfsEditor::open(
+        LocalTarget {
+            target,
+            _local: std::rc::Rc::new(()),
+        },
+        1026,
+        cap,
+        &r,
+    )
+    .unwrap();
+    assert_eq!(
+        reads.load(Ordering::Relaxed),
+        2 * session.copied_metadata_blocks()
+    );
+    assert!(session.work_used() <= cap.work);
+    assert!(session.work_used() >= two_decodes);
+    drop(session);
+    assert_eq!(r.memory.used(), 0);
+}

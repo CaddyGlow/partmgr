@@ -64,40 +64,36 @@ pub enum FatEditState {
 }
 struct Region<S> {
     storage: S,
-    region: FatEditRegion,
-    container_length: u64,
+    bounds: crate::fs_storage::RegionBounds,
 }
 impl<S: Storage> Region<S> {
     fn position(&self, at: u64, length: usize) -> io::Result<u64> {
         self.len()?;
-        if at
-            .checked_add(length as u64)
-            .is_none_or(|end| end > self.region.length)
-        {
-            return Err(io::ErrorKind::UnexpectedEof.into());
-        }
-        self.region
-            .offset
-            .checked_add(at)
-            .ok_or(io::ErrorKind::InvalidInput.into())
+        self.bounds.position(
+            at,
+            length as u64,
+            || io::ErrorKind::UnexpectedEof.into(),
+            || io::ErrorKind::InvalidInput.into(),
+        )
     }
 }
 impl<S: Storage> Storage for Region<S> {
     fn len(&self) -> io::Result<u64> {
-        if self.storage.len()? != self.container_length {
-            return Err(io::Error::other(Error::new(
+        self.bounds.check_parent(&self.storage, || {
+            io::Error::other(Error::new(
                 ErrorKind::StalePlan,
                 "FAT edit container length changed",
-            )));
-        }
-        Ok(self.region.length)
+            ))
+        })?;
+        Ok(self.bounds.length)
     }
     fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
         self.storage
             .read_exact_at(self.position(at, out.len())?, out)
     }
-    fn write_at(&mut self, at: u64, data: &[u8]) -> io::Result<usize> {
-        self.storage.write_at(self.position(at, data.len())?, data)
+    fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+        self.storage
+            .write_at(self.position(at, bytes.len())?, bytes)
     }
     fn flush(&mut self) -> io::Result<()> {
         self.storage.flush()
@@ -255,8 +251,11 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
         }
         Ok(Region {
             storage,
-            region,
-            container_length,
+            bounds: crate::fs_storage::RegionBounds::new(
+                region.offset,
+                region.length,
+                container_length,
+            ),
         })
     }
     /// Open only after a complete clean ownership/state audit of the currently owned target.
@@ -634,7 +633,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
         let plan = match batch.stages {
             Some(stages) => UndoPlan::new_staged(
                 binding,
-                self.target.region.length,
+                self.target.bounds.length,
                 batch.patches,
                 &stages,
                 self.limits.undo,
@@ -642,7 +641,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
             ),
             None => UndoPlan::new(
                 binding,
-                self.target.region.length,
+                self.target.bounds.length,
                 batch.patches,
                 self.limits.undo,
                 resources,

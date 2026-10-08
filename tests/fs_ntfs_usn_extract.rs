@@ -278,7 +278,7 @@ fn bounded_reads_work_records_cancellation_decode_and_causal_io() {
     drop((reader, volume));
     assert_eq!(r.memory.used(), 0);
     let r = resources();
-    let mut bad = record.clone();
+    let mut bad = record;
     fixture::w(&mut bad, 4, 99);
     let (_, volume, reader) = open(image(named_resident(&bad)), journal(), &r);
     match reader.visit(&r, &mut |_| Ok(())).unwrap_err() {

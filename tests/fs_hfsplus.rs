@@ -1,3 +1,5 @@
+#[path = "common/reader_contract.rs"]
+mod reader_contract;
 use partmgr::{fs_core::*, fs_hfsplus::*, fs_hfsplus_audit::*, fs_hfsplus_tree::*};
 use std::{
     io,
@@ -277,6 +279,16 @@ fn indexed_overflow_and_resource_forks_common_native_tree_and_refunds() {
         let id = volume
             .lookup(&[NativeName::Utf16(native_name(binary))], &r)
             .unwrap();
+        // Retained-index lookup needs no directory-sized memory reservation.
+        volume
+            .lookup(
+                &[NativeName::Utf16(native_name(binary))],
+                &Resources {
+                    memory: Budget::new(0),
+                    cancellation: Cancellation::default(),
+                },
+            )
+            .unwrap();
         let file = volume.open_fork(&id, &StreamKind::Data, &r).unwrap();
         let mut b = [0; 31];
         assert_eq!(file.read_at(8 * 4096 - 8, &mut b, &r).unwrap(), 31);
@@ -286,7 +298,7 @@ fn indexed_overflow_and_resource_forks_common_native_tree_and_refunds() {
         assert_eq!(b.as_slice(), expected);
         let mut empty = [0; 2];
         assert_eq!(file.read_at(file.len(), &mut empty, &r).unwrap(), 0);
-        assert!(file.read_at(file.len() + 1, &mut empty, &r).is_err());
+        reader_contract::assert_eof_contract(&file, &r);
         let tree = HfsPlusTreeSource::inventory(volume, audit_limits(), &r).unwrap();
         // A one-entry page must fit without charging a complete directory inventory.
         let page_resources = Resources {

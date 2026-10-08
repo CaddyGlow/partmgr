@@ -71,6 +71,8 @@ pub struct FatBuildPlan {
     files: Vec<PlannedFile>,
     directories: Vec<PlannedDirectory>,
     identities: Vec<ObjectId>,
+    allocation_runs: Vec<(u32, u32)>,
+    payload_files: Vec<usize>,
     _tree_reservations: Vec<Reservation>,
     _reservation: Reservation,
 }
@@ -473,6 +475,7 @@ impl FatBuildPlan {
         }
         path_reservations.push(inventory_reservation);
         plan._tree_reservations = path_reservations;
+        plan.index_ranges()?;
         drop(resources.memory.reserve((2 * SCRATCH) as u64)?);
         Ok(plan)
     }
@@ -537,7 +540,11 @@ impl FatBuildPlan {
             ));
         }
         let charge = (files.len() as u64)
-            .checked_mul(std::mem::size_of::<PlannedFile>() as u64)
+            .checked_mul(
+                (std::mem::size_of::<PlannedFile>()
+                    + std::mem::size_of::<(u32, u32)>()
+                    + std::mem::size_of::<usize>()) as u64,
+            )
             .ok_or_else(|| invalid("inventory charge overflow"))?;
         let reservation = resources.memory.reserve(charge)?;
         let mut planned = Vec::new();
@@ -577,7 +584,7 @@ impl FatBuildPlan {
         }
         // Verify that bounded emission scratch can be reserved before returning a plan.
         drop(resources.memory.reserve((2 * SCRATCH) as u64)?);
-        Ok(Self {
+        let mut plan = Self {
             length,
             options,
             fat_sectors: fat_sectors as u32,
@@ -588,9 +595,13 @@ impl FatBuildPlan {
             files: planned,
             directories: Vec::new(),
             identities: Vec::new(),
+            allocation_runs: Vec::new(),
+            payload_files: Vec::new(),
             _tree_reservations: Vec::new(),
             _reservation: reservation,
-        })
+        };
+        plan.index_ranges()?;
+        Ok(plan)
     }
     /// Stable input identities retained by a tree plan; empty for the compatibility profile.
     pub fn source_identities(&self) -> &[ObjectId] {
@@ -601,6 +612,26 @@ impl FatBuildPlan {
     }
     fn cluster_bytes(&self) -> u64 {
         u64::from(self.options.sectors_per_cluster) * 512
+    }
+    fn index_ranges(&mut self) -> Result<()> {
+        let mut runs = inventory_vec(self.directories.len() + self.files.len())?;
+        let mut payloads = inventory_vec(self.files.len())?;
+        for directory in &self.directories {
+            if directory.clusters != 0 {
+                runs.push((directory.first, directory.first + directory.clusters));
+            }
+        }
+        for (index, file) in self.files.iter().enumerate() {
+            if file.clusters != 0 {
+                runs.push((file.first, file.first + file.clusters));
+                payloads.push(index);
+            }
+        }
+        runs.sort_unstable_by_key(|run| run.0);
+        payloads.sort_unstable_by_key(|index| self.files[*index].first);
+        self.allocation_runs = runs;
+        self.payload_files = payloads;
+        Ok(())
     }
     fn entry(&self, n: u32) -> u32 {
         let eoc = match self.options.family {
@@ -616,32 +647,16 @@ impl FatBuildPlan {
         {
             return eoc;
         }
-        for directory in &self.directories {
-            if directory.first != 0
-                && n >= directory.first
-                && n < directory.first + directory.clusters
-            {
-                return if n + 1 == directory.first + directory.clusters {
+        let index = self.allocation_runs.partition_point(|run| run.1 <= n);
+        match self.allocation_runs.get(index) {
+            Some(&(start, end)) if n >= start => {
+                if n + 1 == end {
                     eoc
                 } else {
                     n + 1
-                };
+                }
             }
-        }
-        let Some(f) = self
-            .files
-            .iter()
-            .rev()
-            .find(|f| f.clusters != 0 && f.first <= n)
-        else {
-            return 0;
-        };
-        if f.first == 0 || n >= f.first + f.clusters {
-            0
-        } else if n + 1 == f.first + f.clusters {
-            eoc
-        } else {
-            n + 1
+            _ => 0,
         }
     }
     fn boot(&self) -> [u8; 512] {
@@ -719,41 +734,59 @@ impl FatBuildPlan {
             let at = u64::from(self.reserved) * 512 + copy * fat_bytes;
             let start = offset.max(at);
             let end = (offset + out.len() as u64).min(at + fat_bytes);
-            for pos in start..end {
-                let p = pos - at;
-                let value = match self.options.family {
-                    FatFamily::Fat12 => {
-                        let pair = (p / 3) as u32 * 2;
-                        let packed = self.entry(pair) | (self.entry(pair + 1) << 12);
-                        (packed >> ((p % 3) * 8)) as u8
-                    }
-                    FatFamily::Fat16 => (self.entry((p / 2) as u32) >> ((p % 2) * 8)) as u8,
-                    FatFamily::Fat32 => (self.entry((p / 4) as u32) >> ((p % 4) * 8)) as u8,
-                };
-                out[(pos - offset) as usize] = value;
+            let (width, entries) = match self.options.family {
+                FatFamily::Fat12 => (3_u64, 2_u32),
+                FatFamily::Fat16 => (2, 1),
+                FatFamily::Fat32 => (4, 1),
+            };
+            if start < end {
+                let first = (start - at) / width;
+                let last = (end - at).div_ceil(width);
+                for unit in first..last {
+                    let n = unit as u32 * entries;
+                    let packed = if entries == 2 {
+                        self.entry(n) | (self.entry(n + 1) << 12)
+                    } else {
+                        self.entry(n)
+                    };
+                    let bytes = packed.to_le_bytes();
+                    overlay(
+                        out,
+                        at + unit * width,
+                        &bytes[..width.min(fat_bytes - unit * width) as usize],
+                    );
+                }
             }
         }
+
         let root = if self.options.family == FatFamily::Fat32 {
             self.data_offset()
         } else {
             u64::from(self.reserved + 2 * self.fat_sectors) * 512
         };
-        for (index, file) in self.files.iter().enumerate() {
-            let mut entry = [0; 32];
-            entry[..11].copy_from_slice(&file.name);
-            entry[11] = 0x20;
-            entry[16..18].copy_from_slice(&0x21_u16.to_le_bytes());
-            entry[24..26].copy_from_slice(&0x21_u16.to_le_bytes());
-            entry[20..22].copy_from_slice(&((file.first >> 16) as u16).to_le_bytes());
-            entry[26..28].copy_from_slice(&(file.first as u16).to_le_bytes());
-            entry[28..32].copy_from_slice(&file.length.to_le_bytes());
-            if self.directories.is_empty() {
+        if self.directories.is_empty() {
+            let first = offset.saturating_sub(root) / 32;
+            let last = (offset + out.len() as u64)
+                .saturating_sub(root)
+                .div_ceil(32);
+            for index in first as usize..(last as usize).min(self.files.len()) {
+                let file = &self.files[index];
+                let entry = directory_entry(file.name, false, file.first, file.length);
                 overlay(out, root + index as u64 * 32, &entry);
             }
-            if file.length == 0 {
-                continue;
+        }
+        let data = self.data_offset();
+        let cluster_bytes = self.cluster_bytes();
+        let first = self.payload_files.partition_point(|index| {
+            let file = &self.files[*index];
+            data + u64::from(file.first - 2) * cluster_bytes + u64::from(file.length) <= offset
+        });
+        for index in &self.payload_files[first..] {
+            let file = &self.files[*index];
+            let at = data + u64::from(file.first - 2) * cluster_bytes;
+            if at >= offset + out.len() as u64 {
+                break;
             }
-            let at = self.data_offset() + u64::from(file.first - 2) * self.cluster_bytes();
             let start = offset.max(at);
             let end = (offset + out.len() as u64).min(at + u64::from(file.length));
             if start < end {
@@ -765,14 +798,29 @@ impl FatBuildPlan {
                     .map_err(|e| Error::io("FAT source read", e))?;
             }
         }
-        for directory in &self.directories {
+        let directory_at = |directory: &PlannedDirectory| {
+            if directory.first == 0 {
+                root
+            } else {
+                data + u64::from(directory.first - 2) * cluster_bytes
+            }
+        };
+        let first = self.directories.partition_point(|directory| {
+            directory_at(directory) + directory.entries.len() as u64 * 32 <= offset
+        });
+        for directory in &self.directories[first..] {
             let at = if directory.first == 0 {
                 root
             } else {
                 self.data_offset() + u64::from(directory.first - 2) * self.cluster_bytes()
             };
-            for (index, entry) in directory.entries.iter().enumerate() {
-                overlay(out, at + index as u64 * 32, entry);
+            if at >= offset + out.len() as u64 {
+                break;
+            }
+            let first = offset.saturating_sub(at) / 32;
+            let last = (offset + out.len() as u64).saturating_sub(at).div_ceil(32);
+            for index in first as usize..(last as usize).min(directory.entries.len()) {
+                overlay(out, at + index as u64 * 32, &directory.entries[index]);
             }
         }
         Ok(())
@@ -923,4 +971,63 @@ fn copy_identity(id: &ObjectId) -> Result<ObjectId> {
         generation: id.generation,
         native,
     })
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use crate::fs_core::{Budget, Cancellation};
+    struct Pattern;
+    impl ReadAt for Pattern {
+        fn len(&self) -> u64 {
+            513
+        }
+        fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> std::io::Result<()> {
+            for (i, byte) in out.iter_mut().enumerate() {
+                *byte = (offset + i as u64) as u8;
+            }
+            Ok(())
+        }
+    }
+    #[test]
+    fn partial_render_matches_complete_windows_across_packed_entries_and_regions() {
+        let resources = Resources {
+            memory: Budget::new(1 << 20),
+            cancellation: Cancellation::default(),
+        };
+        for (family, length) in [
+            (FatFamily::Fat12, 1440 * 1024),
+            (FatFamily::Fat16, 16 * 1024 * 1024),
+            (FatFamily::Fat32, 64 * 1024 * 1024),
+        ] {
+            let plan = FatBuildPlan::new(
+                length,
+                FatBuildOptions {
+                    family,
+                    sectors_per_cluster: 1,
+                    volume_id: 7,
+                },
+                &[FatBuildFile {
+                    name: "FILE.BIN".into(),
+                    source: Arc::new(Pattern),
+                }],
+                &resources,
+            )
+            .unwrap();
+            let fat = u64::from(plan.reserved) * 512;
+            let boundary = fat + u64::from(plan.fat_sectors) * 512;
+            for base in [fat, boundary - 17, plan.data_offset().saturating_sub(17)] {
+                let mut complete = [0; 2048];
+                plan.render(base, &mut complete, &resources).unwrap();
+                for start in 0..32 {
+                    for count in [1, 2, 3, 4, 7, 31, 513] {
+                        let mut partial = vec![0; count];
+                        plan.render(base + start as u64, &mut partial, &resources)
+                            .unwrap();
+                        assert_eq!(partial, complete[start..start + count]);
+                    }
+                }
+            }
+        }
+    }
 }

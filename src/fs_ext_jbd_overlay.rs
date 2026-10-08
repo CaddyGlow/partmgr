@@ -180,7 +180,7 @@ impl<'a> Overlay<'a> {
         if !audit.is_clean() {
             return Err(invalid("redo overlay complete ownership audit rejected"));
         }
-        Ok((decoder.geometry.clone(), audit))
+        Ok((decoder.geometry, audit))
     }
 }
 impl super::super::ExtDecodeRead for Overlay<'_> {

@@ -1067,18 +1067,18 @@ impl HfsVolume {
                 return Err(bad("HFS lookup name bounds"));
             }
             name_profile(name)?;
-            let entries = self.directory(&id, r)?;
-            let found = entries
-                .get()
-                .iter()
-                .find(|e| {
-                    let NativeName::Bytes(n) = &e.name else {
-                        return false;
-                    };
-                    n.len() == name.len() && n.iter().zip(name).all(|(a, b)| fold(*a) == fold(*b))
+            self.revalidate(&id, r)?;
+            r.cancellation.check()?;
+            let children = self.child_ids(&id)?;
+            let index = children
+                .binary_search_by(|child| {
+                    let n = &self.inner.nodes[child].name;
+                    n.iter()
+                        .map(|u| fold(*u))
+                        .cmp(name.iter().map(|u| fold(*u)))
                 })
-                .ok_or_else(|| bad("HFS native component missing"))?;
-            id = found.object.clone();
+                .map_err(|_| bad("HFS native component missing"))?;
+            id = self.identity(children[index]);
         }
         self.revalidate(&id, r)?;
         Ok(id)
@@ -1212,6 +1212,9 @@ impl FileRead for HfsFile {
     }
     fn read_at(&self, at: u64, b: &mut [u8], r: &Resources) -> Result<usize> {
         self.volume.revalidate(&self.identity, r)?;
+        if at >= self.file.len() || b.is_empty() {
+            return Ok(0);
+        }
         let n = self
             .file
             .read_at(at, b)

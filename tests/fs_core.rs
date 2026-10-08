@@ -36,8 +36,8 @@ fn retained_transform_reserves_before_work_and_refunds_all_paths() {
 fn native_names_do_not_normalize_or_replace_invalid_sequences() {
     let bytes = NativeName::Bytes(vec![0xff, b'a']);
     let utf16 = NativeName::Utf16(vec![0xd800, 0x0061]);
-    assert_eq!(bytes.clone(), NativeName::Bytes(vec![0xff, b'a']));
-    assert_eq!(utf16.clone(), NativeName::Utf16(vec![0xd800, 0x0061]));
+    assert_eq!(bytes, NativeName::Bytes(vec![0xff, b'a']));
+    assert_eq!(utf16, NativeName::Utf16(vec![0xd800, 0x0061]));
     assert_eq!(bytes.display_lossy(), "\u{fffd}a");
     assert_eq!(utf16.display_lossy(), "\u{fffd}a");
     assert_ne!(bytes, utf16);

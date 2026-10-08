@@ -119,15 +119,7 @@ fn changed_geometry_and_constructor_overflow_are_rejected() {
     assert_eq!(state.lock().unwrap().writes, 0);
     assert!(session.flush().is_err());
     assert!(session.mutation_uncertain());
-    assert!(
-        BoundedSession::new(
-            Backend(state.clone()),
-            u64::MAX,
-            2,
-            SectorGeometry::default()
-        )
-        .is_err()
-    );
+    assert!(BoundedSession::new(Backend(state), u64::MAX, 2, SectorGeometry::default()).is_err());
     assert!(SectorGeometry::new(Some(0), None).is_err());
 }
 #[test]

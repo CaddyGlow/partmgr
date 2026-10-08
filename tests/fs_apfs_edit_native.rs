@@ -358,7 +358,7 @@ fn native_range_checkpoint_checker_payload_and_hardlink_resource_receipt() {
         expected[4091 + i] = (i * 31 + 9) as u8;
     }
     assert_eq!(data, expected);
-    let mut resource = prefix.clone();
+    let mut resource = prefix;
     resource.push("16-4353-1".into());
     assert_eq!(
         checked(&dir, "resource", &tsk.join("icat"), &resource),

@@ -10,6 +10,8 @@ use virtdisk::ReadAt;
 struct Bytes(Vec<u8>);
 #[path = "fixtures/apfs_clean.rs"]
 mod fixture;
+#[path = "common/reader_contract.rs"]
+mod reader_contract;
 impl ReadAt for Bytes {
     fn len(&self) -> u64 {
         self.0.len() as u64
@@ -74,6 +76,7 @@ fn independent_native_layout_payloads_forks_and_full_allocation() {
             }
         );
     }
+    reader_contract::assert_eof_contract(&file, &r);
     let fork = v.open_stream(&id, &StreamKind::ResourceFork, &r).unwrap();
     let mut b = [0; 8];
     assert_eq!(fork.read_at(0, &mut b, &r).unwrap(), 8);
@@ -663,8 +666,7 @@ fn native_formatter_checker_payload_and_fork_receipt() {
         data.as_slice(),
         fs::read(root.join("child-data.stdout")).unwrap()
     );
-    let tree =
-        partmgr::fs_apfs_tree::ApfsTreeSource::inventory(v.clone(), audit_limits(), &r).unwrap();
+    let tree = partmgr::fs_apfs_tree::ApfsTreeSource::inventory(v, audit_limits(), &r).unwrap();
     assert_eq!(
         tree.directory_page(&tree.root(), None, 8, &r)
             .unwrap()
@@ -1433,5 +1435,40 @@ fn reserved_root_physical_owner_cannot_authorize_data_or_free_space() {
         .unwrap();
     assert!(v.open_file(&id, &r).is_err());
     drop((proof, v));
+    assert_eq!(r.memory.used(), 0);
+}
+
+#[test]
+fn audited_payload_reader_reuses_proof_and_checks_explicit_boundaries() {
+    let r = resources();
+    let source = Arc::new(MutableSource::new(fixture::apfs_seed()));
+    let c = ApfsContainer::open(source.clone(), limits(), &r).unwrap();
+    let volume = ApfsVolume::open(c, 1026, &r).unwrap();
+    let id = volume
+        .lookup(&[NativeName::Bytes(b"A\xc3\xa9-file".to_vec())], &r)
+        .unwrap();
+    let audited = volume.audited_reader(audit_limits(), &r).unwrap();
+    source.reads.lock().unwrap().clear();
+    let file = audited.open_stream(&id, &StreamKind::Data, &r).unwrap();
+    assert!(source.reads.lock().unwrap().is_empty());
+    let mut byte = [0];
+    assert_eq!(file.read_at(0, &mut byte, &r).unwrap(), 1);
+    assert_eq!(&*source.reads.lock().unwrap(), &[(100 * 4096, 1)]);
+    for at in [file.len(), file.len() + 1, u64::MAX] {
+        byte[0] = 0xaa;
+        assert_eq!(file.read_at(at, &mut byte, &r).unwrap(), 0);
+        assert_eq!(byte[0], 0xaa);
+    }
+    source.bytes.lock().unwrap()[22 * 4096 + 300] ^= 1;
+    assert_eq!(
+        audited.revalidate(&r).unwrap_err().kind,
+        ErrorKind::StalePlan
+    );
+    source.length.fetch_sub(1, Ordering::Relaxed);
+    assert_eq!(
+        file.read_at(0, &mut byte, &r).unwrap_err().kind,
+        ErrorKind::StalePlan
+    );
+    drop((file, audited, volume));
     assert_eq!(r.memory.used(), 0);
 }

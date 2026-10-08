@@ -1037,6 +1037,9 @@ impl FileRead for XfsFile {
     }
     fn read_at(&self, at: u64, out: &mut [u8], r: &Resources) -> Result<usize> {
         self.check(r)?;
+        if at >= self.file.len() || out.is_empty() {
+            return Ok(0);
+        }
         self.file
             .read_at(at, out)
             .map_err(|e| Error::io("XFS payload", e))

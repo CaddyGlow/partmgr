@@ -127,82 +127,61 @@ impl<S: Storage> Prepared<S> {
             ceiling: limits.work,
             resources: r.clone(),
         });
-        let attempt_charge = limits
+        let decoder_charge = limits
             .read
             .work
             .checked_add(limits.audit.work)
-            .ok_or_else(|| budget("HFS+ owned restart work overflow"))?;
-        let mut pages = vector(limits.pages)?;
-        for _ in 0..limits.attempts {
-            work.charge(attempt_charge)?;
-            let mut retained = vector(pages.len())?;
-            retained.extend(pages.iter().cloned());
-            let snapshot = Arc::new(Snapshot {
-                length,
-                pages: retained,
-                work: work.clone(),
-                _lease: lease.clone(),
-            });
-            let decoded = (|| {
-                let volume = HfsPlusVolume::open(snapshot.clone(), limits.read, r)?;
+            .ok_or_else(|| budget("HFS+ owned decoder work overflow"))?;
+        work.charge(decoder_charge)?;
+        let discovery_work = work.clone();
+        let resources = r.clone();
+        let pages = crate::fs_discovery::discover::<PAGE>(
+            &target,
+            length,
+            vector(limits.pages)?,
+            (limits.pages, limits.attempts),
+            r,
+            Arc::new(move |bytes| discovery_work.charge(bytes)),
+            move |source| {
+                let volume = HfsPlusVolume::open(source, limits.read, &resources)?;
                 if volume.geometry().volume_bytes() != length {
                     return Err(bad("HFS+ owned source contains undeclared tail"));
                 }
-                let proof = audit_hfsplus(&volume, limits.audit, r)?;
+                let proof = audit_hfsplus(&volume, limits.audit, &resources)?;
                 if !proof.is_complete() || !proof.is_clean() {
                     return Err(bad("HFS+ owned preparation requires complete clean proof"));
                 }
-                Ok((volume, proof))
-            })();
-            match decoded {
-                Ok((volume, proof)) => {
-                    let prepared = Self {
-                        target,
-                        snapshot,
-                        volume,
-                        proof,
-                        range_bytes: limits.range_bytes,
-                        limits,
-                        generation: 0,
-                        uncertain: false,
-                    };
-                    prepared.revalidate(r)?;
-                    return Ok(prepared);
-                }
-                Err(error) => {
-                    let missing = error
-                        .source
-                        .as_ref()
-                        .and_then(io::Error::get_ref)
-                        .and_then(|e| e.downcast_ref::<MissingPage>())
-                        .map(|e| e.0);
-                    let Some(page) = missing else {
-                        return Err(error);
-                    };
-                    if pages.len() == limits.pages {
-                        return Err(budget("HFS+ owned metadata page ceiling"));
-                    }
-                    let at = page
-                        .checked_mul(PAGE as u64)
-                        .filter(|at| at.checked_add(PAGE as u64).is_some_and(|end| end <= length))
-                        .ok_or_else(|| bad("HFS+ owned missing-page bounds"))?;
-                    let insertion = match pages.binary_search_by_key(&page, |entry| entry.0) {
-                        Ok(_) => {
-                            return Err(bad("HFS+ missing-page sentinel names retained metadata"));
-                        }
-                        Err(index) => index,
-                    };
-                    work.charge(PAGE as u64)?;
-                    let mut bytes = [0; PAGE];
-                    target
-                        .read_exact_at(at, &mut bytes)
-                        .map_err(|e| Error::io("HFS+ owned metadata copy", e))?;
-                    pages.insert(insertion, (page, Arc::new(bytes)));
-                }
-            }
+                Ok(())
+            },
+        )?;
+        // Only immutable copied pages escape discovery. Decode them once to bind
+        // retained file maps to the sealed snapshot, then compare with the owner.
+        work.charge(decoder_charge)?;
+        let snapshot = Arc::new(Snapshot {
+            length,
+            pages,
+            work,
+            _lease: lease,
+        });
+        let volume = HfsPlusVolume::open(snapshot.clone(), limits.read, r)?;
+        let proof = audit_hfsplus(&volume, limits.audit, r)?;
+        if !proof.is_complete() || !proof.is_clean() {
+            return Err(bad("HFS+ sealed preparation requires complete clean proof"));
         }
-        Err(budget("HFS+ owned decoder attempt ceiling"))
+        let prepared = Self {
+            target,
+            snapshot,
+            volume,
+            proof,
+            range_bytes: limits.range_bytes,
+            limits,
+            generation: 0,
+            uncertain: false,
+        };
+        prepared.revalidate(r)?;
+        Ok(prepared)
     }
+
     fn revalidate(&self, r: &Resources) -> Result<()> {
         if self
             .target
@@ -351,7 +330,8 @@ fn same_owner_complete_metadata_snapshot_no_payload_prefetch_and_refunds() {
     let limits = Limits {
         pages: 256,
         attempts: 257,
-        work: 1 << 32,
+        // Two decoder passes plus actual bytes fit; per-page decoder restarts do not.
+        work: 5 << 20,
         range_bytes: 1 << 16,
         read: HfsPlusReadLimits {
             blocks: 256,

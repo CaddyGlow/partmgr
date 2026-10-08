@@ -31,6 +31,7 @@ overflow-checks = true
 unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
+redundant_clone = "warn"
 chunks_exact_to_as_chunks = "allow"
 
 [workspace]

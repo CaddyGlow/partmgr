@@ -64,33 +64,28 @@ pub enum ExtEditState {
 }
 struct Region<S> {
     storage: S,
-    selected: ExtEditRegion,
-    container_length: u64,
+    bounds: crate::fs_storage::RegionBounds,
 }
 impl<S: Storage> Region<S> {
     fn position(&self, at: u64, length: usize) -> io::Result<u64> {
         self.len()?;
-        if at
-            .checked_add(length as u64)
-            .is_none_or(|end| end > self.selected.length)
-        {
-            return Err(io::ErrorKind::UnexpectedEof.into());
-        }
-        self.selected
-            .offset
-            .checked_add(at)
-            .ok_or(io::ErrorKind::InvalidInput.into())
+        self.bounds.position(
+            at,
+            length as u64,
+            || io::ErrorKind::UnexpectedEof.into(),
+            || io::ErrorKind::InvalidInput.into(),
+        )
     }
 }
 impl<S: Storage> Storage for Region<S> {
     fn len(&self) -> io::Result<u64> {
-        if self.storage.len()? != self.container_length {
-            return Err(io::Error::other(Error::new(
+        self.bounds.check_parent(&self.storage, || {
+            io::Error::other(Error::new(
                 ErrorKind::StalePlan,
                 "ext2 editor container length changed",
-            )));
-        }
-        Ok(self.selected.length)
+            ))
+        })?;
+        Ok(self.bounds.length)
     }
     fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
         self.storage
@@ -181,8 +176,11 @@ impl<S: Storage, J: Storage> ExtEditor<S, J> {
         }
         let target = Region {
             storage,
-            selected: region,
-            container_length,
+            bounds: crate::fs_storage::RegionBounds::new(
+                region.offset,
+                region.length,
+                container_length,
+            ),
         };
         let status = fs_undo::inspect(&journal, r)?;
         if status

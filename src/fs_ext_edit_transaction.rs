@@ -243,7 +243,7 @@ impl<S: Storage, J: Storage> ExtEditor<S, J> {
         };
         let plan = UndoPlan::new_staged(
             binding,
-            self.target.selected.length,
+            self.target.bounds.length,
             batch.patches,
             &batch.stages,
             self.limits.undo,
@@ -583,8 +583,11 @@ impl<S: Storage, J: Storage> ExtEditor<S, J> {
         }
         let mut target = Region {
             storage,
-            selected: region,
-            container_length,
+            bounds: crate::fs_storage::RegionBounds::new(
+                region.offset,
+                region.length,
+                container_length,
+            ),
         };
         recover_guarded(&mut target, &mut journal, binding, limits, r)?;
         Self::open(

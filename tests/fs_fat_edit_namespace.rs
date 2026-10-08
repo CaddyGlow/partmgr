@@ -507,7 +507,7 @@ fn directory_move_dotdot_descendant_gate_and_corrupt_parent_rejection() {
 fn native_name_collisions_context_policy_lfn_boundaries_and_illegal_fields() {
     let r = resources();
     let c = Arc::new(Mutex::new(Clock::default()));
-    let mut e = editor(&fixture(false), c.clone(), &r);
+    let mut e = editor(&fixture(false), c, &r);
     let root = e.open_directory(&[], &r).unwrap();
     let collision = name(b"OTHER   BIN", Some("payload.bin"));
     assert_eq!(
@@ -546,11 +546,7 @@ fn native_name_collisions_context_policy_lfn_boundaries_and_illegal_fields() {
     .unwrap();
     drop(root);
     assert_eq!(
-        bytes(
-            &e,
-            &[NativeName::Utf16(unicode.long_name.clone().unwrap())],
-            &r
-        ),
+        bytes(&e, &[NativeName::Utf16(unicode.long_name.unwrap())], &r),
         Vec::<u8>::new()
     );
     let root = e.open_directory(&[], &r).unwrap();

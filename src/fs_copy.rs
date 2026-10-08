@@ -35,6 +35,79 @@ pub struct CopyLimits {
     /// Maximum entries requested per page.
     pub page_entries: usize,
 }
+pub(crate) struct CopyPages {
+    limits: CopyLimits,
+    used: usize,
+}
+impl CopyPages {
+    pub(crate) fn new(limits: CopyLimits) -> Self {
+        Self { limits, used: 0 }
+    }
+    pub(crate) fn next(
+        &mut self,
+        source: &dyn TreeSource,
+        directory: &ObjectId,
+        continuation: Option<&[u8]>,
+        resources: &Resources,
+    ) -> Result<DirectoryPage> {
+        resources.cancellation.check()?;
+        if self.used == self.limits.pages {
+            return Err(Error::new(
+                ErrorKind::BudgetExhausted,
+                "copy directory page limit exceeded",
+            ));
+        }
+        self.used += 1;
+        let page =
+            source.directory_page(directory, continuation, self.limits.page_entries, resources)?;
+        if page.entries.len() > self.limits.page_entries {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "source exceeded requested directory page size",
+            ));
+        }
+        if page.next.as_ref().is_some_and(|token| token.len() > 1024) {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "copy continuation exceeds bounded token profile",
+            ));
+        }
+        Ok(page)
+    }
+}
+#[derive(Clone, Copy)]
+pub(crate) enum MetadataStatus {
+    Absent,
+    Uninspectable,
+    Present,
+}
+impl MetadataStatus {
+    fn of<T>(field: &MetadataField<T>) -> Self {
+        match field {
+            MetadataField::Absent => Self::Absent,
+            MetadataField::Uninspectable { .. } => Self::Uninspectable,
+            MetadataField::Known(_) | MetadataField::Opaque { .. } => Self::Present,
+        }
+    }
+}
+pub(crate) fn visit_metadata_fields(
+    metadata: &Metadata,
+    mut visit: impl FnMut(&'static str, MetadataStatus),
+) {
+    visit("created", MetadataStatus::of(&metadata.created));
+    visit("modified", MetadataStatus::of(&metadata.modified));
+    visit("accessed", MetadataStatus::of(&metadata.accessed));
+    visit("owner", MetadataStatus::of(&metadata.owner));
+    visit("mode", MetadataStatus::of(&metadata.mode));
+    visit("security", MetadataStatus::of(&metadata.security));
+    visit("native_flags", MetadataStatus::of(&metadata.native_flags));
+    visit(
+        "symlink_target",
+        MetadataStatus::of(&metadata.symlink_target),
+    );
+    visit("reparse_data", MetadataStatus::of(&metadata.reparse_data));
+}
+
 /// Explicit destination, conversion and resource policies for a content-only copy.
 pub struct FatCopyOptions {
     /// Exact unpublished destination byte length.
@@ -227,26 +300,26 @@ pub(crate) fn native_name(name: &NativeName, policy: CopyNamePolicy) -> Result<V
     }
 }
 
-fn outcome<T>(
+fn outcome(
     object: &ObjectId,
     class: &'static str,
     has_destination_entry: bool,
-    field: &MetadataField<T>,
+    field: MetadataStatus,
     out: &mut Vec<MetadataOutcome>,
 ) {
     let synthesized =
         has_destination_entry && matches!(class, "created" | "modified" | "native_flags");
     let decision = match field {
-        MetadataField::Absent if synthesized => Preservation::Transform {
+        MetadataStatus::Absent if synthesized => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
             report: "source class absent; deterministic FAT defaults synthesized".into(),
         },
-        MetadataField::Absent => Preservation::Preserve,
-        MetadataField::Uninspectable { .. } => Preservation::Transform {
+        MetadataStatus::Absent => Preservation::Preserve,
+        MetadataStatus::Uninspectable => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
             report: "source class uninspectable; preservation is unverified and not claimed".into(),
         },
-        MetadataField::Known(_) | MetadataField::Opaque { .. } => Preservation::Transform {
+        MetadataStatus::Present => Preservation::Transform {
             policy: "content-only deterministic defaults".into(),
             report: if synthesized {
                 "source metadata omitted; deterministic FAT defaults applied"
@@ -335,7 +408,7 @@ impl FatCopyPlan {
         seen.insert(root.clone());
         objects.push(root.clone());
         directories.push_back(root.clone());
-        let mut pages = 0;
+        let mut pages = CopyPages::new(limits);
         while let Some(directory) = directories.pop_front() {
             if !source.streams(&directory, resources)?.get().is_empty() {
                 return Err(Error::new(
@@ -345,26 +418,12 @@ impl FatCopyPlan {
             }
             let mut continuation = None;
             loop {
-                resources.cancellation.check()?;
-                if pages == limits.pages {
-                    return Err(Error::new(
-                        ErrorKind::BudgetExhausted,
-                        "copy directory page limit exceeded",
-                    ));
-                }
-                pages += 1;
-                let page = source.directory_page(
+                let page = pages.next(
+                    source.as_ref(),
                     &directory,
                     continuation.as_deref(),
-                    limits.page_entries,
                     resources,
                 )?;
-                if page.entries.len() > limits.page_entries {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "source exceeded requested directory page size",
-                    ));
-                }
                 for entry in &page.entries {
                     if objects.len() == limits.objects {
                         return Err(Error::new(
@@ -436,15 +495,6 @@ impl FatCopyPlan {
                     objects.push(entry.object.clone());
                 }
                 continuation = page.next.clone();
-                if continuation
-                    .as_ref()
-                    .is_some_and(|token| token.len() > 1024)
-                {
-                    return Err(Error::new(
-                        ErrorKind::Unsupported,
-                        "copy continuation exceeds bounded token profile",
-                    ));
-                }
                 if continuation.is_none() {
                     break;
                 }
@@ -454,69 +504,9 @@ impl FatCopyPlan {
             source.revalidate(object, resources)?;
             let metadata = source.metadata(object, resources)?;
             let metadata = metadata.get();
-            outcome(
-                object,
-                "created",
-                object != &root,
-                &metadata.created,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "modified",
-                object != &root,
-                &metadata.modified,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "accessed",
-                object != &root,
-                &metadata.accessed,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "owner",
-                object != &root,
-                &metadata.owner,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "mode",
-                object != &root,
-                &metadata.mode,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "security",
-                object != &root,
-                &metadata.security,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "native_flags",
-                object != &root,
-                &metadata.native_flags,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "symlink_target",
-                object != &root,
-                &metadata.symlink_target,
-                &mut outcomes,
-            );
-            outcome(
-                object,
-                "reparse_data",
-                object != &root,
-                &metadata.reparse_data,
-                &mut outcomes,
-            );
+            visit_metadata_fields(metadata, |class, status| {
+                outcome(object, class, object != &root, status, &mut outcomes);
+            });
             outcomes.push(MetadataOutcome {
                 object: object.clone(),
                 class: "attributes",

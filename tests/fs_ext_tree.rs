@@ -386,9 +386,9 @@ fn native_debugfs_hardlink_inventory() {
     assert_eq!(std::fs::read(&path).unwrap(), unchanged);
     receipt.push_str("result=passed\ncommands: mke2fs -q -F -t ext2 -O none -I 128 ext2.img; debugfs -w -f commands ext2.img; debugfs -R stat /{payload,short,long} ext2.img; e2fsck -fn ext2.img\n");
     for file in [
-        path.clone(),
-        commands.clone(),
-        payload.clone(),
+        path,
+        commands,
+        payload,
         std::path::PathBuf::from("src/fs_ext.rs"),
         std::path::PathBuf::from("src/fs_ext_tree.rs"),
         std::path::PathBuf::from("tests/fs_ext_tree.rs"),

@@ -1247,9 +1247,7 @@ impl<S: Storage> ApfsEditor<S> {
             base.catalog.push((k, v));
         }
         let mut k = key(file, 4);
-        let mut native_name = name
-            .clone()
-            .unwrap_or_else(|| b"com.apple.ResourceFork".to_vec());
+        let mut native_name = name.unwrap_or_else(|| b"com.apple.ResourceFork".to_vec());
         native_name.push(0);
         let name = native_name.as_slice();
         k.extend_from_slice(&(name.len() as u16).to_le_bytes());

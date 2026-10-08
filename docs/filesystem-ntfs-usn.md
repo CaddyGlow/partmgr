@@ -34,9 +34,42 @@ preserved without a guessed applicability mask.
 The input slice must begin at a known record boundary. Sparse `$J` holes and the
 initial8-byte USN in a DeviceIoControl result need explicit extraction/envelope
 handling before this decoder; it does not silently scan for plausible headers.
-There is no NTFS stream extraction, MFT interpretation beyond the optional V2 ID
-split, transaction-log replay, deletion/file recovery, timeline attribution,
-rename-pair inference, carving, or journal modification capability in this draft.
+The framing decoder itself has no NTFS stream extraction. The separately bounded
+extractor described below handles a selected stream. MFT interpretation beyond
+the optional V2 ID split, transaction-log replay, deletion/file recovery, timeline
+attribution, rename-pair inference, carving and journal modification remain unavailable.
+
+## Source-bound selected stream extraction
+
+`fs_ntfs_usn_extract::NtfsUsnReader::open` opens exactly the named `$J` DATA stream
+on a caller-selected, validated NTFS FILE identity. It retains the source and its
+mapping. This selection does not authenticate the object's namespace as
+`$Extend/$UsnJrnl`, decode `$Max`, determine rollover/completeness, or acquire a
+snapshot. The caller must uphold the source stability contract. The evidence ID
+remains a caller label, rather than a digest claim.
+
+`visit` delivers borrowed records with exact bytes, source-scoped owner identity
+and logical offsets. Sparse and unwritten extents are explicit gap events with no
+backing reads. Eight zero bytes at a record boundary in a data extent are reported
+as zero padding. A record cannot cross a hole or unwritten range; malformed data
+terminates traversal instead of searching for plausible headers. Physical data
+mapping boundaries can be crossed when logical data remains contiguous.
+
+`JournalLimits` bounds retained extents, record sizes/names/counts, requested read
+bytes and traversal/IO work. Scratch and identity storage use shared reservations.
+Storage errors and callback failures retain causal errors; native decode errors
+retain their field and stream positions. Cancellation and all success/failure
+paths refund scratch. Repeated traversal restarts with independent ceilings.
+
+Three independent fixture tests cover exact records/padding, sparse/unwritten
+gaps, gap-crossing refusal, cap/cancellation/decode/IO failures and refunds.
+The native receipt at
+`/data/cache/partmgr-ntfs-usn-native-extract-v1/qualification.json` binds ten compiled
+sources and 34 artifacts. A native ntfscp-produced named stream carries the
+independent 1,024-record synthetic fixture; all 84,656 extracted bytes match
+ntfscat output and the fixture, with the image unchanged. An enabled gate missing
+its image fails. This is native named-stream transport evidence, not an actual
+Windows USN journal capture or journal lifecycle qualification.
 
 ## Primary definitions
 

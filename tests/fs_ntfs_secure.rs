@@ -497,10 +497,84 @@ fn native_security_gate(allocated: bool) {
             ));
         }
         drop(resolved);
-        let metadata =
-            partmgr::fs_ntfs_metadata::inspect_ntfs_native_metadata(&volume, &record, limits(), &r)
-                .unwrap();
+        let metadata = partmgr::fs_ntfs_metadata::inspect_ntfs_resolved_metadata(
+            &volume,
+            record.identity(),
+            object_limits(),
+            &r,
+        )
+        .unwrap();
         assert_eq!(metadata.record(), record.identity());
+        let attributes_only = partmgr::fs_ntfs_metadata::inspect_ntfs_resolved_attributes(
+            &volume,
+            record.identity(),
+            object_limits().streams,
+            &r,
+        )
+        .unwrap();
+        assert_eq!(
+            attributes_only.native_attributes().len(),
+            metadata.native_attributes().len()
+        );
+        for (plain, secured) in attributes_only
+            .native_attributes()
+            .iter()
+            .zip(metadata.native_attributes())
+        {
+            assert_eq!(plain.raw, secured.raw);
+            assert_eq!(plain.record, secured.record);
+            assert_eq!(plain.offset, secured.offset);
+        }
+        let plain = attributes_only.into_metadata(&r).unwrap();
+        assert!(matches!(
+            plain.security,
+            MetadataField::Uninspectable { .. }
+        ));
+        assert!(matches!(plain.owner, MetadataField::Uninspectable { .. }));
+        let si = run(
+            &format!("record-si-{n}"),
+            &paths[3],
+            &["-i", &n.to_string(), "-a", "0x10", imagearg],
+        );
+        assert_eq!(metadata.standard_information().unwrap().raw, si.stdout);
+        fs::write(
+            out.join(format!("standard-{n}.bin")),
+            metadata.standard_information().unwrap().raw,
+        )
+        .unwrap();
+        if n == number {
+            let file_name = run(
+                &format!("record-filename-{n}"),
+                &paths[3],
+                &["-i", &n.to_string(), "-a", "0x30", imagearg],
+            );
+            assert!(
+                metadata
+                    .file_names()
+                    .any(|value| value.raw == file_name.stdout)
+            );
+            fs::write(out.join(format!("filename-{n}.bin")), file_name.stdout).unwrap();
+        }
+        for (ordinal, attribute) in metadata.native_attributes().iter().enumerate() {
+            fs::write(
+                out.join(format!("attribute-{n}-{ordinal}.bin")),
+                &attribute.raw,
+            )
+            .unwrap();
+            fs::write(
+                out.join(format!("attribute-{n}-{ordinal}.provenance")),
+                format!(
+                    "kind={}\ninstance={}\noffset={}\nrecord={:?}\nname={:?}\n",
+                    attribute.kind,
+                    attribute.instance,
+                    attribute.offset,
+                    attribute.record,
+                    attribute.name
+                ),
+            )
+            .unwrap();
+        }
+
         assert_eq!(metadata.security().descriptor().raw(), expected.as_slice());
         let owner = metadata
             .security()
@@ -510,9 +584,18 @@ fn native_security_gate(allocated: bool) {
             .raw()
             .to_vec();
         let mapped = metadata.into_metadata(&r).unwrap();
+        assert_eq!(plain.created, mapped.created);
+        assert_eq!(plain.modified, mapped.modified);
+        assert_eq!(plain.accessed, mapped.accessed);
+        assert_eq!(plain.attributes, mapped.attributes);
+        fs::write(
+            out.join(format!("attributes-only-{n}.verified")),
+            "exact attributes and provenance; common owner/security remain uninspectable\n",
+        )
+        .unwrap();
         assert_eq!(mapped.get().security, MetadataField::Known(expected));
         assert_eq!(mapped.get().owner, MetadataField::Known(owner));
-        drop((mapped, record));
+        drop((mapped, plain, record));
         assert_eq!(r.memory.used(), baseline);
         run(
             &format!("ntfsinfo-{n}"),
@@ -824,6 +907,209 @@ fn secure_extension_roots_use_full_catalog_checks_and_reject_owner_mismatch() {
     let object = volume.stream_identity(24, &r).unwrap();
     assert!(lookup_ntfs_security_object(&volume, &object, object_limits(), &r).is_err());
     drop(volume);
+    assert_eq!(r.memory.used(), 0);
+}
+
+fn metadata_extension_seed() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let mut bytes = seed();
+    let mut standard = vec![0; 72];
+    for (at, ticks) in [(0, 11), (8, 22), (16, 33), (24, 44)] {
+        fixture::q(&mut standard, at, ticks);
+    }
+    fixture::d(&mut standard, 32, 0x22);
+    standard[44] = 0xa7;
+    let mut filename = vec![0; 72];
+    fixture::q(&mut filename, 0, 5 | (7 << 48));
+    for (at, ticks) in [(8, 101), (16, 202), (24, 303), (32, 404)] {
+        fixture::q(&mut filename, at, ticks);
+    }
+    filename[64] = 3;
+    filename[65] = 1;
+    for (at, u) in [(66, 0xd800), (68, 0xe9), (70, 0xffff)] {
+        fixture::w(&mut filename, at, u);
+    }
+    let mut list = security_list_entry(0x10, 24, 1);
+    list.extend(security_list_entry(0x30, 26, 8));
+    list.extend(security_list_entry(0x50, 26, 9));
+    list.extend(security_list_entry(0x80, 24, 3));
+    let base = fixture::record(
+        24,
+        &[
+            fixture::resident(0x10, &standard, 1),
+            fixture::resident(0x20, &list, 4),
+            fixture::resident(0x80, b"data", 3),
+        ],
+    );
+    let mut ext = fixture::record(
+        26,
+        &[
+            fixture::resident(0x30, &filename, 8),
+            fixture::resident(0x50, &sd(), 9),
+        ],
+    );
+    fixture::q(&mut ext, 32, 24 | (7 << 48));
+    bytes[2048 + 24 * 1024..2048 + 25 * 1024].copy_from_slice(&base);
+    bytes[2048 + 26 * 1024..2048 + 27 * 1024].copy_from_slice(&ext);
+    (bytes, standard, filename)
+}
+#[test]
+fn resolved_metadata_preserves_si_filename_reserved_bytes_security_and_leases() {
+    let (bytes, standard, filename) = metadata_extension_seed();
+    let r = resources();
+    let volume = NtfsVolume::open(Arc::new(Bytes(bytes)), readlimits(), &r).unwrap();
+    let object = volume.stream_identity(24, &r).unwrap();
+    let capture = partmgr::fs_ntfs_metadata::inspect_ntfs_resolved_metadata(
+        &volume,
+        &object,
+        object_limits(),
+        &r,
+    )
+    .unwrap();
+    assert_eq!(capture.record(), &object);
+    assert_eq!(capture.standard_information().unwrap().raw, standard);
+    let name = capture.file_names().next().unwrap();
+    assert_eq!(name.raw, filename);
+    assert_eq!(name.timestamps, [101, 202, 303, 404]);
+    assert_eq!(capture.native_attributes().len(), 5);
+    let raw: Vec<Vec<u8>> = capture
+        .native_attributes()
+        .iter()
+        .map(|a| a.raw.clone())
+        .collect();
+    drop(volume);
+    let metadata = capture.into_metadata(&r).unwrap();
+    assert_eq!(
+        metadata.created,
+        MetadataField::Known(NativeTimestamp {
+            ticks: 11,
+            ticks_per_second: 10_000_000,
+            epoch: "NTFS FILETIME: 1601-01-01 UTC".into()
+        })
+    );
+    assert_eq!(metadata.security, MetadataField::Known(sd()));
+    assert_eq!(metadata.owner, MetadataField::Known(sd()[20..36].to_vec()));
+    for a in raw {
+        assert!(
+            metadata
+                .attributes
+                .iter()
+                .any(|(_, v)| v == &MetadataField::Known(a.clone()))
+        );
+    }
+    assert!(metadata.attributes.iter().any(|(n, v)| n
+        == &NativeName::Bytes(b"ntfs.STANDARD_INFORMATION.mft_changed.FILETIME".to_vec())
+        && v == &MetadataField::Known(33i64.to_le_bytes().to_vec())));
+    drop(metadata);
+    assert_eq!(r.memory.used(), 0);
+}
+#[test]
+fn resolved_metadata_caps_cancel_and_consuming_copy_failures_refund() {
+    let (bytes, _, _) = metadata_extension_seed();
+    let r = resources();
+    let volume = NtfsVolume::open(Arc::new(Bytes(bytes)), readlimits(), &r).unwrap();
+    let object = volume.stream_identity(24, &r).unwrap();
+    let baseline = r.memory.used();
+    let mut tiny = object_limits();
+    tiny.streams.extension_records = 0;
+    assert!(
+        partmgr::fs_ntfs_metadata::inspect_ntfs_resolved_metadata(&volume, &object, tiny, &r)
+            .is_err()
+    );
+    assert_eq!(r.memory.used(), baseline);
+    let capture = partmgr::fs_ntfs_metadata::inspect_ntfs_resolved_metadata(
+        &volume,
+        &object,
+        object_limits(),
+        &r,
+    )
+    .unwrap();
+    let drain = r.memory.reserve((64 << 20) - r.memory.used()).unwrap();
+    assert!(capture.into_metadata(&r).is_err());
+    drop(drain);
+    assert_eq!(r.memory.used(), baseline);
+    let capture = partmgr::fs_ntfs_metadata::inspect_ntfs_resolved_metadata(
+        &volume,
+        &object,
+        object_limits(),
+        &r,
+    )
+    .unwrap();
+    r.cancellation.cancel();
+    assert!(capture.into_metadata(&r).is_err());
+    assert_eq!(r.memory.used(), baseline);
+    drop(volume);
+    assert_eq!(r.memory.used(), 0);
+}
+
+#[test]
+fn resolved_metadata_high_bit_filetime_preserves_unsigned_generic_contract() {
+    let (mut bytes, _, _) = metadata_extension_seed();
+    // SI is the first resident attribute in FILE 24; value starts at 0x50.
+    fixture::q(&mut bytes, 2048 + 24 * 1024 + 0x50, u64::MAX);
+    let r = resources();
+    let volume = NtfsVolume::open(Arc::new(Bytes(bytes)), readlimits(), &r).unwrap();
+    let object = volume.stream_identity(24, &r).unwrap();
+    let capture = partmgr::fs_ntfs_metadata::inspect_ntfs_resolved_metadata(
+        &volume,
+        &object,
+        object_limits(),
+        &r,
+    )
+    .unwrap();
+    assert_eq!(capture.standard_information().unwrap().timestamps[0], -1);
+    let metadata = capture.into_metadata(&r).unwrap();
+    assert!(
+        matches!(&metadata.created, partmgr::fs_core::MetadataField::Known(t)
+        if t.ticks == i128::from(u64::MAX))
+    );
+    drop((metadata, volume));
+    assert_eq!(r.memory.used(), 0);
+}
+
+#[test]
+fn resolved_attributes_without_security_preserve_evidence_and_unknown_owner() {
+    let (mut bytes, standard, filename) = metadata_extension_seed();
+    // A structurally valid resident SD attribute with unsupported descriptor
+    // revision must be retained without an implicit ACL interpretation.
+    bytes[2048 + 26 * 1024 + 56 + 96 + 24] = 2;
+    let r = resources();
+    let volume = NtfsVolume::open(Arc::new(Bytes(bytes)), readlimits(), &r).unwrap();
+    let object = volume.stream_identity(24, &r).unwrap();
+    assert!(lookup_ntfs_security_object(&volume, &object, object_limits(), &r).is_err());
+    let capture = partmgr::fs_ntfs_metadata::inspect_ntfs_resolved_attributes(
+        &volume,
+        &object,
+        object_limits().streams,
+        &r,
+    )
+    .unwrap();
+    assert_eq!(capture.record(), &object);
+    assert_eq!(capture.standard_information().unwrap().raw, standard);
+    assert_eq!(capture.file_names().next().unwrap().raw, filename);
+    let raw: Vec<Vec<u8>> = capture
+        .native_attributes()
+        .iter()
+        .map(|a| a.raw.clone())
+        .collect();
+    drop(volume);
+    let metadata = capture.into_metadata(&r).unwrap();
+    assert!(matches!(
+        metadata.security,
+        MetadataField::Uninspectable { .. }
+    ));
+    assert!(matches!(
+        metadata.owner,
+        MetadataField::Uninspectable { .. }
+    ));
+    for bytes in raw {
+        assert!(
+            metadata
+                .attributes
+                .iter()
+                .any(|(_, value)| value == &MetadataField::Known(bytes.clone()))
+        );
+    }
+    drop(metadata);
     assert_eq!(r.memory.used(), 0);
 }
 

@@ -145,3 +145,6 @@ pub mod fs_apfs_builder;
 pub mod fs_apfs_edit;
 /// Common native APFS tree after complete accepted-profile allocation proof.
 pub mod fs_apfs_tree;
+
+/// Bounded source-bound USN stream extraction.
+pub mod fs_ntfs_usn_extract;

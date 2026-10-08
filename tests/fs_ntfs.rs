@@ -1342,3 +1342,115 @@ fn fresh_native_attribute_selectors_are_scoped_and_do_not_accept_caller_maps() {
     }
     assert_eq!(r.memory.used(), 0);
 }
+
+/// Explicit independent native fixture gate; enabled missing inputs fail.
+#[test]
+#[ignore = "requires externally generated NTFS MFT attribute-list fixture and native MFT dump"]
+fn native_mft_attribute_list_bootstrap_matches_independent_dump() {
+    let image =
+        std::env::var("PARTMGR_NTFS_BOOTSTRAP_NATIVE_IMAGE").expect("native image path required");
+    let expected =
+        std::env::var("PARTMGR_NTFS_BOOTSTRAP_NATIVE_MFT").expect("native MFT dump path required");
+    let bytes = std::fs::read(image).unwrap();
+    let expected = std::fs::read(expected).unwrap();
+    let source = Arc::new(Image::new(bytes));
+    let r = r();
+    {
+        let volume =
+            NtfsVolume::open_stream_profile(source.clone(), limits(), stream_limits(), &r).unwrap();
+        let owner = volume.stream_identity(0, &r).unwrap();
+        let attributes = volume
+            .native_attributes(&owner, stream_limits(), &r)
+            .unwrap();
+        assert!(
+            attributes
+                .get()
+                .iter()
+                .any(|a| a.kind == 0xb0 && a.record != owner)
+        );
+        assert_eq!(
+            attributes.get().iter().filter(|a| a.kind == 0x80).count(),
+            2
+        );
+        assert!(
+            attributes
+                .get()
+                .iter()
+                .any(|a| a.kind == 0x80 && a.record != owner)
+        );
+        let file = volume
+            .open_stream(&owner, &[], stream_limits(), &r)
+            .unwrap();
+        assert_eq!(file.len(), expected.len() as u64);
+        let mut buffer = [0; 1031];
+        let mut actual = Vec::new();
+        let mut at = 0;
+        while at < expected.len() {
+            let n = file.read_at(at as u64, &mut buffer, &r).unwrap();
+            assert!(n > 0);
+            actual.extend_from_slice(&buffer[..n]);
+            at += n;
+        }
+        // ntfscat exposes the MFT after native USA fixups, not raw sector tails.
+        for record in actual.chunks_exact_mut(1024) {
+            let usa = usize::from(u16::from_le_bytes([record[4], record[5]]));
+            for sector in 1..=2 {
+                let saved = [record[usa + sector * 2], record[usa + sector * 2 + 1]];
+                record[sector * 512 - 2..sector * 512].copy_from_slice(&saved);
+            }
+        }
+        assert!(
+            actual == expected,
+            "complete USA-normalized native MFT bytes"
+        );
+    }
+    assert_eq!(r.memory.used(), 0);
+    // Independent native record offsets: the known first MFT extent contains slot16.
+    let cluster = usize::from(u16::from_le_bytes([source.bytes[11], source.bytes[12]]))
+        * usize::from(source.bytes[13]);
+    let mft_cluster = u64::from_le_bytes(source.bytes[48..56].try_into().unwrap());
+    let extension = mft_cluster as usize * cluster + 16 * 1024;
+    let mut data = extension
+        + usize::from(u16::from_le_bytes(
+            source.bytes[extension + 20..extension + 22]
+                .try_into()
+                .unwrap(),
+        ));
+    while u32::from_le_bytes(source.bytes[data..data + 4].try_into().unwrap()) != 0x80 {
+        let length =
+            u32::from_le_bytes(source.bytes[data + 4..data + 8].try_into().unwrap()) as usize;
+        assert!(length >= 24);
+        data += length;
+        assert!(data < extension + 1024);
+    }
+    let pairs = data
+        + usize::from(u16::from_le_bytes(
+            source.bytes[data + 32..data + 34].try_into().unwrap(),
+        ));
+    assert_eq!(source.bytes[pairs], 0x11);
+    for (case, kind) in [
+        (0, ErrorKind::StalePlan),
+        (1, ErrorKind::InvalidData),
+        (2, ErrorKind::InvalidData),
+        (3, ErrorKind::InvalidData),
+    ] {
+        let mut malformed = source.bytes.clone();
+        match case {
+            0 => w(&mut malformed, extension + 16, 2),
+            1 => q(&mut malformed, extension + 32, (1 << 48) | 1),
+            2 => q(&mut malformed, data + 16, 7),
+            3 => malformed[pairs + 2] = mft_cluster as u8,
+            _ => unreachable!(),
+        }
+        let error = NtfsVolume::open_stream_profile(
+            Arc::new(Image::new(malformed)),
+            limits(),
+            stream_limits(),
+            &r,
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.kind, kind, "native malformed extension case {case}");
+        assert_eq!(r.memory.used(), 0);
+    }
+}

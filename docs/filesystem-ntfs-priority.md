@@ -8,7 +8,7 @@ decoders from volume capture and native Windows qualification.
 
 | Area | Current checkpoint | Required next evidence |
 | --- | --- | --- |
-| USN | Public `fs_ntfs_usn` borrowed V2/V3 decoder; ten focused tests, fmt and strict Clippy pass; independent 1,024-record synthetic fixture reproduces exactly | Native journal extraction, sparse/rolled-over stream handling, source binding, timelines and Windows fixtures |
+| USN | Borrowed V2/V3 decoder and source-bound selected `$J` extraction; sparse/unwritten/padding events, 13 focused tests and native named-stream comparison | Authenticated journal namespace, `$Max`/rollover handling, timelines and actual Windows journal fixtures |
 | Security descriptors | Public `fs_ntfs_security` preserves descriptor bytes, owner/group SIDs, ordered ACEs, unknown payloads and absent/null/present ACL distinctions; three focused tests and integrated strict Clippy pass | Volume-bound `$Secure` lookup and native descriptor comparisons, capture/restore/edit profiles |
 | `$Secure` | Bounded `$SII`/`$SDH` tree lookup, `$SDS` copy/hash validation and file-bound metadata capture integrated; native allocated-index gate independently passes for 514 descriptors | Extension-record security resolution and Windows restore/edit qualification |
 | Streams and metadata | Exact DATA/ADS enumeration/open and bounded attribute-list/extension resolution integrated; native attribute provenance and distinct SI/FILE_NAME timestamp views retained; 26 focused reader/audit/tree tests plus strict Clippy/fmt pass | MFT attribute-list bootstrap and complete resolved tree/audit paths; compression/encryption and complete capture |
@@ -92,7 +92,26 @@ is an explicit bounded MFT-bootstrap profile; the original constructor remains s
 extension-aware security under separate stream/security limits. Existing tree
 and ownership-audit completeness limits remain. The full-suite run at
 `/data/cache/partmgr-ntfs-acl-tree-integrated-fullhost-v1.log` was compiled before
-this import and is tracked as that earlier checkpoint.
+this import and completed with 660 passed, zero failed and 79 ignored across 80
+suites. Its adjacent JSON binds the log hash and historical scope. The current
+MFT/security production import's first full-suite run lost its handle and stopped
+without a terminal result; its partial log remains at
+`/data/cache/partmgr-ntfs-object-integrated-fullhost-v1.log` and is not counted as
+passed. A replacement uses fixed archived source and saves command exits and
+source/log hashes at `/data/cache/partmgr-ntfs-object-fullhost-v2/receipt.json`.
+Formatting and strict Clippy have passed; the full test command is still running.
+That fixed source predates the selected-USN extraction import, whose focused and
+native checks are recorded separately in [the USN documentation](filesystem-ntfs-usn.md).
+
+Native split-MFT reader evidence is now qualified separately at
+`/data/cache/partmgr-ntfs-mft-split-native-20261008-v3/verification.json`. Root
+independently verified all 96 archived artifact hashes and all production source
+bindings against the live code. The native generator creates base DATA VCNs 0..7
+and extension-record DATA VCNs 8..18; complete 66,560-byte MFT output matches both
+ntfscat and TSK icat after USA normalization. Sequence, parent, listed-VCN and
+physical-alias controls reject malformed mappings. The exact additive ignored
+native test is integrated; complete extension ownership and tree capture remain
+separate work.
 
 The full USN-integration host run is recorded separately at
 `/data/cache/partmgr-ntfs-usn-integrated-fullhost-v2.log`. It completed with exit

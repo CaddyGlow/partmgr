@@ -3,13 +3,16 @@
 //! Inventory is an explicit full-tree operation, separate from ordinary direct
 //! file access. It is not a global allocation audit. FAT native timestamp fields
 //! remain opaque; no metadata-preserving optical capture is claimed.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::Arc,
+};
 use crate::{
     fs_core::*,
     fs_fat::{FatEntry, FatVolume},
-};
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    sync::Arc,
 };
 
 struct Node {
@@ -301,7 +304,7 @@ impl TreeSource for FatTreeSource {
         let entry = self.node(object)?.entry.as_ref();
         Budgeted::try_new(
             &resources.memory,
-            std::mem::size_of::<StreamInfo>() as u64,
+            crate::platform::mem::size_of::<StreamInfo>() as u64,
             || {
                 Ok(match entry {
                     Some(entry) if !entry.is_directory() => vec![StreamInfo {

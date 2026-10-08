@@ -5,7 +5,10 @@ use crate::fs_apfs::{
     index::{self, TreeKind},
     u32le, u64le,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use crate::platform::collections::{BTreeMap, BTreeSet};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 #[path = "fs_apfs_edit_disk.rs"]
 mod disk;
 use disk::{d, q, seal, w};
@@ -928,7 +931,7 @@ impl<S: Storage> ApfsEditor<S> {
         // Canonical native runs preserve logical bytes while keeping contiguous
         // mappings bounded by run count rather than one catalog key per block.
         catalog.sort_by(|a, b| disk::compare(&a.0, &b.0));
-        let original_catalog = std::mem::take(&mut catalog);
+        let original_catalog = crate::platform::mem::take(&mut catalog);
         catalog
             .try_reserve_exact(original_catalog.len())
             .map_err(|_| budget("APFS native extent run index"))?;
@@ -1483,7 +1486,7 @@ impl<S: Storage> ApfsEditor<S> {
             q(cib, 16, next);
             seal(cib);
             q(&mut sm, address_offset + *ci * 8, cib_addr);
-            metadata.push((cib_addr, std::mem::take(cib)));
+            metadata.push((cib_addr, crate::platform::mem::take(cib)));
         }
         q(&mut sm, 16, next);
         q(&mut sm, 200, ip_count);
@@ -1599,8 +1602,8 @@ impl<S: Storage> ApfsEditor<S> {
             .metadata
             .iter()
             .chain(&plan.ephemeral)
-            .chain(std::iter::once(&plan.map))
-            .chain(std::iter::once(&plan.nx))
+            .chain(crate::platform::iter::once(&plan.map))
+            .chain(crate::platform::iter::once(&plan.nx))
         {
             let copied: [u8; BLOCK] = bytes
                 .as_slice()
@@ -1813,7 +1816,7 @@ impl<S: Storage> ApfsEditor<S> {
                 .flush()
                 .map_err(|e| Error::io("APFS COW ephemeral barrier", e))?;
             self.verify_blocks(&plan.ephemeral, r)?;
-            self.verify_blocks(std::slice::from_ref(&plan.map), r)?;
+            self.verify_blocks(crate::platform::slice::from_ref(&plan.map), r)?;
             plan.resources.cancellation.check()?;
             if self
                 .target
@@ -1830,14 +1833,14 @@ impl<S: Storage> ApfsEditor<S> {
             self.target
                 .flush()
                 .map_err(|e| Error::io("APFS COW checkpoint barrier", e))?;
-            self.verify_blocks(std::slice::from_ref(&plan.nx), r)?;
+            self.verify_blocks(crate::platform::slice::from_ref(&plan.nx), r)?;
             self.refresh_indexed(
                 plan.xid + 1,
                 &[
                     &plan.metadata,
                     &plan.ephemeral,
-                    std::slice::from_ref(&plan.map),
-                    std::slice::from_ref(&plan.nx),
+                    crate::platform::slice::from_ref(&plan.map),
+                    crate::platform::slice::from_ref(&plan.nx),
                 ],
                 &plan.payload,
                 r,

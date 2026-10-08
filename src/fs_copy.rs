@@ -3,6 +3,15 @@
 //! No metadata-preserving copy is advertised. The caller chooses name conversion
 //! and deterministic metadata replacement before planning. Unsupported object
 //! kinds, hard links and additional streams fail before any destination writes.
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashSet, VecDeque},
+    io,
+    sync::Arc,
+};
 use crate::{
     fs_core::*,
     fs_fat_builder::{
@@ -10,12 +19,6 @@ use crate::{
     },
     storage::Storage,
 };
-use std::{
-    collections::{HashSet, VecDeque},
-    io,
-    sync::Arc,
-};
-use virtdisk::ReadAt;
 
 /// Explicit interpretation of source byte names; exact UTF-16 names remain native.
 #[derive(Clone, Copy, Debug)]
@@ -252,7 +255,7 @@ pub(crate) fn native_name(name: &NativeName, policy: CopyNamePolicy) -> Result<V
             }
             match policy {
                 CopyNamePolicy::StrictUtf8 => collect(
-                    std::str::from_utf8(bytes)
+                    crate::platform::str::from_utf8(bytes)
                         .map_err(|_| {
                             Error::new(
                                 ErrorKind::Unsupported,

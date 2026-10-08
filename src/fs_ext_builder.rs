@@ -1,15 +1,18 @@
 //! Deterministic classic Linux ext2 authoring, exclusively for unpublished new images.
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashMap, HashSet},
+    io,
+    sync::Arc,
+};
 use crate::{
     fs_core::{Error, ErrorKind, FileRead, ObjectId, Reservation, Resources, Result},
     storage::Storage,
 };
 use sha2::{Digest, Sha256};
-use std::{
-    collections::{HashMap, HashSet},
-    io,
-    sync::Arc,
-};
-use virtdisk::ReadAt;
 /// Deferred caller-stabilized logical bytes. Sparse streams are materialized.
 #[derive(Clone)]
 pub enum ExtBuildSource {

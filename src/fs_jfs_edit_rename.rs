@@ -1,5 +1,8 @@
 //! Private operation-specific inline-directory rename transaction.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 pub(in super::super) struct Plan {
     base: Prepared,
     before: [u8; 512],
@@ -140,6 +143,7 @@ pub(in super::super) fn publish(
     )?);
     super::publish_inode_plan(storage, plan.base, &plan.before, &plan.after, original, r)
 }
+#[cfg(feature = "std")]
 #[test]
 fn bounded_owned_inline_rename_emits_native_redo_and_preserves_payload_and_native_identity() {
     use crate::fs_jfs::JfsReadLimits;
@@ -602,6 +606,7 @@ pub(in super::super) fn recover(
         r,
     )
 }
+#[cfg(feature = "std")]
 #[test]
 fn rename_all_program_and_barrier_cuts_cold_recover_four_persistence_profiles() {
     use crate::fs_jfs::JfsReadLimits;
@@ -725,6 +730,7 @@ fn rename_all_program_and_barrier_cuts_cold_recover_four_persistence_profiles() 
         "rename publication programs={programs} barriers={barriers} four persistence combinations with interrupted recovery passed"
     );
 }
+#[cfg(feature = "std")]
 #[test]
 fn rename_every_recovery_program_and_barrier_restarts_under_four_persistence_profiles() {
     use crate::fs_jfs::JfsReadLimits;
@@ -828,6 +834,7 @@ fn rename_every_recovery_program_and_barrier_restarts_under_four_persistence_pro
         }
     }
 }
+#[cfg(feature = "std")]
 #[test]
 fn native_valid_but_semantically_invalid_rename_records_refuse_all_mutation() {
     use crate::fs_jfs::JfsReadLimits;
@@ -944,6 +951,7 @@ fn native_valid_but_semantically_invalid_rename_records_refuse_all_mutation() {
     assert_eq!(lost.bytes, before);
     assert_eq!(r.memory.used(), 0);
 }
+#[cfg(feature = "std")]
 #[test]
 fn rename_caps_cancellation_causal_read_errors_and_stale_native_bytes_are_prewrite() {
     use crate::fs_jfs::JfsReadLimits;
@@ -1022,21 +1030,21 @@ fn rename_caps_cancellation_causal_read_errors_and_stale_native_bytes_are_prewri
         inner: super::super::CowTestBackend,
     }
     impl crate::storage::Storage for Reads {
-        fn len(&self) -> std::io::Result<u64> {
+        fn len(&self) -> crate::platform::io::Result<u64> {
             crate::storage::Storage::len(&self.inner)
         }
-        fn read_exact_at(&self, at: u64, b: &mut [u8]) -> std::io::Result<()> {
+        fn read_exact_at(&self, at: u64, b: &mut [u8]) -> crate::platform::io::Result<()> {
             if at == 32768 {
-                return Err(std::io::Error::other(
+                return Err(crate::platform::io::Error::other(
                     "namespace causal metadata interruption",
                 ));
             }
             crate::storage::Storage::read_exact_at(&self.inner, at, b)
         }
-        fn write_at(&mut self, at: u64, b: &[u8]) -> std::io::Result<usize> {
+        fn write_at(&mut self, at: u64, b: &[u8]) -> crate::platform::io::Result<usize> {
             crate::storage::Storage::write_at(&mut self.inner, at, b)
         }
-        fn flush(&mut self) -> std::io::Result<()> {
+        fn flush(&mut self) -> crate::platform::io::Result<()> {
             crate::storage::Storage::flush(&mut self.inner)
         }
     }
@@ -1055,6 +1063,7 @@ fn rename_caps_cancellation_causal_read_errors_and_stale_native_bytes_are_prewri
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn owned_rename_session_stays_uncertain_through_cancelled_recovery_and_blocks_fresh_operations() {
     use crate::fs_jfs::JfsReadLimits;
@@ -1128,6 +1137,7 @@ fn owned_rename_session_stays_uncertain_through_cancelled_recovery_and_blocks_fr
     drop(tree);
     assert_eq!(r.memory.used(), 0);
 }
+#[cfg(feature = "std")]
 #[test]
 fn rename_native_checkpoint_log_end_word_torn_at_each_byte_recovers_without_guessing_home() {
     use crate::fs_jfs::JfsReadLimits;
@@ -1158,24 +1168,26 @@ fn rename_native_checkpoint_log_end_word_torn_at_each_byte_recovers_without_gues
         cut: Option<usize>,
     }
     impl crate::storage::Storage for EndWord {
-        fn len(&self) -> std::io::Result<u64> {
+        fn len(&self) -> crate::platform::io::Result<u64> {
             crate::storage::Storage::len(&self.inner)
         }
-        fn read_exact_at(&self, at: u64, b: &mut [u8]) -> std::io::Result<()> {
+        fn read_exact_at(&self, at: u64, b: &mut [u8]) -> crate::platform::io::Result<()> {
             crate::storage::Storage::read_exact_at(&self.inner, at, b)
         }
-        fn write_at(&mut self, at: u64, b: &[u8]) -> std::io::Result<usize> {
+        fn write_at(&mut self, at: u64, b: &[u8]) -> crate::platform::io::Result<usize> {
             if at == 483 * 4096
                 && b.get(28) == Some(&1)
                 && let Some(cut) = self.cut.take()
             {
                 self.inner.writes += 1;
                 self.inner.bytes[at as usize..at as usize + cut].copy_from_slice(&b[..cut]);
-                return Err(std::io::Error::other("native log-end word interrupted"));
+                return Err(crate::platform::io::Error::other(
+                    "native log-end word interrupted",
+                ));
             }
             crate::storage::Storage::write_at(&mut self.inner, at, b)
         }
-        fn flush(&mut self) -> std::io::Result<()> {
+        fn flush(&mut self) -> crate::platform::io::Result<()> {
             crate::storage::Storage::flush(&mut self.inner)
         }
     }

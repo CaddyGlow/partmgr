@@ -1,7 +1,10 @@
 //! Bounded native Windows self-relative security descriptor inspection.
 //! Structural parsing does not evaluate access, resolve accounts, or grant restore authority.
 use crate::fs_core::*;
-use std::ops::Range;
+use crate::platform::ops::Range;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 /// Explicit descriptor-byte, total ACE and structural-work ceilings.
 #[derive(Clone, Copy, Debug)]

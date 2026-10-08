@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{fs_apfs::*, fs_apfs_audit::*, fs_apfs_edit::*, fs_core::*, storage::Storage};
 use std::{
     io,

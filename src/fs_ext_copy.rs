@@ -1,4 +1,11 @@
 //! Deferred common-tree capture into unpublished classic ext2 with preserved hardlinks.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 use crate::{
     fs_copy::{CopyLimits, FileInput, MetadataOutcome},
     fs_copy::{CopyPages, MetadataStatus, visit_metadata_fields},
@@ -8,10 +15,6 @@ use crate::{
         ExtBuildPlan, ExtBuildReport, ExtBuildSource,
     },
     storage::Storage,
-};
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
 };
 /// Explicit native name conversion policy.
 #[derive(Clone, Copy, Debug)]

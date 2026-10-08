@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, Resources, StreamKind, TreeSource},
     fs_ntfs::{NtfsDirectoryLimits, NtfsReadLimits, NtfsVolume},

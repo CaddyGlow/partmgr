@@ -1,6 +1,9 @@
 //! HFS+ native-state and external-undo persistence cuts.
 use super::*;
-use std::sync::{Arc, Mutex};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::sync::{Arc, Mutex};
 #[derive(Default)]
 pub(crate) struct Clock {
     pub(crate) events: usize,
@@ -79,11 +82,12 @@ impl Storage for Model {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn every_native_range_commit_cut_cold_recovers_exact_image() {
     commit_cuts(None);
 }
-fn commit_cuts(native: Option<&std::path::Path>) {
+fn commit_cuts(native: Option<&crate::platform::path::Path>) {
     let limits = Limits {
         pages: 256,
         attempts: 257,
@@ -117,7 +121,7 @@ fn commit_cuts(native: Option<&std::path::Path>) {
     for binary in [false, true] {
         let label = if binary { "hfsx" } else { "hfsplus" };
         let original = if native.is_some() {
-            std::fs::read(format!(
+            crate::platform::fs::read(format!(
                 "/data/cache/partmgr-hfsplus-public-builder-native-v2/{label}-source.img"
             ))
             .unwrap()
@@ -215,13 +219,21 @@ fn commit_cuts(native: Option<&std::path::Path>) {
                     u8::from(retain_journal)
                 );
                 let image = output.join(format!("{stem}.img"));
-                std::fs::write(&image, &target.bytes).unwrap();
-                let check=std::process::Command::new("/nix/store/kvh9g90h1506i4q3ah4mf7v23f5agvr8-hfsprogs-627.40.1-linux/bin/fsck.hfsplus").arg("-fn").arg(&image).output().unwrap();
-                std::fs::write(output.join(format!("{stem}-fsck.stdout")), &check.stdout).unwrap();
-                std::fs::write(output.join(format!("{stem}-fsck.stderr")), &check.stderr).unwrap();
+                crate::platform::fs::write(&image, &target.bytes).unwrap();
+                let check=crate::platform::process::Command::new("/nix/store/kvh9g90h1506i4q3ah4mf7v23f5agvr8-hfsprogs-627.40.1-linux/bin/fsck.hfsplus").arg("-fn").arg(&image).output().unwrap();
+                crate::platform::fs::write(
+                    output.join(format!("{stem}-fsck.stdout")),
+                    &check.stdout,
+                )
+                .unwrap();
+                crate::platform::fs::write(
+                    output.join(format!("{stem}-fsck.stderr")),
+                    &check.stderr,
+                )
+                .unwrap();
                 assert!(check.status.success(), "{stem}: {check:?}");
                 assert!(String::from_utf8_lossy(&check.stdout).contains("appears to be OK"));
-                let cat = std::process::Command::new(
+                let cat = crate::platform::process::Command::new(
                     "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat",
                 )
                 .args(["-f", "hfs"])
@@ -235,8 +247,9 @@ fn commit_cuts(native: Option<&std::path::Path>) {
                     payload[3..8].fill(0x5a);
                 }
                 assert_eq!(cat.stdout, payload, "{stem}");
-                std::fs::write(output.join(format!("{stem}-icat.stdout")), cat.stdout).unwrap();
-                assert_eq!(std::fs::read(image).unwrap(), target.bytes);
+                crate::platform::fs::write(output.join(format!("{stem}-icat.stdout")), cat.stdout)
+                    .unwrap();
+                assert_eq!(crate::platform::fs::read(image).unwrap(), target.bytes);
             }
             events
         };
@@ -251,11 +264,12 @@ fn commit_cuts(native: Option<&std::path::Path>) {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn every_native_rollback_cut_retries_from_cold_state() {
     rollback_cuts(None);
 }
-fn rollback_cuts(native: Option<&std::path::Path>) {
+fn rollback_cuts(native: Option<&crate::platform::path::Path>) {
     let limits = Limits {
         pages: 256,
         attempts: 257,
@@ -289,7 +303,7 @@ fn rollback_cuts(native: Option<&std::path::Path>) {
     for binary in [false, true] {
         let label = if binary { "hfsx" } else { "hfsplus" };
         let original = if native.is_some() {
-            std::fs::read(format!(
+            crate::platform::fs::read(format!(
                 "/data/cache/partmgr-hfsplus-public-builder-native-v2/{label}-source.img"
             ))
             .unwrap()
@@ -383,13 +397,21 @@ fn rollback_cuts(native: Option<&std::path::Path>) {
                     u8::from(keep_journal)
                 );
                 let image = output.join(format!("{stem}.img"));
-                std::fs::write(&image, &target.bytes).unwrap();
-                let check=std::process::Command::new("/nix/store/kvh9g90h1506i4q3ah4mf7v23f5agvr8-hfsprogs-627.40.1-linux/bin/fsck.hfsplus").arg("-fn").arg(&image).output().unwrap();
-                std::fs::write(output.join(format!("{stem}-fsck.stdout")), &check.stdout).unwrap();
-                std::fs::write(output.join(format!("{stem}-fsck.stderr")), &check.stderr).unwrap();
+                crate::platform::fs::write(&image, &target.bytes).unwrap();
+                let check=crate::platform::process::Command::new("/nix/store/kvh9g90h1506i4q3ah4mf7v23f5agvr8-hfsprogs-627.40.1-linux/bin/fsck.hfsplus").arg("-fn").arg(&image).output().unwrap();
+                crate::platform::fs::write(
+                    output.join(format!("{stem}-fsck.stdout")),
+                    &check.stdout,
+                )
+                .unwrap();
+                crate::platform::fs::write(
+                    output.join(format!("{stem}-fsck.stderr")),
+                    &check.stderr,
+                )
+                .unwrap();
                 assert!(check.status.success(), "{stem}: {check:?}");
                 assert!(String::from_utf8_lossy(&check.stdout).contains("appears to be OK"));
-                let cat = std::process::Command::new(
+                let cat = crate::platform::process::Command::new(
                     "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat",
                 )
                 .args(["-f", "hfs"])
@@ -399,8 +421,9 @@ fn rollback_cuts(native: Option<&std::path::Path>) {
                 .unwrap();
                 assert!(cat.status.success());
                 assert_eq!(cat.stdout, b"typed metadata payload");
-                std::fs::write(output.join(format!("{stem}-icat.stdout")), cat.stdout).unwrap();
-                assert_eq!(std::fs::read(image).unwrap(), original);
+                crate::platform::fs::write(output.join(format!("{stem}-icat.stdout")), cat.stdout)
+                    .unwrap();
+                assert_eq!(crate::platform::fs::read(image).unwrap(), original);
             }
             events
         };
@@ -416,27 +439,31 @@ fn rollback_cuts(native: Option<&std::path::Path>) {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit HFS+ native commit persistence-cut gate"]
 fn native_commit_cuts_fsck_and_full_payload() {
-    let output = std::path::PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_CUT_EVIDENCE").expect("fresh output required"),
+    let output = crate::platform::path::PathBuf::from(
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_CUT_EVIDENCE")
+            .expect("fresh output required"),
     );
     assert!(!output.exists());
-    std::fs::create_dir(&output).unwrap();
+    crate::platform::fs::create_dir(&output).unwrap();
     commit_cuts(Some(&output));
-    std::fs::write(output.join("receipt.txt"),"status=passed;scope=all modeled commit writes/barriers;four persistence combinations;HFSplus and HFSX;native fsck/full TSK payload;macOS/public editor open\n").unwrap();
+    crate::platform::fs::write(output.join("receipt.txt"),"status=passed;scope=all modeled commit writes/barriers;four persistence combinations;HFSplus and HFSX;native fsck/full TSK payload;macOS/public editor open\n").unwrap();
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit HFS+ native rollback persistence-cut gate"]
 fn native_rollback_cuts_fsck_and_full_payload() {
-    let output = std::path::PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_ROLLBACK_EVIDENCE").expect("fresh output required"),
+    let output = crate::platform::path::PathBuf::from(
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_ROLLBACK_EVIDENCE")
+            .expect("fresh output required"),
     );
     assert!(!output.exists());
-    std::fs::create_dir(&output).unwrap();
+    crate::platform::fs::create_dir(&output).unwrap();
     rollback_cuts(Some(&output));
-    std::fs::write(output.join("receipt.txt"),"status=passed;scope=all modeled rollback writes/barriers;four persistence combinations;HFSplus and HFSX;native fsck/full TSK payload;macOS/public editor open\n").unwrap();
+    crate::platform::fs::write(output.join("receipt.txt"),"status=passed;scope=all modeled rollback writes/barriers;four persistence combinations;HFSplus and HFSX;native fsck/full TSK payload;macOS/public editor open\n").unwrap();
 }

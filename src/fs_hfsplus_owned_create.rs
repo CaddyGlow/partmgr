@@ -1,6 +1,9 @@
 //! Private empty-object birth preparation with explicit native metadata.
 use super::super::super::metadata_builder::{self, CatalogMetadata};
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 #[derive(Clone, Copy)]
 pub(crate) struct CreateRequest<'a> {
     pub(crate) parent: &'a [NativeName],
@@ -16,7 +19,7 @@ impl<S: Storage> Prepared<S> {
         binding: UndoBinding,
         undo: UndoLimits,
         r: &Resources,
-    ) -> std::result::Result<Self, RenameFailure<S>> {
+    ) -> crate::platform::result::Result<Self, RenameFailure<S>> {
         let plan = self.plan_create_entry(request, r);
         self.commit_catalog_plan(plan, journal, binding, undo, r)
     }
@@ -224,7 +227,7 @@ pub(crate) fn recover_create_entry(
     limits: Limits,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     let proof = (|| -> Result<_> {
         let length = target
             .len()
@@ -277,10 +280,11 @@ pub(crate) fn recover_create_entry(
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn typed_empty_file_directory_creation_preparation_no_writes() {
     use super::super::transaction::recovery::cuts::{Clock, Model};
-    use std::sync::{Arc, Mutex};
+    use crate::platform::sync::{Arc, Mutex};
     for binary in [false, true] {
         for directory in [false, true] {
             let r = Resources {
@@ -544,14 +548,15 @@ fn typed_empty_file_directory_creation_preparation_no_writes() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn every_creation_commit_cut_cold_recovers_exact_image() {
     creation_commit_cuts(None, false);
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn creation_commit_cuts(native: Option<&CreationNativeCuts>, populated: bool) {
     use super::super::transaction::recovery::cuts::{Clock, Model};
-    use std::sync::{Arc, Mutex};
+    use crate::platform::sync::{Arc, Mutex};
     let limits = Limits {
         pages: 256,
         attempts: 257,
@@ -687,14 +692,15 @@ fn creation_commit_cuts(native: Option<&CreationNativeCuts>, populated: bool) {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn every_creation_rollback_cut_second_restart_restores_original() {
     creation_rollback_cuts(None, false);
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn creation_rollback_cuts(native: Option<&CreationNativeCuts>, populated: bool) {
     use super::super::transaction::recovery::cuts::{Clock, Model};
-    use std::sync::{Arc, Mutex};
+    use crate::platform::sync::{Arc, Mutex};
     let limits = Limits {
         pages: 256,
         attempts: 257,
@@ -871,18 +877,20 @@ fn creation_rollback_cuts(native: Option<&CreationNativeCuts>, populated: bool) 
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native empty-object creation gate"]
 fn native_empty_object_creation_namespace() {
     use super::super::transaction::recovery::cuts::{Clock, Model};
-    use std::{
+    use crate::platform::{
         fs,
         path::PathBuf,
         process::Command,
         sync::{Arc, Mutex},
     };
     let output = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_CREATE_EVIDENCE").expect("fresh evidence required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_CREATE_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
     fs::create_dir(&output).unwrap();
@@ -891,7 +899,7 @@ fn native_empty_object_creation_namespace() {
     let fls = "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/fls";
     let icat = "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat";
     let istat = "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/istat";
-    let extract = |image: &std::path::Path| {
+    let extract = |image: &crate::platform::path::Path| {
         let result = Command::new(icat)
             .args(["-f", "hfs"])
             .arg(image)
@@ -1080,23 +1088,23 @@ fn native_empty_object_creation_namespace() {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 struct CreationNativeCuts {
     populated: bool,
-    output: std::path::PathBuf,
-    count: std::cell::Cell<usize>,
+    output: crate::platform::path::PathBuf,
+    count: crate::platform::cell::Cell<usize>,
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 impl CreationNativeCuts {
     fn source(&self, binary: bool) -> Vec<u8> {
-        std::fs::read(format!(
+        crate::platform::fs::read(format!(
             "/data/cache/partmgr-hfsplus-public-builder-native-v2/{}-source.img",
             if binary { "hfsx" } else { "hfsplus" }
         ))
         .unwrap()
     }
     fn check(&self, binary: bool, directory: bool, bytes: &[u8]) {
-        use std::{fs, process::Command};
+        use crate::platform::{fs, process::Command};
         let n = self.count.get();
         self.count.set(n + 1);
         let stem = format!("{n}-{binary}-{directory}");
@@ -1122,7 +1130,7 @@ impl CreationNativeCuts {
         assert!(check.status.success(), "{stem}: {check:?}");
         assert!(String::from_utf8_lossy(&check.stdout).contains("appears to be OK"));
         let toolroot = "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin";
-        let data = |path: &std::path::Path| {
+        let data = |path: &crate::platform::path::Path| {
             let result = Command::new(format!("{toolroot}/icat"))
                 .args(["-f", "hfs"])
                 .arg(path)
@@ -1132,7 +1140,7 @@ impl CreationNativeCuts {
             assert!(result.status.success());
             result.stdout
         };
-        let source = std::path::PathBuf::from(format!(
+        let source = crate::platform::path::PathBuf::from(format!(
             "/data/cache/partmgr-hfsplus-public-builder-native-v2/{}-source.img",
             if binary { "hfsx" } else { "hfsplus" }
         ));
@@ -1186,29 +1194,31 @@ impl CreationNativeCuts {
     }
 }
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native creation all-position commit and rollback gate"]
 fn native_all_creation_commit_and_rollback_cuts() {
-    let output = std::path::PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_CREATE_CUT_EVIDENCE").expect("fresh evidence required"),
+    let output = crate::platform::path::PathBuf::from(
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_CREATE_CUT_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
-    std::fs::create_dir(&output).unwrap();
+    crate::platform::fs::create_dir(&output).unwrap();
     let gate = CreationNativeCuts {
         populated: false,
         output,
-        count: std::cell::Cell::new(0),
+        count: crate::platform::cell::Cell::new(0),
     };
     creation_commit_cuts(Some(&gate), false);
     creation_rollback_cuts(Some(&gate), false);
-    std::fs::write(
+    crate::platform::fs::write(
         gate.output.join("receipt.txt"),
         format!("resolved_images={}\n", gate.count.get()),
     )
     .unwrap();
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn public_create_limits(
     limits: Limits,
     undo: UndoLimits,
@@ -1223,7 +1233,7 @@ fn public_create_limits(
         undo,
     }
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn commit_public_create<S: Storage>(
     prepared: Prepared<S>,
     request: CreateRequest<'_>,
@@ -1231,7 +1241,7 @@ fn commit_public_create<S: Storage>(
     binding: UndoBinding,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<Prepared<S>, RenameFailure<S>> {
+) -> crate::platform::result::Result<Prepared<S>, RenameFailure<S>> {
     use crate::fs_hfsplus::edit::{HfsPlusCreateRequest, HfsPlusEditSession};
     let limits = prepared.limits;
     let session = HfsPlusEditSession::open(
@@ -1258,7 +1268,7 @@ fn commit_public_create<S: Storage>(
         }),
     }
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn recover_public_create(
     target: &mut dyn Storage,
     journal: &mut dyn Storage,
@@ -1267,7 +1277,7 @@ fn recover_public_create(
     limits: Limits,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     crate::fs_hfsplus::edit::recover_create(
         target,
         journal,
@@ -1487,7 +1497,7 @@ pub(crate) fn recover_populated_birth(
     limits: Limits,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     let proof = (|| -> Result<_> {
         let length = target
             .len()
@@ -1548,16 +1558,17 @@ impl<S: Storage> Prepared<S> {
         binding: UndoBinding,
         undo: UndoLimits,
         r: &Resources,
-    ) -> std::result::Result<Self, RenameFailure<S>> {
+    ) -> crate::platform::result::Result<Self, RenameFailure<S>> {
         let plan = self.plan_populated_birth(request.0, request.1, request.2, r);
         self.commit_catalog_plan(plan, journal, binding, undo, r)
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn populated_birth_commit_and_cold_recovery_both_forks() {
     use super::super::transaction::recovery::cuts::{Clock, Model};
-    use std::sync::{Arc, Mutex};
+    use crate::platform::sync::{Arc, Mutex};
     let limits = Limits {
         pages: 256,
         attempts: 257,
@@ -1685,12 +1696,13 @@ fn populated_birth_commit_and_cold_recovery_both_forks() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn every_populated_birth_commit_and_rollback_cut_recovers() {
     creation_commit_cuts(None, true);
     creation_rollback_cuts(None, true);
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn commit_creation_case<S: Storage>(
     prepared: Prepared<S>,
     request: BirthSelection<'_>,
@@ -1698,7 +1710,7 @@ fn commit_creation_case<S: Storage>(
     binding: UndoBinding,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<Prepared<S>, RenameFailure<S>> {
+) -> crate::platform::result::Result<Prepared<S>, RenameFailure<S>> {
     match request.1 {
         Some((data, resource)) => {
             use crate::fs_hfsplus::edit::{HfsPlusCreateFileRequest, HfsPlusEditSession};
@@ -1731,7 +1743,7 @@ fn commit_creation_case<S: Storage>(
         None => commit_public_create(prepared, request.0, journal, binding, undo, r),
     }
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn recover_creation_case(
     target: &mut dyn Storage,
     journal: &mut dyn Storage,
@@ -1740,7 +1752,7 @@ fn recover_creation_case(
     limits: Limits,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     match request.1 {
         Some((data, resource)) => crate::fs_hfsplus::edit::recover_create_file(
             target,
@@ -1760,26 +1772,28 @@ fn recover_creation_case(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 type BirthSelection<'a> = (CreateRequest<'a>, Option<(&'a [u8], &'a [u8])>);
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native populated creation all-position gate"]
 fn native_all_populated_birth_commit_and_rollback_cuts() {
-    let output = std::path::PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_CREATE_CUT_EVIDENCE").expect("fresh evidence required"),
+    let output = crate::platform::path::PathBuf::from(
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_CREATE_CUT_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
-    std::fs::create_dir(&output).unwrap();
+    crate::platform::fs::create_dir(&output).unwrap();
     let gate = CreationNativeCuts {
         populated: true,
         output,
-        count: std::cell::Cell::new(0),
+        count: crate::platform::cell::Cell::new(0),
     };
     creation_commit_cuts(Some(&gate), true);
     creation_rollback_cuts(Some(&gate), true);
-    std::fs::write(
+    crate::platform::fs::write(
         gate.output.join("receipt.txt"),
         format!("resolved_images={}\n", gate.count.get()),
     )

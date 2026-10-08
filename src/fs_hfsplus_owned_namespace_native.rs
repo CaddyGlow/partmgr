@@ -1,8 +1,11 @@
 //! Native same-parent file/directory rename and cold recovery qualification.
 use super::*;
 use crate::fs_hfsplus::edit::{HfsPlusEditLimits, HfsPlusEditSession, HfsPlusRenameRequest};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
 use sha2::{Digest, Sha256};
-use std::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
 struct FileStore(fs::File);
 impl Storage for FileStore {
     fn len(&self) -> io::Result<u64> {
@@ -42,7 +45,7 @@ impl Storage for Stop {
         self.store.flush()
     }
 }
-fn store(path: &std::path::Path) -> FileStore {
+fn store(path: &crate::platform::path::Path) -> FileStore {
     FileStore(
         fs::OpenOptions::new()
             .read(true)
@@ -52,11 +55,13 @@ fn store(path: &std::path::Path) -> FileStore {
     )
 }
 
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit fresh native HFS+ rename namespace/fork recovery gate"]
 fn native_rename_namespace_forks_and_cold_recovery() {
     let output = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_RENAME_EVIDENCE").expect("fresh evidence required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_RENAME_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
     fs::create_dir(&output).unwrap();
@@ -104,7 +109,7 @@ fn native_rename_namespace_forks_and_cold_recovery() {
             let original = fs::read(&source).unwrap();
             let hash = Sha256::digest(&original);
             let cnid = if directory { "17" } else { "16" };
-            let extract = |image: &std::path::Path, resource: bool| {
+            let extract = |image: &crate::platform::path::Path, resource: bool| {
                 let address = if resource {
                     format!("{cnid}-4353-1")
                 } else {

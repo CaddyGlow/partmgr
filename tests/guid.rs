@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::guid::{EFI_SYSTEM_PARTITION, GptAttributes, GptName, Guid, MICROSOFT_BASIC_DATA};
 #[test]
 fn independent_guid_vector() {

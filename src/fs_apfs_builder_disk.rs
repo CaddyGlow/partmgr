@@ -4,6 +4,9 @@ pub(super) use crate::fs_apfs_disk::{
     BLOCK, NodeFields, budget, compare, d, invalid, object, q, seal, w, zero,
 };
 use crate::fs_core::Result;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 pub(super) type Records = Vec<(Vec<u8>, Vec<u8>)>;
 pub(super) fn key(id: u64, kind: u64) -> Vec<u8> {
     ((kind << 60) | id).to_le_bytes().to_vec()

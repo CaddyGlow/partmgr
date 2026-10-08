@@ -1,5 +1,8 @@
 //! Private native transaction lifecycle; caller plans typed filesystem operations.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{fs_ext_audit::ExtAuditLimits, storage::Storage};
 
 pub(crate) fn commit(
@@ -55,7 +58,7 @@ pub(crate) fn commit(
         .memory
         .reserve(
             candidate_count
-                .checked_mul(std::mem::size_of::<ReplayBlock>())
+                .checked_mul(crate::platform::mem::size_of::<ReplayBlock>())
                 .ok_or_else(|| budget("native candidate reservation overflow"))? as u64,
         )
         .map_err(io::Error::other)?;

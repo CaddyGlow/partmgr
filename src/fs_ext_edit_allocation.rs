@@ -1,7 +1,10 @@
 //! Audited classic bitmap and direct/indirect allocation planning.
 use super::*;
+use crate::platform::collections::BTreeMap;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{fs_core::FileRead, fs_file::ExtentKind, storage::WriteRange};
-use std::collections::BTreeMap;
 fn budget(message: &str) -> Error {
     Error::new(ErrorKind::BudgetExhausted, message)
 }
@@ -105,7 +108,7 @@ impl<'a> Planner<'a> {
             .and_then(|n| {
                 n.checked_add(
                     u64::from(editor.limits.undo.patches)
-                        * (4 * std::mem::size_of::<WriteRange>() as u64 + 96),
+                        * (4 * crate::platform::mem::size_of::<WriteRange>() as u64 + 96),
                 )
             })
             .and_then(|n| n.checked_add(2048))
@@ -311,14 +314,14 @@ impl<'a> Planner<'a> {
         generation: u64,
         report: Option<ExtResizeReport>,
     ) -> Result<ExtEditBatch> {
-        let edits = std::mem::take(&mut self.edits);
+        let edits = crate::platform::mem::take(&mut self.edits);
         let mut run = Vec::new();
         let mut at = 0;
         let mut phase = Phase::Publish;
         for (position, (byte, next_phase)) in edits {
             self.tick(1)?;
             if !run.is_empty() && (position != at + run.len() as u64 || next_phase != phase) {
-                let data = std::mem::take(&mut run);
+                let data = crate::platform::mem::take(&mut run);
                 self.patch(at, data, phase)?;
             }
             if run.is_empty() {
@@ -977,7 +980,7 @@ impl PlanningContext<'_> {
         }
         Ok(())
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub(crate) fn file_handle(&self, number: u32, r: &Resources) -> Result<ExtEditFile> {
         self.ready(r)?;
         let metadata = r.memory.reserve(512)?;
@@ -1006,7 +1009,7 @@ impl PlanningContext<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 impl<'a> PlanningContext<'a> {
     // The native owner supplies its current borrowed decoder geometry and complete audit.
     // This context has no write authority, owns no source, and cannot outlive either proof.

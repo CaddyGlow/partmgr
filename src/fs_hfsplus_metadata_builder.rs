@@ -1,6 +1,9 @@
 //! Typed catalog metadata authoring; opaque catalog bytes are never transplanted.
 use super::bad;
 use crate::fs_core::{Metadata, MetadataField, NativeName, Result};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 /// Dates are native unsigned seconds since 1904-01-01 00:00:00 GMT.
 #[derive(Clone, Copy, Debug)]

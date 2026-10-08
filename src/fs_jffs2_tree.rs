@@ -1,10 +1,13 @@
 //! Exact-byte JFFS2 tree source with unfollowed symlink metadata and deferred file data.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::sync::Arc;
 use crate::{
     fs_core::*,
     fs_jffs2::{Jffs2Volume, budget, copy, invalid},
     fs_jffs2_audit::{Jffs2AuditLimits, Jffs2AuditReport, audit},
 };
-use std::sync::Arc;
 /// Reachable checked namespace retaining complete audit evidence and scan resources.
 pub struct Jffs2TreeSource {
     volume: Jffs2Volume,

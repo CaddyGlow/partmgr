@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, ObjectId, Resources},
     fs_exfat_audit::{ExfatAuditLimits, audit_exfat},

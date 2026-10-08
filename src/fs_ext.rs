@@ -1,16 +1,19 @@
 //! Strict immutable ext profiles with indexed classic or extent maps and byte names.
 //! Unknown features and recovery-required states fail closed; ownership audits are explicit.
-use crate::{
-    fs_core::{self, FileRead, NativeName, ObjectId, Reservation, Resources},
-    fs_file::{ExtentFile, ExtentKind, FileExtent},
-    storage::Storage,
-};
-use std::{
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     io,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
+};
+use crate::{
+    fs_core::{self, FileRead, NativeName, ObjectId, Reservation, Resources},
+    fs_file::{ExtentFile, ExtentKind, FileExtent},
+    storage::Storage,
 };
 static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
 #[path = "fs_ext_checksum.rs"]
@@ -27,7 +30,7 @@ mod journal;
 // Native transaction codec is staged independently before owned-session wiring.
 #[path = "fs_ext_integrity.rs"]
 mod integrity;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[path = "fs_ext_jbd.rs"]
 mod jbd;
 #[path = "fs_ext_metadata.rs"]
@@ -38,7 +41,7 @@ mod modern;
 mod resize;
 #[path = "fs_ext_xattr.rs"]
 mod xattr;
-use virtdisk::{DiskView, ReadAt};
+use crate::io::{DiskView, ReadAt};
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
@@ -82,7 +85,7 @@ impl MetadataSource {
         resources.cancellation.check().map_err(io::Error::other)?;
         // Includes buffers, slot vector and conservative allocator bookkeeping.
         let charge = capacity
-            .checked_mul(block_bytes + std::mem::size_of::<CachedBlock>() + 64)
+            .checked_mul(block_bytes + crate::platform::mem::size_of::<CachedBlock>() + 64)
             .ok_or_else(|| invalid("ext metadata cache accounting overflow"))?;
         let reservation = resources
             .memory
@@ -792,7 +795,7 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
             // The decoder's maximum-capacity buffers are temporary validation
             // workspace. Retained files charge only their compact logical map.
             let charge = (decoded.map.len() as u64)
-                .checked_mul(std::mem::size_of::<FileExtent>() as u64)
+                .checked_mul(crate::platform::mem::size_of::<FileExtent>() as u64)
                 .and_then(|n| n.checked_add(512))
                 .ok_or_else(|| io::Error::other("ext retained map accounting overflow"))?;
             let reservation = resources.memory.reserve(charge).map_err(io::Error::other)?;
@@ -821,7 +824,7 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
             )));
         }
         let charge = count
-            .checked_mul((3 * std::mem::size_of::<FileExtent>() + 32) as u64)
+            .checked_mul((3 * crate::platform::mem::size_of::<FileExtent>() + 32) as u64)
             .and_then(|n| n.checked_add(68))
             .ok_or_else(|| io::Error::other("ext map accounting overflow"))?;
         let reservation = resources.memory.reserve(charge).map_err(io::Error::other)?;
@@ -977,7 +980,7 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
             None
         };
         let charge = (max_entries as u64)
-            .checked_mul((std::mem::size_of::<ExtEntry>() + 255) as u64)
+            .checked_mul((crate::platform::mem::size_of::<ExtEntry>() + 255) as u64)
             .ok_or_else(|| io::Error::other("ext directory accounting overflow"))?;
         let reservation = resources.memory.reserve(charge).map_err(io::Error::other)?;
         let _scratch = resources

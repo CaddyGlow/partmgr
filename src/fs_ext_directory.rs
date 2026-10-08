@@ -1,7 +1,10 @@
 //! Bounded checksum, topology and native hash-range validation for indexed directories.
 use super::{dir_hash, integrity::Integrity, invalid, u16le, u32le, unsupported};
 use crate::fs_core::{Reservation, Resources};
-use std::io;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct IndexNode {
     pub kind: u8, // 1=root, 2=index, 3=leaf.
@@ -56,12 +59,12 @@ pub(super) fn validate(
     queue.try_reserve_exact(blocks).map_err(io::Error::other)?;
     if nodes
         .capacity()
-        .checked_mul(std::mem::size_of::<IndexNode>())
+        .checked_mul(crate::platform::mem::size_of::<IndexNode>())
         .and_then(|bytes| {
             bytes.checked_add(
                 queue
                     .capacity()
-                    .checked_mul(std::mem::size_of::<(usize, u8)>())?,
+                    .checked_mul(crate::platform::mem::size_of::<(usize, u8)>())?,
             )
         })
         .and_then(|bytes| bytes.checked_add(4608))
@@ -227,7 +230,7 @@ pub(super) fn validate(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::super::metadata::MetadataChecksums;
     use super::*;
@@ -326,6 +329,7 @@ mod tests {
             },
         )
     }
+    #[cfg(feature = "std")]
     #[test]
     fn absent_checksum_native_index_capacity_topology_and_cancel() {
         // Raw native directory layout is assembled independently; no checksum
@@ -386,6 +390,7 @@ mod tests {
         assert_eq!(reads, 1);
         assert_eq!(resources.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn complete_index_rechecksummed_key_alias_cycle_and_leaf_defects_are_bounded() {
         let image = fixture();
@@ -418,6 +423,7 @@ mod tests {
         assert!(inspect(&image, &resources).is_err());
         assert_eq!(resources.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn internal_index_depth_collision_ranges_and_unreferenced_blocks() {
         let base = fixture();

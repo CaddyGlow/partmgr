@@ -1,6 +1,9 @@
 //! Fresh native allocation and B-tree layout, without a source image.
 use super::*;
-use std::collections::BTreeMap;
+use crate::platform::collections::BTreeMap;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 pub(super) struct Payload {
     pub input: usize,
     pub named: Option<usize>,
@@ -268,7 +271,7 @@ pub(super) fn construct(
     if o.volume_label.is_empty()
         || o.volume_label.len() > 255
         || o.volume_label.contains(&0)
-        || std::str::from_utf8(&o.volume_label).is_err()
+        || crate::platform::str::from_utf8(&o.volume_label).is_err()
     {
         return Err(invalid("APFS native volume label"));
     }

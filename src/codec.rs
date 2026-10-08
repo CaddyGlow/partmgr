@@ -1,10 +1,13 @@
 //! Deterministic supported metadata serialization and durability ordering.
 use crate::gpt::crc32;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     layout::{DiskLayout, GptLayout},
     storage::{Barrier, WritePlan, WriteRange},
 };
-use std::io;
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
@@ -126,7 +129,7 @@ pub fn edit_plan(old: &DiskLayout, proposed: &DiskLayout) -> io::Result<WritePla
 /// Until the final MBR barrier strict scheme discovery may see an old/empty MBR;
 /// after GPT backup durability, explicit recovery can select that valid copy.
 pub fn initialize_plan(
-    source: &dyn virtdisk::ReadAt,
+    source: &dyn crate::io::ReadAt,
     layout: &DiskLayout,
 ) -> io::Result<WritePlan> {
     let replacement = |offset: u64, mut bytes: Vec<u8>| -> io::Result<WriteRange> {
@@ -202,7 +205,7 @@ pub fn commit_and_inspect<S: crate::storage::Storage + Send + Sync>(
     sector_size: u32,
 ) -> Result<DiskLayout, crate::error::Error> {
     struct Reader<'a, S>(&'a S, u64);
-    impl<S: crate::storage::Storage + Send + Sync> virtdisk::ReadAt for Reader<'_, S> {
+    impl<S: crate::storage::Storage + Send + Sync> crate::io::ReadAt for Reader<'_, S> {
         fn len(&self) -> u64 {
             self.1
         }

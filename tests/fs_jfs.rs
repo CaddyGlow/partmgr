@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 #[path = "common/reader_contract.rs"]
 mod reader_contract;
 use partmgr::{fs_core::*, fs_jfs::*, fs_jfs_audit::*, fs_jfs_tree::*};

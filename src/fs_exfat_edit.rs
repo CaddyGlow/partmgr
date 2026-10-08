@@ -1,4 +1,11 @@
 //! Exclusive bounded exFAT sessions with disjoint external undo and native dirty fences.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    io,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use crate::{
     fs_core::{Error, ErrorKind, NativeName, ObjectId, Reservation, Resources, Result},
     fs_exfat::ExfatBoot,
@@ -6,10 +13,6 @@ use crate::{
     fs_exfat_volume::{ExfatDecoder, ExfatReadLimits, Mapping},
     fs_undo::{self, UndoBinding, UndoFailure, UndoLimits, UndoPlan, UndoState, UndoStatus},
     storage::{Storage, WriteRange},
-};
-use std::{
-    io,
-    sync::atomic::{AtomicU64, Ordering},
 };
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 #[path = "fs_exfat_edit_namespace.rs"]
@@ -628,7 +631,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
         } else {
             &clusters[needed as usize..]
         };
-        let mut edits = std::collections::BTreeMap::<u64, (u8, u8)>::new();
+        let mut edits = crate::platform::collections::BTreeMap::<u64, (u8, u8)>::new();
         for &c in changed {
             p.tick(1)?;
             let (at, mask) = decoder.bitmap_position(c)?;
@@ -637,8 +640,8 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
                 return Err(budget("exFAT bitmap patch limit"));
             }
             let e = match edits.entry(at) {
-                std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
-                std::collections::btree_map::Entry::Vacant(e) => {
+                crate::platform::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
+                crate::platform::collections::btree_map::Entry::Vacant(e) => {
                     let mut old = [0];
                     self.target.read_exact_at(at, &mut old).map_err(native)?;
                     e.insert((old[0], old[0]))
@@ -672,7 +675,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
         batch: ExfatEditBatch,
         transaction: [u8; 16],
         r: &Resources,
-    ) -> std::result::Result<UndoStatus, UndoFailure> {
+    ) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
         self.ready(r).map_err(failure)?;
         if batch.source != self.scope || batch.generation != self.generation {
             return Err(failure(Error::new(
@@ -752,7 +755,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
         binding: UndoBinding,
         limits: ExfatEditLimits,
         r: &Resources,
-    ) -> std::result::Result<Self, UndoFailure> {
+    ) -> crate::platform::result::Result<Self, UndoFailure> {
         let mut target = Self::region(store, region).map_err(recovery_failure)?;
         recover_guarded(&mut target, &mut journal, binding, limits, r)?;
         Self::inspected(
@@ -768,7 +771,10 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
         .map_err(recovery_failure)
     }
     /// Restore or verify the pending transaction before permitting further operations.
-    pub fn recover(&mut self, r: &Resources) -> std::result::Result<UndoStatus, UndoFailure> {
+    pub fn recover(
+        &mut self,
+        r: &Resources,
+    ) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
         let SessionState::NeedsRecovery {
             binding,
             target_may_have_changed,
@@ -1159,7 +1165,7 @@ fn recover_guarded(
     binding: UndoBinding,
     limits: ExfatEditLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     let _lease = r
         .memory
         .reserve(

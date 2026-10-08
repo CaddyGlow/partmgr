@@ -1,12 +1,15 @@
 //! Source-bound extraction of a caller-selected NTFS `$J` stream.
 //! Selection does not authenticate its namespace as `$Extend/$UsnJrnl`, establish
 //! snapshot stability, decode `$Max`, or infer journal completeness/replay.
+use crate::platform::fmt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_core::*,
     fs_ntfs::{NtfsFile, NtfsStreamLimits, NtfsVolume},
     fs_ntfs_usn::{self as usn, Provenance, RecordLimits, UsnRecord},
 };
-use std::fmt;
 
 /// Bounded extraction failure, retaining native decoder field provenance.
 #[derive(Debug)]
@@ -29,8 +32,8 @@ impl fmt::Display for ExtractError {
         }
     }
 }
-impl std::error::Error for ExtractError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for ExtractError {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         match self {
             Self::Core(error) => Some(error),
             Self::Decode(error) => Some(error),
@@ -38,7 +41,7 @@ impl std::error::Error for ExtractError {
     }
 }
 /// Extraction result with causal storage or precise native framing errors.
-pub type ExtractResult<T> = std::result::Result<T, ExtractError>;
+pub type ExtractResult<T> = crate::platform::result::Result<T, ExtractError>;
 
 /// Ceilings across one complete traversal; no collection of records is retained.
 #[derive(Clone, Copy, Debug)]
@@ -116,7 +119,7 @@ impl NtfsUsnReader {
             ));
         }
         let lease = r.memory.reserve(
-            (std::mem::size_of::<Self>() as u64)
+            (crate::platform::mem::size_of::<Self>() as u64)
                 .checked_add(owner.native.len() as u64)
                 .ok_or_else(|| failure(ErrorKind::BudgetExhausted, "USN identity charge"))?,
         )?;
@@ -161,7 +164,7 @@ impl NtfsUsnReader {
     ) -> ExtractResult<()> {
         r.cancellation.check()?;
         let charge = (self.limits.extents as u64)
-            .checked_mul(std::mem::size_of::<LogicalExtent>() as u64)
+            .checked_mul(crate::platform::mem::size_of::<LogicalExtent>() as u64)
             .and_then(|n| n.checked_add(self.limits.record.record_bytes as u64))
             .ok_or_else(|| failure(ErrorKind::BudgetExhausted, "USN traversal charge"))?;
         let _scratch = r.memory.reserve(charge)?;

@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{fs_core::*, fs_ntfs::*, fs_ntfs_security::*};
 use std::{io, sync::Arc};
 use virtdisk::ReadAt;

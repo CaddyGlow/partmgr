@@ -1,5 +1,8 @@
 //! Independent e2fsprogs namespace/payload oracles for the private owned session.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) fn operations(
     out: &Path,

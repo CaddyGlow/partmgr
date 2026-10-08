@@ -1,10 +1,13 @@
 //! Staged common-tree inventory with explicit content-only metadata defaults.
 use super::{bad, budget, builder_layout, catalog_key, metadata_builder, vector};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{collections::HashSet, sync::Arc};
 use crate::{
     fs_copy::{CopyLimits, CopyNamePolicy, MetadataOutcome, native_name},
     fs_core::*,
 };
-use std::{collections::HashSet, sync::Arc};
 
 #[derive(Clone, Copy)]
 pub(crate) enum MetadataPolicy {

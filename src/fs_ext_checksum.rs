@@ -1,4 +1,7 @@
 //! Linux ext/JBD2 CRC32C state: reflected Castagnoli polynomial, no final xor.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 pub(super) fn crc32c(mut state: u32, bytes: &[u8]) -> u32 {
     for &byte in bytes {
         state ^= u32::from(byte);
@@ -9,8 +12,9 @@ pub(super) fn crc32c(mut state: u32, bytes: &[u8]) -> u32 {
     state
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
+    #[cfg(feature = "std")]
     #[test]
     fn castagnoli_standard_vector_and_incremental_state() {
         assert_eq!(super::crc32c(!0, b"123456789"), 0x1cf96d7c);

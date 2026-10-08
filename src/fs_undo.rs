@@ -3,12 +3,15 @@
 //! This is an undo protocol, not a filesystem ownership audit or a native journal.
 //! Both stores must remain exclusively held, independently persistent and disjoint.
 //! The caller verifies the volume binding against the actual selected volume.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{fmt, io};
 use crate::{
     fs_core::{Error, ErrorKind, Reservation, Resources, Result},
     storage::{Storage, WriteRange},
 };
 use sha2::{Digest, Sha256};
-use std::{fmt, io};
 
 const HEADER: usize = 512;
 const BODY: u64 = 1024;
@@ -84,8 +87,8 @@ impl fmt::Display for UndoFailure {
         write!(f, "external undo {}: {}", self.stage, self.source)
     }
 }
-impl std::error::Error for UndoFailure {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for UndoFailure {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         Some(&self.source)
     }
 }
@@ -210,7 +213,9 @@ impl UndoPlan {
             })
             .ok_or_else(|| limit("external undo retained payload overflow"))?;
         let charge = u64::try_from(
-            payload + patches.capacity() as u128 * std::mem::size_of::<WriteRange>() as u128,
+            payload
+                + patches.capacity() as u128
+                    * crate::platform::mem::size_of::<WriteRange>() as u128,
         )
         .map_err(|_| limit("external undo retained charge"))?;
         let reservation = r.memory.reserve(charge)?;
@@ -261,7 +266,7 @@ impl UndoPlan {
         }
         let charge = (count as u64)
             .checked_add(stage_lengths.len() as u64)
-            .and_then(|n| n.checked_mul(std::mem::size_of::<usize>() as u64))
+            .and_then(|n| n.checked_mul(crate::platform::mem::size_of::<usize>() as u64))
             .ok_or_else(|| limit("external undo stage charge overflow"))?;
         let reservation = r.memory.reserve(charge)?;
         let _temporary = r.memory.reserve(
@@ -324,7 +329,7 @@ impl UndoPlan {
         target: &mut dyn Storage,
         journal: &mut dyn Storage,
         r: &Resources,
-    ) -> std::result::Result<UndoStatus, UndoFailure> {
+    ) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
         let mut stage = "preflight";
         let mut published = false;
         let mut changed = false;
@@ -602,7 +607,7 @@ pub fn recover(
     binding: UndoBinding,
     limits: UndoLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     recover_validated(
         target,
         journal,
@@ -735,7 +740,7 @@ pub(crate) fn recover_validated(
     limits: UndoLimits,
     r: &Resources,
     validator: &mut dyn UndoRecoveryValidator,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     let mut stage = "recovery preflight";
     let mut changed = false;
     let result = (|| {
@@ -840,7 +845,7 @@ fn decode_patch(body: &[u8], cursor: usize) -> Result<(u64, &[u8], &[u8], usize)
     Ok((offset, old, new, end))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod semantic_recovery_tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -939,6 +944,7 @@ mod semantic_recovery_tests {
         assert_eq!(inspect(&journal, &r).unwrap().state, UndoState::Prepared);
         (target, journal, binding, r)
     }
+    #[cfg(feature = "std")]
     #[test]
     fn rejected_or_cancelled_fence_finishes_before_any_restore_or_marker_write() {
         for cancel in [false, true] {
@@ -999,6 +1005,7 @@ mod semantic_recovery_tests {
         assert_eq!(&target.bytes[10..12], &[1, 0]);
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn malformed_late_range_with_valid_digest_never_reaches_engine_validator() {
         let (mut target, mut journal, binding, r) = prepared();
@@ -1035,6 +1042,7 @@ mod semantic_recovery_tests {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn read_only_recovery_validation_of_empty_journal_refunds() {
     struct Journal;

@@ -1,5 +1,8 @@
 //! Scoped ranges and native dirty-fenced external undo transactions.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_file::ExtentKind,
     fs_undo::{UndoBinding, UndoFailure, UndoPlan, UndoStatus},
@@ -135,7 +138,7 @@ impl<S: Storage, J: Storage> ExtEditor<S, J> {
             .and_then(|n| {
                 n.checked_add(
                     u64::from(self.limits.undo.patches)
-                        * (std::mem::size_of::<WriteRange>() as u64 + 64),
+                        * (crate::platform::mem::size_of::<WriteRange>() as u64 + 64),
                 )
             })
             .and_then(|n| n.checked_add(256))
@@ -224,7 +227,7 @@ impl<S: Storage, J: Storage> ExtEditor<S, J> {
         batch: ExtEditBatch,
         transaction: [u8; 16],
         r: &Resources,
-    ) -> std::result::Result<UndoStatus, UndoFailure> {
+    ) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
         self.ready(r).map_err(failure)?;
         if batch.source != self.scope || batch.generation != self.generation {
             return Err(failure(Error::new(
@@ -526,7 +529,7 @@ fn recover_guarded(
     binding: UndoBinding,
     limits: ExtEditLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     let charge = limits
         .undo
         .body_bytes
@@ -571,7 +574,7 @@ impl<S: Storage, J: Storage> ExtEditor<S, J> {
         binding: UndoBinding,
         limits: ExtEditLimits,
         r: &Resources,
-    ) -> std::result::Result<Self, UndoFailure> {
+    ) -> crate::platform::result::Result<Self, UndoFailure> {
         let container_length = storage.len().map_err(native).map_err(recovery_failure)?;
         if region.length < 2048
             || region
@@ -604,7 +607,10 @@ impl<S: Storage, J: Storage> ExtEditor<S, J> {
         .map_err(recovery_failure)
     }
     /// Resolve the pending transaction before allowing access to current handles or allocation.
-    pub fn recover(&mut self, r: &Resources) -> std::result::Result<UndoStatus, UndoFailure> {
+    pub fn recover(
+        &mut self,
+        r: &Resources,
+    ) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
         if self.state != ExtEditState::NeedsRecovery {
             return Err(failure(bad("ext2 session has no pending recovery")));
         }

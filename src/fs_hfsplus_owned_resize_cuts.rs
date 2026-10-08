@@ -3,7 +3,11 @@ use super::super::transaction::recovery::cuts::{Clock, Model};
 use super::commit::ResizeRequest;
 use super::*;
 use crate::fs_undo::{UndoBinding, UndoLimits, UndoState};
-use std::sync::{Arc, Mutex};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::sync::{Arc, Mutex};
+#[cfg(feature = "std")]
 #[test]
 fn every_resize_commit_cut_recovers_exact_old_or_committed_projection() {
     commit_cuts(None);
@@ -139,6 +143,7 @@ fn commit_cuts(native: Option<&native::NativeCutGate>) {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn every_resize_rollback_cut_cold_retry_restores_complete_original() {
     rollback_cuts(None);
@@ -279,6 +284,7 @@ fn rollback_cuts(native: Option<&native::NativeCutGate>) {
 mod native;
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native all-position resize commit and rollback cold recovery gate"]
 fn native_all_resize_commit_and_rollback_cuts() {

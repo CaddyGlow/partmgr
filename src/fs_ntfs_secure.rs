@@ -1,10 +1,13 @@
 //! Native $Secure lookup. Read-only structural evidence, not ACL restoration.
 use super::{NtfsSecurityDescriptor, NtfsSecurityLimits};
+use crate::platform::collections::{BTreeMap, BTreeSet};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_core::*,
     fs_ntfs::{NtfsFile, NtfsRecord, NtfsStreamLimits, NtfsVolume},
 };
-use std::collections::{BTreeMap, BTreeSet};
 /// Explicit $Secure index and descriptor ceilings.
 #[derive(Clone, Copy, Debug)]
 pub struct NtfsSecureLimits {

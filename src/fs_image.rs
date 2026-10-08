@@ -1,5 +1,10 @@
 //! Explicit read-profile dispatch over immutable bounded filesystem sources.
 //! Signature candidates are separate from validated profiles and clean allocation evidence.
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::sync::Arc;
 use crate::{
     fs_apfs::{ApfsContainer, ApfsReadLimits, ApfsVolume},
     fs_apfs_audit::ApfsAuditLimits,
@@ -38,8 +43,6 @@ use crate::{
     fs_xfs_audit::{XfsAuditLimits, audit as audit_xfs},
     fs_xfs_tree::{XfsTreeLimits, XfsTreeSource},
 };
-use std::sync::Arc;
-use virtdisk::ReadAt;
 
 /// Signature candidate; no operation support or metadata validity follows from a match.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -296,10 +299,10 @@ pub fn probe(source: &dyn ReadAt, r: &Resources) -> Result<Budgeted<Vec<ReadForm
 fn malformed(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
 }
-fn fat_error(e: std::io::Error) -> Error {
+fn fat_error(e: crate::platform::io::Error) -> Error {
     Error::classified_io("FAT profile opening/audit", e)
 }
-fn ext_error(e: std::io::Error) -> Error {
+fn ext_error(e: crate::platform::io::Error) -> Error {
     Error::classified_io("ext2 profile opening/audit", e)
 }
 struct SourceGuard {
@@ -325,22 +328,26 @@ impl ReadAt for SourceGuard {
     fn len(&self) -> u64 {
         self.length
     }
-    fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> std::io::Result<()> {
-        self.cancellation.check().map_err(std::io::Error::other)?;
+    fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> crate::platform::io::Result<()> {
+        self.cancellation
+            .check()
+            .map_err(crate::platform::io::Error::other)?;
         if self.source.len() != self.length {
-            return Err(std::io::Error::other(Error::new(
+            return Err(crate::platform::io::Error::other(Error::new(
                 ErrorKind::StalePlan,
                 "filesystem source length changed",
             )));
         }
         self.source.read_exact_at(offset, out)?;
         if self.source.len() != self.length {
-            return Err(std::io::Error::other(Error::new(
+            return Err(crate::platform::io::Error::other(Error::new(
                 ErrorKind::StalePlan,
                 "filesystem source length changed during read",
             )));
         }
-        self.cancellation.check().map_err(std::io::Error::other)
+        self.cancellation
+            .check()
+            .map_err(crate::platform::io::Error::other)
     }
 }
 struct GuardedFile {

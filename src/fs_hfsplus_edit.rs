@@ -1,6 +1,9 @@
 //! Exclusive bare nonjournaled HFS+/HFSX fork range writes and COW resize.
 //! The caller must exclude other writers and use a physically disjoint journal.
 //! Failed uncertain commits require dropping the session and cold recovery.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_core::{NativeName, Resources, Result, StreamKind},
     fs_hfsplus::{
@@ -76,7 +79,7 @@ impl<S: Storage> HfsPlusEditSession<S> {
         journal: &mut dyn Storage,
         binding: UndoBinding,
         r: &Resources,
-    ) -> std::result::Result<UndoStatus, UndoFailure> {
+    ) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
         self.prepared
             .commit_range(plan.0, journal, binding, self.limits.undo, r)
     }
@@ -109,7 +112,7 @@ pub fn recover_range(
     selection: HfsPlusRecoverySelection<'_>,
     limits: HfsPlusEditLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     owned_prepare::transaction::recovery::recover_range(
         target,
         journal,
@@ -154,7 +157,7 @@ impl<S: Storage> HfsPlusEditSession<S> {
         journal: &mut dyn Storage,
         binding: UndoBinding,
         r: &Resources,
-    ) -> std::result::Result<Self, HfsPlusResizeFailure<S>> {
+    ) -> crate::platform::result::Result<Self, HfsPlusResizeFailure<S>> {
         let Self { prepared, limits } = self;
         let request = owned_prepare::resize::commit::ResizeRequest {
             path: request.path,
@@ -180,7 +183,7 @@ pub fn recover_resize(
     binding: UndoBinding,
     limits: HfsPlusEditLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     owned_prepare::resize::recovery::recover_resize(
         target,
         journal,
@@ -220,7 +223,7 @@ impl<S: Storage> HfsPlusEditSession<S> {
         journal: &mut dyn Storage,
         binding: UndoBinding,
         r: &Resources,
-    ) -> std::result::Result<Self, HfsPlusRenameFailure<S>> {
+    ) -> crate::platform::result::Result<Self, HfsPlusRenameFailure<S>> {
         let Self { prepared, limits } = self;
         prepared
             .commit_rename(
@@ -250,7 +253,7 @@ pub fn recover_rename(
     binding: UndoBinding,
     limits: HfsPlusEditLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     owned_prepare::namespace::recover_rename(
         target,
         journal,
@@ -284,7 +287,7 @@ impl<S: Storage> HfsPlusEditSession<S> {
         journal: &mut dyn Storage,
         binding: UndoBinding,
         r: &Resources,
-    ) -> std::result::Result<Self, HfsPlusRenameFailure<S>> {
+    ) -> crate::platform::result::Result<Self, HfsPlusRenameFailure<S>> {
         let Self { prepared, limits } = self;
         prepared
             .commit_rename(
@@ -314,7 +317,7 @@ pub fn recover_move(
     binding: UndoBinding,
     limits: HfsPlusEditLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     owned_prepare::namespace::recover_rename(
         target,
         journal,
@@ -344,7 +347,7 @@ impl<S: Storage> HfsPlusEditSession<S> {
         journal: &mut dyn Storage,
         binding: UndoBinding,
         r: &Resources,
-    ) -> std::result::Result<Self, HfsPlusRenameFailure<S>> {
+    ) -> crate::platform::result::Result<Self, HfsPlusRenameFailure<S>> {
         let Self { prepared, limits } = self;
         prepared
             .commit_rename(
@@ -374,7 +377,7 @@ pub fn recover_delete(
     binding: UndoBinding,
     limits: HfsPlusEditLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     owned_prepare::namespace::recover_rename(
         target,
         journal,
@@ -412,7 +415,7 @@ impl<S: Storage> HfsPlusEditSession<S> {
         journal: &mut dyn Storage,
         binding: UndoBinding,
         r: &Resources,
-    ) -> std::result::Result<Self, HfsPlusRenameFailure<S>> {
+    ) -> crate::platform::result::Result<Self, HfsPlusRenameFailure<S>> {
         let Self { prepared, limits } = self;
         prepared
             .commit_create_entry(
@@ -442,7 +445,7 @@ pub fn recover_create(
     binding: UndoBinding,
     limits: HfsPlusEditLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     owned_prepare::namespace::create::recover_create_entry(
         target,
         journal,
@@ -480,7 +483,7 @@ impl<S: Storage> HfsPlusEditSession<S> {
         journal: &mut dyn Storage,
         binding: UndoBinding,
         r: &Resources,
-    ) -> std::result::Result<Self, HfsPlusRenameFailure<S>> {
+    ) -> crate::platform::result::Result<Self, HfsPlusRenameFailure<S>> {
         let Self { prepared, limits } = self;
         prepared
             .commit_populated_birth(
@@ -514,7 +517,7 @@ pub fn recover_create_file(
     binding: UndoBinding,
     limits: HfsPlusEditLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     owned_prepare::namespace::create::recover_populated_birth(
         target,
         journal,

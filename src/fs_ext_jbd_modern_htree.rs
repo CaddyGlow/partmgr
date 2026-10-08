@@ -2,6 +2,9 @@
 use super::namespace::EntryEdit;
 use super::*;
 use crate::fs_core::NativeName;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 struct Row {
     hash: u32,

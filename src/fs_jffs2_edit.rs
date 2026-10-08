@@ -1,4 +1,11 @@
 //! Owned bounded logical NOR append, exact external-intent recovery and single-block GC.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    fmt, io,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use crate::{
     fs_core::*,
     fs_file::ExtentKind,
@@ -8,10 +15,6 @@ use crate::{
     storage::Storage,
 };
 use sha2::{Digest, Sha256};
-use std::{
-    fmt, io,
-    sync::atomic::{AtomicU64, Ordering},
-};
 #[path = "fs_jffs2_edit_journal.rs"]
 mod journal;
 use journal::{Intent, Slot, State};
@@ -491,8 +494,8 @@ impl fmt::Display for Jffs2EditFailure {
         write!(f, "JFFS2 edit: {}", self.source)
     }
 }
-impl std::error::Error for Jffs2EditFailure {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for Jffs2EditFailure {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         Some(&self.source)
     }
 }
@@ -814,7 +817,7 @@ impl<F: FlashStorage> Jffs2Editor<F> {
         mut plan: Jffs2EditPlan,
         journal: &mut dyn Storage,
         r: &Resources,
-    ) -> std::result::Result<Jffs2EditReport, Jffs2EditFailure> {
+    ) -> crate::platform::result::Result<Jffs2EditReport, Jffs2EditFailure> {
         let mut progress = Progress::default();
         let result = (|| {
             self.check(r)?;
@@ -915,7 +918,7 @@ pub fn recover(
     endian: Jffs2Endian,
     limits: Jffs2EditLimits,
     r: &Resources,
-) -> std::result::Result<Jffs2EditReport, Jffs2EditFailure> {
+) -> crate::platform::result::Result<Jffs2EditReport, Jffs2EditFailure> {
     recover_profile(flash, journal, binding, endian, limits, None, r)
 }
 /// Recover an exact version-2 compressed intent with the identical caller codec and caps.
@@ -928,7 +931,7 @@ pub fn recover_compressed(
     limits: Jffs2EditLimits,
     compression: Jffs2EditCompression,
     r: &Resources,
-) -> std::result::Result<Jffs2EditReport, Jffs2EditFailure> {
+) -> crate::platform::result::Result<Jffs2EditReport, Jffs2EditFailure> {
     recover_profile(
         flash,
         journal,
@@ -947,7 +950,7 @@ fn recover_profile(
     limits: Jffs2EditLimits,
     compression: Option<journal::CompressionProfile>,
     r: &Resources,
-) -> std::result::Result<Jffs2EditReport, Jffs2EditFailure> {
+) -> crate::platform::result::Result<Jffs2EditReport, Jffs2EditFailure> {
     let mut p = Progress::default();
     let result = (|| {
         limits.validate()?;
@@ -1793,6 +1796,6 @@ impl<F: FlashStorage> Jffs2Editor<F> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[path = "fs_jffs2_edit_compression_tests.rs"]
 mod compression_tests;

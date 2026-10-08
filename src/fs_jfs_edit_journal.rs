@@ -1,6 +1,9 @@
 //! Native little-endian JFS log-page and after-image codec, staged privately.
 use super::super::{DecodeRead, bad, budget, le16, le32, pxd, vector};
 use crate::fs_core::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 const PAGE: usize = 4096;
 const HEADER: usize = 8;
 const TRAILER: usize = 4088;
@@ -280,6 +283,7 @@ struct TransactionFields {
     inode: u32,
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn authored_native_free_list_validates_every_extent_before_publication() {
     use super::super::Physical;
@@ -1728,7 +1732,7 @@ pub(super) struct PreparedCow {
     blocks: u32,
     inode: u32,
     length: u64,
-    file: std::sync::Arc<dyn FileRead>,
+    file: crate::platform::sync::Arc<dyn FileRead>,
     identity: ObjectId,
     payload_length: u64,
     source_length: u64,
@@ -1746,7 +1750,7 @@ struct RangeRecipe {
 pub(super) struct CowRequest {
     pub(super) inode: u32,
     pub(super) new: u64,
-    pub(super) file: std::sync::Arc<dyn FileRead>,
+    pub(super) file: crate::platform::sync::Arc<dyn FileRead>,
 }
 pub(super) fn prepare_cow(
     storage: &dyn crate::storage::Storage,
@@ -3536,6 +3540,7 @@ pub(super) fn recover_cow(
     })
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independent_split_native_history_caps_sequence_torn_and_source_failures_refund() {
     use super::fixture::{p16, p32};
@@ -3551,7 +3556,7 @@ fn independent_split_native_history_caps_sequence_torn_and_source_failures_refun
             if self.fail {
                 return Err(Error::io(
                     "independent split source",
-                    std::io::Error::other("causal"),
+                    crate::platform::io::Error::other("causal"),
                 ));
             }
             out.copy_from_slice(
@@ -3670,6 +3675,7 @@ fn independent_split_native_history_caps_sequence_torn_and_source_failures_refun
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn native_after_image_lines_backchains_and_torn_bounds_are_checked_before_callbacks() {
     use super::fixture::{p16, p32, pxd};
@@ -3742,6 +3748,7 @@ fn native_after_image_lines_backchains_and_torn_bounds_are_checked_before_callba
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn native_inline_root_vectors_use_inode_relative_bounds_before_callbacks() {
     use super::fixture::{p16, p32, pxd};
@@ -3797,6 +3804,7 @@ fn native_inline_root_vectors_use_inode_relative_bounds_before_callbacks() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independent_native_map_records_check_whole_lists_limits_and_unsupported_types_before_callbacks()
 {
@@ -3884,6 +3892,7 @@ fn independent_native_map_records_check_whole_lists_limits_and_unsupported_types
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "requires fresh PARTMGR_JFS_REDO_EVIDENCE and JFS_TOOLS with native formatter/replay/dump"]
 fn native_formatter_and_redo_replay_inode_line_layout() {
@@ -3891,20 +3900,22 @@ fn native_formatter_and_redo_replay_inode_line_layout() {
         Borrowed,
         fixture::{p16, p32, pxd},
     };
+    use crate::platform::{fs, path::PathBuf, process::Command};
     use crate::storage::{FileStorage, Storage};
     use sha2::{Digest, Sha256};
-    use std::{fs, path::PathBuf, process::Command};
     fn hash(bytes: &[u8]) -> String {
         format!("{:x}", Sha256::digest(bytes))
     }
     let evidence = PathBuf::from(
-        std::env::var_os("PARTMGR_JFS_REDO_EVIDENCE").expect("fresh evidence directory required"),
+        crate::platform::env::var_os("PARTMGR_JFS_REDO_EVIDENCE")
+            .expect("fresh evidence directory required"),
     );
     assert!(evidence.is_dir());
     let receipt_path = evidence.join("receipt.txt");
     assert!(!receipt_path.exists());
-    let tools =
-        PathBuf::from(std::env::var_os("JFS_TOOLS").expect("jfsutils tool directory required"));
+    let tools = PathBuf::from(
+        crate::platform::env::var_os("JFS_TOOLS").expect("jfsutils tool directory required"),
+    );
     let sources = [
         ("src/fs_jfs.rs", include_bytes!("fs_jfs.rs").as_slice()),
         (
@@ -3939,7 +3950,7 @@ fn native_formatter_and_redo_replay_inode_line_layout() {
         fs::write(dst, bytes).unwrap();
         receipt.push_str(&format!("source={name} sha256={}\n", hash(bytes)));
     }
-    let binary = std::env::current_exe().unwrap();
+    let binary = crate::platform::env::current_exe().unwrap();
     let binary_hash = hash(&fs::read(&binary).unwrap());
     receipt.push_str(&format!(
         "binary={} sha256={binary_hash}\n",
@@ -4128,6 +4139,7 @@ fn native_formatter_and_redo_replay_inode_line_layout() {
 #[path = "fs_jfs_edit_rollover.rs"]
 pub(super) mod rollover;
 
+#[cfg(feature = "std")]
 #[test]
 fn namespace_inode_vector_uses_native_224_byte_overlap_rule_and_strict_default_rejects() {
     use super::fixture::{p16, p32, pxd};
@@ -4187,6 +4199,7 @@ fn namespace_inode_vector_uses_native_224_byte_overlap_rule_and_strict_default_r
 mod namespace;
 #[path = "fs_jfs_edit_rename.rs"]
 pub(super) mod rename;
+#[cfg(feature = "std")]
 #[test]
 fn native_namespace_encoder_reopens_long_names_and_reordered_cookies_with_complete_audit() {
     use crate::fs_jfs::JfsReadLimits;

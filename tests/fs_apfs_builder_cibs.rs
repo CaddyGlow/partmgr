@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{fs_apfs_builder::*, fs_core::*};
 use std::sync::{Arc, atomic::Ordering};
 #[allow(dead_code)]

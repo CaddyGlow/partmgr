@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 #[path = "fixtures/ext2_clean.rs"]
 mod clean_fixture;
 use partmgr::{

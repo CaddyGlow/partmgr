@@ -1,16 +1,19 @@
 //! Strict immutable XFS v5 baseline: leaf AG trees, inline extents and shortform directories.
-use crate::{
-    fs_core::*,
-    fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent},
-};
-use std::{
+use crate::io::{DiskView, ReadAt};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     io,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
 };
-use virtdisk::{DiskView, ReadAt};
+use crate::{
+    fs_core::*,
+    fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent},
+};
 static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
 pub(crate) fn invalid(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
@@ -220,10 +223,10 @@ impl ReadAt for CheckedSource {
         }
         self.inner.read_exact_at(at, out)
     }
-    fn context(&self) -> virtdisk::ReadContext {
+    fn context(&self) -> crate::io::ReadContext {
         self.inner.context()
     }
-    fn budget(&self) -> Option<virtdisk::ReadBudget> {
+    fn budget(&self) -> Option<crate::io::ReadBudget> {
         self.inner.budget()
     }
     fn sparse_holes(&self) -> io::Result<Vec<(u64, u64)>> {

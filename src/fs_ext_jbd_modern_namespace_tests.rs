@@ -1,6 +1,10 @@
 //! Independent namespace fixtures and complete native lifecycle restart matrices.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
+#[cfg(feature = "std")]
 #[test]
 fn modern_exact_native_rename_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -261,6 +265,7 @@ fn full_directory_fixture() -> Vec<u8> {
     bytes
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn modern_cross_directory_file_move_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -394,6 +399,7 @@ fn modern_cross_directory_file_move_restart_every_write_barrier_and_torn_cut() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn modern_create_file_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -534,6 +540,7 @@ fn modern_create_file_restart_every_write_barrier_and_torn_cut() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn modern_create_empty_file_directory_growth_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -674,6 +681,7 @@ fn modern_create_empty_file_directory_growth_restart_every_write_barrier_and_tor
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn modern_mkdir_with_parent_growth_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -829,6 +837,7 @@ fn modern_mkdir_with_parent_growth_restart_every_write_barrier_and_torn_cut() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn modern_delete_file_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -951,6 +960,7 @@ fn modern_delete_file_restart_every_write_barrier_and_torn_cut() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn modern_delete_empty_directory_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -1153,6 +1163,7 @@ fn two_directories_fixture() -> Vec<u8> {
     bytes
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn modern_cross_directory_directory_move_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -1357,6 +1368,7 @@ fn shared_ea_hardlink_fixture() -> Vec<u8> {
     bytes
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independent_hardlink_shared_ea_lifetime_exact_reference_counts_and_refunds() {
     let r = Resources {
@@ -1448,6 +1460,7 @@ fn independent_hardlink_shared_ea_lifetime_exact_reference_counts_and_refunds() 
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independent_shared_ea_unlink_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -1651,6 +1664,7 @@ fn uninitialized_inode_group_fixture() -> Vec<u8> {
     bytes
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independent_uninitialized_inode_group_create_preserves_opaque_block_map_and_refunds() {
     let r = Resources {
@@ -1834,6 +1848,7 @@ fn indexed_namespace_fixture() -> Vec<u8> {
     bytes
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independent_htree_rename_preserves_index_hash_profile_and_payload() {
     let r = Resources {
@@ -1919,7 +1934,7 @@ pub(super) fn independent_namespace_restart_matrix(
     perform: impl Fn(
         &mut session::Session<recovery::tests::Fault>,
         &Cancellation,
-    ) -> std::io::Result<()>,
+    ) -> crate::platform::io::Result<()>,
 ) {
     let r = Resources {
         memory: Budget::new(128 << 20),
@@ -1979,6 +1994,7 @@ pub(super) fn independent_namespace_restart_matrix(
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independent_htree_rename_restart_every_write_barrier_and_torn_cut() {
     let limits = session::Limits {
@@ -2023,6 +2039,7 @@ fn independent_htree_rename_restart_every_write_barrier_and_torn_cut() {
     );
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independent_uninitialized_inode_group_restart_every_write_barrier_and_torn_cut() {
     let limits = session::Limits {

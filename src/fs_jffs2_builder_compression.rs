@@ -49,14 +49,17 @@ impl Jffs2BuildCompression {
                 produced
             }
             Self::Zlib => {
-                let mut encoder = flate2::Compress::new(flate2::Compression::new(3), true);
-                let status = encoder
-                    .compress(input, &mut out, flate2::FlushCompress::Finish)
-                    .map_err(|_| invalid("JFFS2 ZLIB encoder failed"))?;
-                if status != flate2::Status::StreamEnd || encoder.total_in() != input.len() as u64 {
+                use miniz_oxide::deflate::core::{
+                    CompressorOxide, TDEFLFlush, TDEFLStatus, compress,
+                    create_comp_flags_from_zip_params,
+                };
+                let mut encoder = CompressorOxide::new(create_comp_flags_from_zip_params(3, 15, 0));
+                let (status, consumed, produced) =
+                    compress(&mut encoder, input, &mut out, TDEFLFlush::Finish);
+                if status != TDEFLStatus::Done || consumed != input.len() {
                     return Ok(None);
                 }
-                encoder.total_out() as usize
+                produced
             }
         };
         r.cancellation.check()?;

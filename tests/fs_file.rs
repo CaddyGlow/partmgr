@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::fs_file::{ExtentFile, ExtentKind, FileExtent};
 use std::{
     io,

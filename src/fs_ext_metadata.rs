@@ -2,7 +2,10 @@
 //! descriptor/bitmap, hidden-allocation, directory and xattr ownership validators
 //! are connected to both the immutable decoder and the complete audit.
 use super::{checksum::crc32c, invalid, u16le, u32le, unsupported};
-use std::io;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 fn bounded_block(bytes: &[u8]) -> io::Result<()> {
     if !matches!(bytes.len(), 1024 | 2048 | 4096) {
         return Err(unsupported("ext metadata block size"));
@@ -206,7 +209,7 @@ impl MetadataChecksums {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     fn w(b: &mut [u8], at: usize, value: u16) {
@@ -248,6 +251,7 @@ mod tests {
         d(&mut b, 1020, crc);
         b
     }
+    #[cfg(feature = "std")]
     #[test]
     fn super_descriptor_bitmap_inode_bindings_and_corruption() {
         for seeded in [false, true] {
@@ -311,6 +315,7 @@ mod tests {
             assert!(profile.descriptor(0, &[0; 33]).is_err());
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn extent_leaf_index_orphan_and_xattr_have_distinct_seeds_and_bounds() {
         let seed = 0x12345678;

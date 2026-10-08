@@ -1,5 +1,8 @@
 //! Bounded classic-header ext4 extent trees without metadata checksums or 64-bit groups.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 /// Complete allocation references retained separately from logical zero/read semantics.
 pub(crate) struct ExtentAllocation {
     pub(crate) logical: u64,
@@ -21,7 +24,7 @@ struct Walk<'a, R> {
     allocated: usize,
     allocations: Vec<ExtentAllocation>,
     metadata: Vec<u32>,
-    seen: std::collections::BTreeSet<u32>,
+    seen: crate::platform::collections::BTreeSet<u32>,
     inode: &'a ExtInode,
 }
 fn budget(message: &str) -> io::Error {
@@ -212,7 +215,7 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
             allocated: 0,
             allocations: Vec::new(),
             metadata: Vec::new(),
-            seen: std::collections::BTreeSet::new(),
+            seen: crate::platform::collections::BTreeSet::new(),
         };
         walk.allocations
             .try_reserve_exact(max_blocks)

@@ -1,6 +1,9 @@
 //! Bounded native APFS B-tree and object-map indexing.
 use super::*;
-use std::{cmp::Ordering as Compare, collections::BTreeMap};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{cmp::Ordering as Compare, collections::BTreeMap};
 pub(crate) struct Record {
     pub key: Vec<u8>,
     pub value: Vec<u8>,

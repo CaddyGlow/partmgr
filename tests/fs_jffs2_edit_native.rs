@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::{
         Budget, Cancellation, Error, ErrorKind, FileRead, LogicalExtent, NativeName, ObjectId,

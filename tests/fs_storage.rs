@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_storage::{BoundedSession, SectorGeometry, UncertainMutation},
     storage::{FileStorage, Storage},

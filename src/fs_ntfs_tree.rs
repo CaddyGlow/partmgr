@@ -1,16 +1,19 @@
 //! Validated NTFS user namespace inventory from native $I30 indexes.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 use crate::{
     fs_core::*,
     fs_ntfs::{NtfsDirectoryEntry, NtfsDirectoryLimits, NtfsRecord, NtfsVolume},
 };
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-};
 fn bad(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
 }
-fn allocation(_: impl std::fmt::Display) -> Error {
+fn allocation(_: impl crate::platform::fmt::Display) -> Error {
     Error::new(ErrorKind::BudgetExhausted, "NTFS inventory allocation")
 }
 struct Node {

@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::storage::Storage;
 use partmgr::{
     guid::Guid,

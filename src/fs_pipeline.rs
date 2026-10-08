@@ -3,7 +3,10 @@
 //! Reports record caller-observed evidence. They do not perform operations,
 //! infer durability from a successful write, or establish an atomic transaction
 //! across container, partition, filesystem, copy and boot layers.
-use std::fmt;
+use crate::platform::fmt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 /// Version of the report contract and its textual representation.
 pub const REPORT_VERSION: u32 = 1;
@@ -139,7 +142,7 @@ pub struct PipelineReport {
 impl Default for PipelineReport {
     fn default() -> Self {
         Self {
-            outcomes: std::array::from_fn(|_| Outcome::NotAttempted),
+            outcomes: crate::platform::array::from_fn(|_| Outcome::NotAttempted),
         }
     }
 }

@@ -1,11 +1,14 @@
 //! Complete bounded read-only NTFS3.1 base-record allocation and index-reference audit.
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::sync::Arc;
 use crate::{
     fs_core::*,
     fs_file::ExtentKind as MapKind,
     fs_ntfs::{NtfsDirectoryLimits, NtfsFile, NtfsReadLimits, NtfsRecord, NtfsVolume},
 };
-use std::sync::Arc;
-use virtdisk::ReadAt;
 /// Independent ceilings; exhaustion returns an error, never a partial free proof.
 #[derive(Clone, Copy, Debug)]
 pub struct NtfsAuditLimits {

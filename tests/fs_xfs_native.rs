@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 //! Explicit native xfsprogs gate; never silently succeeds when tools/evidence are absent.
 use partmgr::{
     fs_core::*,

@@ -1,6 +1,9 @@
 //! Independent borrowed-codec ownership proof fixtures; no mutable ReadAt adapter.
 use super::*;
 use crate::fs_jffs2::borrowed_fixture as fixture;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 struct Bytes(Vec<u8>);
 impl DecodeRead for Bytes {
@@ -37,6 +40,7 @@ fn image(big: bool, value: u8) -> Bytes {
     Bytes(image)
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn borrowed_compressed_proofs_compare_logical_bytes_and_physical_victim_dependencies() {
     for big in [false, true] {

@@ -1,5 +1,12 @@
 //! Exclusive FAT sessions and recoverable existing-file replacement, extension and truncation.
 //! Creation, renaming and deletion remain subsequent namespace operations.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    io,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use crate::{
     fs_core::{Error, ErrorKind, NativeName, ObjectId, Reservation, Resources, Result},
     fs_fat::{FatDecodedFileMap, FatGeometry, FatStorageDecoder},
@@ -7,10 +14,6 @@ use crate::{
     fs_file::ExtentKind,
     fs_undo::{self, UndoBinding, UndoFailure, UndoLimits, UndoPlan, UndoState, UndoStatus},
     storage::{Storage, WriteRange},
-};
-use std::{
-    io,
-    sync::atomic::{AtomicU64, Ordering},
 };
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 #[path = "fs_fat_edit_namespace.rs"]
@@ -117,7 +120,7 @@ fn native(error: io::Error) -> Error {
     mapped
 }
 
-fn exhausted(message: impl std::fmt::Display) -> Error {
+fn exhausted(message: impl crate::platform::fmt::Display) -> Error {
     Error::new(ErrorKind::BudgetExhausted, message.to_string())
 }
 fn copied(bytes: &[u8]) -> Result<Vec<u8>> {
@@ -339,7 +342,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
         binding: UndoBinding,
         limits: FatEditLimits,
         resources: &Resources,
-    ) -> std::result::Result<Self, UndoFailure> {
+    ) -> crate::platform::result::Result<Self, UndoFailure> {
         resources.cancellation.check().map_err(failure)?;
         let mut target = Self::region(storage, region).map_err(failure)?;
         fs_undo::recover(&mut target, &mut journal, binding, limits.undo, resources)?;
@@ -535,7 +538,8 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
             .checked_mul(2)
             .and_then(|n| {
                 n.checked_add(
-                    u64::from(self.limits.undo.patches) * std::mem::size_of::<WriteRange>() as u64,
+                    u64::from(self.limits.undo.patches)
+                        * crate::platform::mem::size_of::<WriteRange>() as u64,
                 )
             })
             .ok_or_else(|| exhausted("FAT edit batch accounting overflow"))?;
@@ -612,7 +616,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
         batch: FatEditBatch,
         transaction: [u8; 16],
         resources: &Resources,
-    ) -> std::result::Result<UndoStatus, UndoFailure> {
+    ) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
         self.ready(resources).map_err(failure)?;
         if batch.source != self.scope || batch.generation != self.generation {
             return Err(failure(Error::new(
@@ -687,7 +691,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
     pub fn recover(
         &mut self,
         resources: &Resources,
-    ) -> std::result::Result<UndoStatus, UndoFailure> {
+    ) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
         let SessionState::NeedsRecovery {
             binding,
             target_may_have_changed,

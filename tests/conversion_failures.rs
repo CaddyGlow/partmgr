@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     codec::initialize_plan,
     conversion::{

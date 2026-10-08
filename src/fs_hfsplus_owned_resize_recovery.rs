@@ -3,6 +3,9 @@ use super::*;
 use crate::fs_undo::{
     self, UndoBinding, UndoFailure, UndoLimits, UndoRecoveryValidator, UndoStatus,
 };
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 struct Collector {
     patches: Vec<WriteRange>,
 }
@@ -78,7 +81,7 @@ pub(crate) fn recover_resize(
     limits: Limits,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     let length = target
         .len()
         .map_err(|e| fail(Error::io("HFS+ cold resize length", e)))?;

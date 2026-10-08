@@ -2,7 +2,10 @@
 //! Absent checksums never supply an integrity proof. GDT_CSUM protects descriptors
 //! only; bitmap, inode, extent and directory checksums require METADATA_CSUM.
 use super::{invalid, metadata::MetadataChecksums, u16le, u32le, unsupported};
-use std::io;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
@@ -87,12 +90,12 @@ impl Integrity {
             .then_some(MetadataChecksums { seed: self.seed })
     }
     // Native checksum writing remains in the private journal qualification module.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub fn inode_seed(&self, number: u32, generation: u32) -> u32 {
         self.metadata()
             .map_or(0, |c| c.inode_seed(number, generation))
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub fn stamp_directory_leaf(
         &self,
         number: u32,
@@ -111,7 +114,7 @@ impl Integrity {
         bytes[tail + 8..tail + 12].copy_from_slice(&checksum.to_le_bytes());
         self.directory_leaf(number, generation, bytes).map(|_| ())
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub fn stamp_inode(&self, number: u32, generation: u32, bytes: &mut [u8]) -> io::Result<()> {
         if !matches!(bytes.len(), 128 | 256) {
             return Err(unsupported("ext integrity inode size"));
@@ -132,7 +135,7 @@ impl Integrity {
         self.inode(number, bytes)
     }
     // Native writers remain private until their full profile qualification.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub fn stamp_descriptor(&self, group: u32, bytes: &mut [u8]) -> io::Result<()> {
         if !matches!(bytes.len(), 32 | 64) {
             return Err(unsupported("ext integrity descriptor size"));
@@ -256,15 +259,16 @@ impl Integrity {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     fn unhex(text: &str) -> Vec<u8> {
         text.as_bytes()
             .chunks_exact(2)
-            .map(|b| u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap())
+            .map(|b| u8::from_str_radix(crate::platform::str::from_utf8(b).unwrap(), 16).unwrap())
             .collect()
     }
+    #[cfg(feature = "std")]
     #[test]
     fn native_crc16_descriptors_and_absent_integrity() {
         // Independently authored mke2fs ext4 16MiB/1KiB/I256 fixture, -O

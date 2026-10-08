@@ -1,6 +1,9 @@
 //! Shared structural GPT decoding and checksums.
-use std::io;
-use virtdisk::ReadAt;
+use crate::io::ReadAt;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }

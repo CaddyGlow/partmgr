@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::*, fs_flash::*, fs_jffs2::*, fs_jffs2_audit::*, fs_jffs2_edit::*, storage::Storage,
 };

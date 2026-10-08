@@ -1,19 +1,22 @@
 //! Same-owner metadata preparation for future recoverable HFS+ operations.
 //! Mutable storage is never exposed as an immutable ReadAt source.
-use crate::{
-    fs_core::*,
-    fs_hfsplus::{HfsPlusReadLimits, HfsPlusVolume, bad, budget, vector},
-    fs_hfsplus_audit::{HfsPlusAuditLimits, HfsPlusAuditReport, audit_hfsplus},
-    storage::{Storage, WriteRange},
-};
-use std::{
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     fmt, io,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
 };
-use virtdisk::ReadAt;
+use crate::{
+    fs_core::*,
+    fs_hfsplus::{HfsPlusReadLimits, HfsPlusVolume, bad, budget, vector},
+    fs_hfsplus_audit::{HfsPlusAuditLimits, HfsPlusAuditReport, audit_hfsplus},
+    storage::{Storage, WriteRange},
+};
 const PAGE: usize = 512;
 #[derive(Clone, Copy)]
 pub(crate) struct Limits {
@@ -31,7 +34,7 @@ impl fmt::Display for MissingPage {
         write!(f, "uncopied HFS+ metadata page {}", self.0)
     }
 }
-impl std::error::Error for MissingPage {}
+impl crate::platform::error::Error for MissingPage {}
 struct Work {
     used: AtomicU64,
     ceiling: u64,
@@ -139,7 +142,7 @@ impl<S: Storage> Prepared<S> {
             &target,
             length,
             vector(limits.pages)?,
-            (limits.pages, limits.attempts),
+            (limits.pages, limits.attempts, decoder_charge),
             r,
             Arc::new(move |bytes| discovery_work.charge(bytes)),
             move |source| {
@@ -295,12 +298,13 @@ impl<S: Storage> Prepared<S> {
 #[path = "fs_hfsplus_owned_transaction.rs"]
 pub(crate) mod transaction;
 
+#[cfg(feature = "std")]
 #[test]
 fn same_owner_complete_metadata_snapshot_no_payload_prefetch_and_refunds() {
     use super::independent as fixture;
     struct Owned {
         bytes: Vec<u8>,
-        reads: std::sync::Mutex<Vec<(u64, usize)>>,
+        reads: crate::platform::sync::Mutex<Vec<(u64, usize)>>,
         fail_io: bool,
     }
     impl Storage for Owned {
@@ -355,7 +359,7 @@ fn same_owner_complete_metadata_snapshot_no_payload_prefetch_and_refunds() {
         };
         let target = Owned {
             bytes: fixture::hfsplus_seed(binary),
-            reads: std::sync::Mutex::new(Vec::new()),
+            reads: crate::platform::sync::Mutex::new(Vec::new()),
             fail_io: false,
         };
         let mut prepared = Prepared::open(target, limits, &r).unwrap();
@@ -433,7 +437,7 @@ fn same_owner_complete_metadata_snapshot_no_payload_prefetch_and_refunds() {
         assert_eq!(r.memory.used(), 0);
         let target = Owned {
             bytes: fixture::hfsplus_seed(binary),
-            reads: std::sync::Mutex::new(Vec::new()),
+            reads: crate::platform::sync::Mutex::new(Vec::new()),
             fail_io: false,
         };
         assert!(Prepared::open(target, Limits { pages: 1, ..limits }, &r).is_err());
@@ -447,7 +451,7 @@ fn same_owner_complete_metadata_snapshot_no_payload_prefetch_and_refunds() {
         ] {
             let target = Owned {
                 bytes: fixture::hfsplus_seed(binary),
-                reads: std::sync::Mutex::new(Vec::new()),
+                reads: crate::platform::sync::Mutex::new(Vec::new()),
                 fail_io: false,
             };
             assert!(Prepared::open(target, failed_limits, &r).is_err());
@@ -461,14 +465,14 @@ fn same_owner_complete_metadata_snapshot_no_payload_prefetch_and_refunds() {
         damaged[bitmap_byte] &= !(0x80 >> (12 % 8));
         let target = Owned {
             bytes: damaged,
-            reads: std::sync::Mutex::new(Vec::new()),
+            reads: crate::platform::sync::Mutex::new(Vec::new()),
             fail_io: false,
         };
         assert!(Prepared::open(target, limits, &r).is_err());
         assert_eq!(r.memory.used(), 0);
         let target = Owned {
             bytes: fixture::hfsplus_seed(binary),
-            reads: std::sync::Mutex::new(Vec::new()),
+            reads: crate::platform::sync::Mutex::new(Vec::new()),
             fail_io: true,
         };
         let error = match Prepared::open(target, limits, &r) {
@@ -480,7 +484,7 @@ fn same_owner_complete_metadata_snapshot_no_payload_prefetch_and_refunds() {
         r.cancellation.cancel();
         let target = Owned {
             bytes: fixture::hfsplus_seed(binary),
-            reads: std::sync::Mutex::new(Vec::new()),
+            reads: crate::platform::sync::Mutex::new(Vec::new()),
             fail_io: false,
         };
         assert!(Prepared::open(target, limits, &r).is_err());

@@ -1,6 +1,9 @@
 //! Bounded native exFAT namespace changes under the retained exclusive-session audit.
 use super::*;
 use crate::fs_exfat_volume::{ExfatDirectory, ExfatEntry};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 /// Caller-supplied native creation fields. Type, secondary count and checksum must be zero.
 pub struct ExfatCreateMetadata {
     /// Exact primary directory entry template; attributes and native times are retained.
@@ -474,7 +477,11 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
         }
     }
     fn initialize_parent(&self, place: &mut Placement, p: &mut Planner<'_, S>) -> Result<()> {
-        for (&c, b) in place.growth.iter().zip(std::mem::take(&mut place.buffers)) {
+        for (&c, b) in place
+            .growth
+            .iter()
+            .zip(crate::platform::mem::take(&mut place.buffers))
+        {
             p.patch(self.boot.cluster_offset(c)?, b)?;
         }
         Ok(())
@@ -528,7 +535,7 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
         decoder: &ExfatDecoder<&dyn Storage>,
         p: &mut Planner<'_, S>,
     ) -> Result<()> {
-        let mut edits = std::collections::BTreeMap::<u64, u8>::new();
+        let mut edits = crate::platform::collections::BTreeMap::<u64, u8>::new();
         for &c in clusters {
             p.tick(1 + (edits.len() + 1).ilog2() as usize)?;
             let (at, mask) = decoder.bitmap_position(c)?;
@@ -536,8 +543,8 @@ impl<S: Storage, J: Storage> ExfatEditor<S, J> {
                 return Err(budget("exFAT bitmap publication ceiling"));
             }
             let byte = match edits.entry(at) {
-                std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
-                std::collections::btree_map::Entry::Vacant(e) => {
+                crate::platform::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
+                crate::platform::collections::btree_map::Entry::Vacant(e) => {
                     let mut b = [0];
                     self.target.read_exact_at(at, &mut b).map_err(native)?;
                     e.insert(b[0])

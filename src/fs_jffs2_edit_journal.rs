@@ -1,5 +1,8 @@
 //! Private bounded external JFFS2 intent journal; never a NOR undo log.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 const MAGIC: &[u8; 8] = b"JFF2TX01";
 const COMPRESSED_MAGIC: &[u8; 8] = b"JFF2TX02";
 pub(super) const BODY_AT: u64 = 1024;
@@ -326,7 +329,7 @@ pub(super) fn load_profile(
         || (op == 2 && seq > 3)
         || seq == 0
         || (seq - 1) % 2
-            != if std::ptr::eq(h.as_ptr(), a.as_ptr()) {
+            != if crate::platform::ptr::eq(h.as_ptr(), a.as_ptr()) {
                 0
             } else {
                 1
@@ -442,10 +445,11 @@ pub(super) fn load_profile(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
 
+    #[cfg(feature = "std")]
     #[test]
     fn versioned_profile_requires_exact_codec_caps_and_reserved_bytes() {
         let profile = CompressionProfile {

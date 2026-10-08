@@ -1,5 +1,8 @@
 //! Independent native legacy structural qualification; no public profile admission.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) fn read_audit(
     out: &Path,
@@ -46,7 +49,7 @@ pub(super) fn read_audit(
             fs::write(&empty, []).unwrap();
             let mut native_commands = format!("write \"{}\" /payload\nea_set /payload user.partmgr {}\nln /payload /alias\nln /payload /native", payload.display(), "z".repeat(600)).into_bytes();
             native_commands.extend_from_slice(b"\xff\nset_inode_field /payload links_count 3\n");
-            let mut names = std::collections::BTreeSet::new();
+            let mut names = crate::platform::collections::BTreeSet::new();
             for n in 0..400 {
                 let name = format!("entry{n:03}{}", "n".repeat(247));
                 assert_eq!(name.len(), 255);

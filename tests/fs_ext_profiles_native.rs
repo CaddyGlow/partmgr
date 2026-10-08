@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 //! Independently authored e2fsprogs extent/journal fixtures; never production builder seeds.
 use partmgr::{
     fs_core::{Budget, Cancellation, FileRead, Resources},

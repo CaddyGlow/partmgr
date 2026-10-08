@@ -1,9 +1,9 @@
 //! Strict immutable bare HFS+/HFSX profiles with checked catalog and extents B-trees.
-use crate::{
-    fs_core::*,
-    fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent},
-};
-use std::{
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     collections::{BTreeMap, BTreeSet},
     io,
     sync::{
@@ -11,7 +11,10 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-use virtdisk::ReadAt;
+use crate::{
+    fs_core::*,
+    fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent},
+};
 #[path = "fs_hfsplus_node.rs"]
 pub(crate) mod authoring_node;
 static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
@@ -1132,7 +1135,7 @@ impl HfsPlusVolume {
     pub(crate) fn directory_entries(
         &self,
         id: &ObjectId,
-        range: std::ops::Range<usize>,
+        range: crate::platform::ops::Range<usize>,
         r: &Resources,
     ) -> Result<Vec<DirectoryEntry>> {
         let ids = self.child_ids(id)?;

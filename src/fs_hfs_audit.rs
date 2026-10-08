@@ -1,9 +1,12 @@
 //! Complete allocation and native-reference proof for the declared classic HFS baseline.
+use crate::platform::collections::{BTreeMap, BTreeSet, VecDeque};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_core::*,
     fs_hfs::{HfsVolume, bad, be16, budget, vector},
 };
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
 /// Independent global traversal/report ceilings.
 #[derive(Clone, Copy, Debug)]
 pub struct HfsAuditLimits {

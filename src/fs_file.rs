@@ -4,8 +4,11 @@
 //! constructing a handle. Construction validates ranges, not filesystem ownership.
 //! The retained source carries provenance and shared read accounting. No payload
 //! is decoded during construction; lookup uses a binary search over a bounded map.
-use std::{io, sync::Arc};
-use virtdisk::ReadAt;
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{io, sync::Arc};
 
 /// Meaning of one logical file range.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

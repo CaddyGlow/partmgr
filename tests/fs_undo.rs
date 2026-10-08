@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, Resources},
     fs_undo::{self, UndoBinding, UndoLimits, UndoPlan, UndoState},

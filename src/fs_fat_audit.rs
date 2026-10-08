@@ -1,12 +1,15 @@
 //! Read-only FAT ownership audit. Sources must remain immutable throughout.
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{io, sync::Arc};
 use crate::{
     fs_core::{Reservation, Resources},
     fs_fat::{
         FatDecodeRead, FatDecoder, FatEntry, FatFamily, FatGeometry, FatStorageDecoder, FatVolume,
     },
 };
-use std::{io, sync::Arc};
-use virtdisk::ReadAt;
 
 /// Explicit whole-volume work bounds, independent of memory accounting.
 #[derive(Clone, Copy, Debug)]

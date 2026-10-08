@@ -1,10 +1,13 @@
 //! Reviewable editing over owned layouts, with explicit filesystem prerequisites.
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     error::Error,
     layout::{DiskLayout, LbaRange},
     payload::FilesystemResize,
 };
-use std::io;
 /// A boundary change and the payload work it requires.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Change {

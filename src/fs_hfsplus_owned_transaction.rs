@@ -1,6 +1,9 @@
 //! Private dirty-fenced range commits. Cold native recovery qualification follows.
 use super::*;
 use crate::fs_undo::{UndoBinding, UndoFailure, UndoLimits, UndoPlan, UndoStatus};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 fn failure(source: Error) -> UndoFailure {
     UndoFailure {
@@ -133,7 +136,7 @@ impl<S: Storage> Prepared<S> {
         binding: UndoBinding,
         undo_limits: UndoLimits,
         r: &Resources,
-    ) -> std::result::Result<UndoStatus, UndoFailure> {
+    ) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
         if self.uncertain {
             return Err(failure(Error::new(
                 ErrorKind::InvalidOperation,
@@ -217,6 +220,7 @@ impl<S: Storage> Prepared<S> {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn private_dirty_fenced_range_commit_exact_bytes_and_stale_generation() {
     use crate::fs_undo::{self, UndoState};
@@ -367,15 +371,16 @@ fn private_dirty_fenced_range_commit_exact_bytes_and_stale_generation() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit fresh-image native HFS+ owned range commit gate"]
 fn native_private_owned_range_commit_complete_payload_and_exact_image() {
+    use crate::platform::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
     use crate::{
         fs_hfsplus::edit::{HfsPlusEditLimits, HfsPlusEditSession},
         fs_undo::{self, UndoState},
     };
     use sha2::{Digest, Sha256};
-    use std::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
     struct FileStore(fs::File);
     impl Storage for FileStore {
         fn len(&self) -> io::Result<u64> {
@@ -392,7 +397,8 @@ fn native_private_owned_range_commit_complete_payload_and_exact_image() {
         }
     }
     let output = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_OWNED_EVIDENCE").expect("fresh evidence required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_OWNED_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
     fs::create_dir(&output).unwrap();
@@ -553,15 +559,16 @@ fn native_private_owned_range_commit_complete_payload_and_exact_image() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit fresh-image native HFS+ cold recovery gate"]
 fn native_private_owned_range_recovery_complete_payload_and_exact_image() {
+    use crate::platform::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
     use crate::{
         fs_hfsplus::edit::{HfsPlusEditLimits, HfsPlusEditSession, HfsPlusRecoverySelection},
         fs_undo::{self, UndoState},
     };
     use sha2::{Digest, Sha256};
-    use std::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
     struct FileStore(fs::File);
     struct StopPayload(FileStore);
     impl Storage for StopPayload {
@@ -598,7 +605,8 @@ fn native_private_owned_range_recovery_complete_payload_and_exact_image() {
         }
     }
     let output = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_RECOVERY_EVIDENCE").expect("fresh evidence required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_RECOVERY_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
     fs::create_dir(&output).unwrap();
@@ -804,7 +812,7 @@ pub(super) fn commit_dirty(
     states: [(u64, u8); 2],
     limits: Limits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     plan.commit(
         &mut DirtyTarget {
             target,

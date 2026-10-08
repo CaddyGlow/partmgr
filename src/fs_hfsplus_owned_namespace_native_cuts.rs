@@ -1,7 +1,10 @@
 //! Native fsck, namespace and complete fork validation for every resolved cut.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{cell::Cell, fs, path::PathBuf, process::Command};
 use sha2::{Digest, Sha256};
-use std::{cell::Cell, fs, path::PathBuf, process::Command};
 const CHECKER: &str =
     "/nix/store/kvh9g90h1506i4q3ah4mf7v23f5agvr8-hfsprogs-627.40.1-linux/bin/fsck.hfsplus";
 const ICAT: &str = "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat";
@@ -23,7 +26,7 @@ pub(super) struct Gate {
     tools: Vec<(&'static str, Vec<u8>)>,
     cases: Cell<usize>,
 }
-fn extract(path: &std::path::Path, id: &str) -> Vec<u8> {
+fn extract(path: &crate::platform::path::Path, id: &str) -> Vec<u8> {
     let result = Command::new(ICAT)
         .args(["-f", "hfs"])
         .arg(path)
@@ -48,7 +51,7 @@ impl Gate {
     }
     fn open_profile(directory_moves: bool, directory_deletes: bool, file_deletes: bool) -> Self {
         let output = PathBuf::from(
-            std::env::var_os("PARTMGR_HFSPLUS_RENAME_CUT_EVIDENCE")
+            crate::platform::env::var_os("PARTMGR_HFSPLUS_RENAME_CUT_EVIDENCE")
                 .expect("fresh evidence required"),
         );
         assert!(!output.exists());

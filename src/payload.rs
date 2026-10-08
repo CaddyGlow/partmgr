@@ -3,9 +3,12 @@
 //! Copying requires exclusive disk access and a separate recovery medium with
 //! capacity for a complete disk snapshot plus 256 bytes. RAM usage is bounded by
 //! the chosen chunk size. Retain that medium until the containing layout commits.
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::storage::Storage;
 use sha2::{Digest, Sha256};
-use std::io;
 const SNAPSHOT: u64 = 256;
 fn invalid(s: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, s)

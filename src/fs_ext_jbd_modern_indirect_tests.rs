@@ -1,5 +1,8 @@
 //! Independently assembled checksum-profile legacy maps; no production fixture codec.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 fn fixture_direct(extent_feature: bool) -> Vec<u8> {
     let mut bytes = fixture();
     let seed = crc(!0, &[0x39; 16]);
@@ -65,6 +68,7 @@ fn limits() -> (session::Limits, ExtEditLimits) {
     };
     (limits, planning)
 }
+#[cfg(feature = "std")]
 #[test]
 fn checksum_indirect_extend_crosses_single_double_truncate_preserves_profile_and_refunds() {
     let (limits, planning) = limits();
@@ -192,6 +196,7 @@ fn checksum_indirect_extend_crosses_single_double_truncate_preserves_profile_and
         assert_eq!(r.memory.used(), 0);
     }
 }
+#[cfg(feature = "std")]
 #[test]
 fn checksum_without_extent_feature_create_move_and_delete_preserves_indirect_profile() {
     let (limits, planning) = limits();
@@ -299,6 +304,7 @@ fn checksum_without_extent_feature_create_move_and_delete_preserves_indirect_pro
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn checksum_indirect_extend_truncate_restart_every_write_barrier_and_torn_cut() {
     let (limits, planning) = limits();

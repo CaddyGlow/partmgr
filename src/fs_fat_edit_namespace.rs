@@ -2,6 +2,9 @@
 use super::resize::{Planner, zeros};
 use super::*;
 use crate::fs_fat::{FatDirectory, FatEntry, FatFamily};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 /// Collision policy for exact caller-provided native names. No alias is generated.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -208,7 +211,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
         let max = capacity.min(self.limits.audit.directory_slots);
         let reservation = r.memory.reserve(
             (max as u64)
-                .checked_mul(std::mem::size_of::<Slot>() as u64)
+                .checked_mul(crate::platform::mem::size_of::<Slot>() as u64)
                 .ok_or_else(|| exhausted("FAT namespace slot reservation overflow"))?,
         )?;
         let mut rows = Vec::new();
@@ -488,7 +491,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
             .and_then(|n| {
                 n.checked_add(
                     (self.limits.undo.patches as u64)
-                        .checked_mul(std::mem::size_of::<WriteRange>() as u64)?,
+                        .checked_mul(crate::platform::mem::size_of::<WriteRange>() as u64)?,
                 )
             })
             .and_then(|n| n.checked_add(2048))

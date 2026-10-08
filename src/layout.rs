@@ -7,8 +7,11 @@
 //! forensic access; these are refused by strict validation and mutation.
 //! GPT rules follow the [UEFI disk-layout specification](https://uefi.org/specs/UEFI/2.11/05_GUID_Partition_Table_Format.html).
 use crate::gpt::{Header, crc32, read_header};
-use std::{collections::HashSet, io};
-use virtdisk::ReadAt;
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{collections::HashSet, io};
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
@@ -199,7 +202,9 @@ impl Entry {
     }
     /// All 36 name units, including terminators and invalid UTF-16.
     pub fn raw_name(&self) -> [u16; 36] {
-        std::array::from_fn(|i| u16::from_le_bytes([self.raw[56 + i * 2], self.raw[57 + i * 2]]))
+        crate::platform::array::from_fn(|i| {
+            u16::from_le_bytes([self.raw[56 + i * 2], self.raw[57 + i * 2]])
+        })
     }
     /// Whether this entry can be exposed as a standalone volume.
     pub fn standalone_volume(&self) -> bool {

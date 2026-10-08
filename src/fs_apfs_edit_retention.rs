@@ -1,6 +1,9 @@
 //! Explicit checkpoint descriptor retirement, separately durable before any allocation reuse.
 use super::*;
 use crate::fs_apfs_audit::{ApfsRetentionProof, prove_apfs_retention};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 /// Source-bound explicit authorization to forget complete checkpoints below a native XID horizon.
 /// This plan cannot free or reuse any allocation and always retains a complete predecessor.

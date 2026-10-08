@@ -1,14 +1,17 @@
 //! Exclusively owned classic ext2 storage sessions with same-owner complete audits.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    io,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use crate::{
     fs_core::{Error, ErrorKind, NativeName, ObjectId, Reservation, Resources, Result},
     fs_ext::{ExtDecodedFileMap, ExtGeometry, ExtInode, ExtStorageDecoder},
     fs_ext_audit::{ExtAuditLimits, ExtAuditReport, audit_ext_storage},
     fs_undo::{self, UndoLimits, UndoState},
     storage::Storage,
-};
-use std::{
-    io,
-    sync::atomic::{AtomicU64, Ordering},
 };
 #[path = "fs_ext_edit_allocation.rs"]
 pub(crate) mod allocation;

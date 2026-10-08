@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 #[path = "fixtures/ntfs_clean.rs"]
 mod ntfs_clean;
 use ntfs_clean::*;

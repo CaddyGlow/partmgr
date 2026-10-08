@@ -1,18 +1,21 @@
 //! Owned APFS sessions. Copied metadata is immutable; mutable storage is never a `ReadAt`.
-use crate::{
-    fs_apfs::{ApfsContainer, ApfsReadLimits, ApfsVolume},
-    fs_apfs_audit::{ApfsAuditLimits, ApfsAuditReport, audit_apfs},
-    fs_core::*,
-    storage::Storage,
-};
-use std::{
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     fmt, io,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
 };
-use virtdisk::ReadAt;
+use crate::{
+    fs_apfs::{ApfsContainer, ApfsReadLimits, ApfsVolume},
+    fs_apfs_audit::{ApfsAuditLimits, ApfsAuditReport, audit_apfs},
+    fs_core::*,
+    storage::Storage,
+};
 const BLOCK: usize = 4096;
 type MetadataBlock = (u64, Arc<[u8; BLOCK]>);
 static SCOPES: AtomicU64 = AtomicU64::new(1);
@@ -46,7 +49,7 @@ impl fmt::Display for MissingBlock {
         f.write_str("uncopied APFS immutable metadata block")
     }
 }
-impl std::error::Error for MissingBlock {}
+impl crate::platform::error::Error for MissingBlock {}
 struct WorkCounter {
     used: AtomicU64,
     ceiling: AtomicU64,
@@ -255,7 +258,7 @@ impl<S: Storage> ApfsEditor<S> {
                 &target,
                 length,
                 blocks,
-                (limits.metadata_blocks, limits.attempts),
+                (limits.metadata_blocks, limits.attempts, attempt_charge),
                 r,
                 Arc::new(move |n| discover_work.charge(n)),
                 move |source| decode(source).map(|_| ()),

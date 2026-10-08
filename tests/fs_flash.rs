@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, Resources},
     fs_flash::{FlashGeometry, FlashImage, FlashLayout, FlashLimits, FlashProgramming},

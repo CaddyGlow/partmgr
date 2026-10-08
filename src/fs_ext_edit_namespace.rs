@@ -3,6 +3,9 @@ use super::allocation::{Phase, Planner, data_blocks, mapped_inode, publish_map};
 use super::*;
 use crate::fs_ext::{ExtDirectory, ExtEntry};
 use crate::fs_file::ExtentKind;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 fn bad(message: &str) -> Error {
     Error::new(ErrorKind::InvalidOperation, message)
 }
@@ -237,7 +240,7 @@ fn layout(d: &ExtEditDirectory, p: &mut Planner<'_>) -> Result<Layout> {
     }
     let lease =
         p.r.memory
-            .reserve(max as u64 * (std::mem::size_of::<Row>() as u64 + 255))?;
+            .reserve(max as u64 * (crate::platform::mem::size_of::<Row>() as u64 + 255))?;
     let mut rows = Vec::new();
     rows.try_reserve_exact(max)
         .map_err(|_| budget("ext2 directory rows"))?;

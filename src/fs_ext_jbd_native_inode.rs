@@ -1,5 +1,8 @@
 //! Independently authored native uninitialized-inode bitmap materialization oracle.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) fn operations(
     out: &Path,

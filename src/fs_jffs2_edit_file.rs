@@ -1,5 +1,8 @@
 //! Bounded inode-preserving regular-file range transactions.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 impl<F: FlashStorage> Jffs2Editor<F> {
     /// Replace a contiguous range from a deferred source, then publish explicit final length.
     /// All native hardlinks retain their inode. Unwritten extension gaps read as zero.

@@ -1,6 +1,9 @@
 //! Borrowed final-redo decoding; no immutable payload capability is constructed.
 use super::*;
 use crate::fs_ext_audit::{ExtAuditLimits, ExtAuditReport};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::storage::Storage;
 
 pub(crate) struct JournalControl {
@@ -211,7 +214,7 @@ impl super::super::ExtDecodeRead for Overlay<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -253,6 +256,7 @@ mod tests {
             findings: 8,
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn complete_borrowed_overlay_rejects_checksum_valid_semantic_defect_before_writes() {
         let resources = Resources {

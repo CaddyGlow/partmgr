@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 //! Explicit external-tool gates: ignored in portable CI, mandatory in tool CI.
 use partmgr::{
     codec::initialize_plan,

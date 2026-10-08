@@ -1,6 +1,6 @@
 [package]
 name = "partmgr"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
@@ -12,12 +12,71 @@ homepage = "https://github.com/CaddyGlow/partmgr"
 keywords = ["partition", "gpt", "mbr", "disk"]
 categories = ["filesystem", "parser-implementations"]
 
+[features]
+default = ["std"]
+std = ["dep:virtdisk", "sha2/std"]
+
 [dependencies]
-virtdisk = { version = "0.2.0" }
-sha2 = "0.10"
-flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+virtdisk = { version = "0.2.0", optional = true }
+sha2 = { version = "0.10", default-features = false }
+hashbrown = { version = "0.17.1", default-features = false, features = ["default-hasher", "inline-more"] }
+spin = { version = "0.9.8", default-features = false, features = ["mutex", "spin_mutex"] }
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
+
+[[bench]]
+name = "refactoring"
+harness = false
+
+[[example]]
+name = "filesystem-apfs-copy"
+required-features = ["std"]
+
+[[example]]
+name = "filesystem-exfat-copy"
+required-features = ["std"]
+
+[[example]]
+name = "filesystem-exfat-inspect"
+required-features = ["std"]
+
+[[example]]
+name = "filesystem-ext-copy"
+required-features = ["std"]
+
+[[example]]
+name = "filesystem-fat-build-tree"
+required-features = ["std"]
+
+[[example]]
+name = "filesystem-fat-build"
+required-features = ["std"]
+
+[[example]]
+name = "filesystem-fat-copy"
+required-features = ["std"]
+
+[[example]]
+name = "filesystem-fat-inspect"
+required-features = ["std"]
+
+[[example]]
+name = "filesystem-io-bench"
+required-features = ["std"]
+
+[[example]]
+name = "filesystem-read-bench"
+required-features = ["std"]
+
+[[example]]
+name = "firmware-image"
+required-features = ["std"]
+
+[[example]]
+name = "rename-gpt"
+required-features = ["std"]
 
 [dev-dependencies]
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 tempfile = "3.23"
 
 # Exhaustive recovery-cut tests repeatedly decode and audit whole filesystems.

@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     payload::{CopyOperation, CopyOutcome},
     storage::Storage,

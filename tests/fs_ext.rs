@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::{Budget, Cancellation, NativeName, Resources},
     fs_ext::ExtVolume,

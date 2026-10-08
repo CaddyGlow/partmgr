@@ -5,7 +5,14 @@
 //! values; writes require an explicit exclusive [`storage::Storage`] capability.
 //! GPT recovery is an explicit source-selection operation in [`recovery`].
 //! Filesystem and firmware operations have separate adapters and outcomes.
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
+
+extern crate alloc;
+
+/// Portable positional I/O, with native standard-library compatibility by default.
+pub mod io;
+mod platform;
 
 /// Deterministic table serialization and ordered commit planning.
 pub mod codec;

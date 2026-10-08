@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::{
         Availability, Budget, Cancellation, ErrorKind, Family, Operation, Resources, StreamKind,

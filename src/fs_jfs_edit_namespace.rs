@@ -1,6 +1,9 @@
 //! Private bounded native namespace codec; publication remains separately checked.
 use crate::fs_core::*;
 use crate::fs_jfs::{Entry, bad, budget};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) fn rename_inline(
     original: &[u8; 512],

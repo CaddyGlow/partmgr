@@ -1,17 +1,20 @@
 //! Strict offline JFFS2 logical NOR node inventory and uncompressed reconstruction.
-use crate::{
-    fs_core::*,
-    fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent},
-    fs_flash::{FlashGeometry, FlashLayout, FlashProgramming},
-};
-use std::{
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     io,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
 };
-use virtdisk::ReadAt;
+use crate::{
+    fs_core::*,
+    fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent},
+    fs_flash::{FlashGeometry, FlashLayout, FlashProgramming},
+};
 #[path = "fs_jffs2_compression.rs"]
 pub(crate) mod compression;
 pub use compression::Jffs2CompressionLimits;
@@ -116,10 +119,10 @@ impl ReadAt for Checked {
         }
         self.source.read_exact_at(p, b)
     }
-    fn context(&self) -> virtdisk::ReadContext {
+    fn context(&self) -> crate::io::ReadContext {
         self.source.context()
     }
-    fn budget(&self) -> Option<virtdisk::ReadBudget> {
+    fn budget(&self) -> Option<crate::io::ReadBudget> {
         self.source.budget()
     }
     fn sparse_holes(&self) -> io::Result<Vec<(u64, u64)>> {
@@ -1008,10 +1011,10 @@ impl FileRead for Jffs2File {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[path = "../tests/fixtures/jffs2_clean.rs"]
 pub(crate) mod borrowed_fixture;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod borrowed_tests {
     use super::*;
     use crate::{
@@ -1066,6 +1069,7 @@ mod borrowed_tests {
             self.flash.read_exact_at(p, out, self.r)
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn borrowed_owned_flash_reuses_checked_decode_and_audit_without_read_at() {
         let geometry = FlashGeometry {

@@ -1,10 +1,13 @@
 //! Complete allocation/reference accounting for the explicitly indexed XFS leaf baseline.
 //! An immutable result grants no discard or mutation authority.
+use crate::platform::collections::VecDeque;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_core::*,
     fs_xfs::{XfsVolume, budget, invalid},
 };
-use std::collections::VecDeque;
 /// Independent full-audit traversal and retained-findings ceilings.
 #[derive(Clone, Copy, Debug)]
 pub struct XfsAuditLimits {

@@ -2,8 +2,11 @@
 use super::commit::ResizeRequest;
 use super::*;
 use crate::fs_undo::{UndoBinding, UndoLimits, UndoState};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
 use sha2::{Digest, Sha256};
-use std::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
 struct FileStore(fs::File);
 impl Storage for FileStore {
     fn len(&self) -> io::Result<u64> {
@@ -43,7 +46,7 @@ impl Storage for Stop {
         self.store.flush()
     }
 }
-fn store(path: &std::path::Path) -> FileStore {
+fn store(path: &crate::platform::path::Path) -> FileStore {
     FileStore(
         fs::OpenOptions::new()
             .read(true)
@@ -52,7 +55,7 @@ fn store(path: &std::path::Path) -> FileStore {
             .unwrap(),
     )
 }
-fn resource_bytes(icat: &str, path: &std::path::Path) -> Vec<u8> {
+fn resource_bytes(icat: &str, path: &crate::platform::path::Path) -> Vec<u8> {
     let result = Command::new(icat)
         .args(["-f", "hfs"])
         .arg(path)
@@ -73,11 +76,13 @@ fn resource_bytes(icat: &str, path: &std::path::Path) -> Vec<u8> {
     assert!(String::from_utf8_lossy(&info.stdout).contains("Resource fork size:\t0"));
     Vec::new()
 }
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit fresh native HFS+ resize commit/cold recovery gate"]
 fn native_resize_commit_and_torn_bitmap_cold_recovery() {
     let output = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_RESIZE_EVIDENCE").expect("fresh evidence required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_RESIZE_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
     fs::create_dir(&output).unwrap();

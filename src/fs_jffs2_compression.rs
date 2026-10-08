@@ -214,14 +214,20 @@ fn decode_node(
     })
 }
 fn decode_zlib(input: &[u8], out: &mut [u8]) -> Result<()> {
-    let mut decoder = flate2::Decompress::new(true);
-    let status = decoder
-        .decompress(input, out, flate2::FlushDecompress::Finish)
-        .map_err(|_| invalid("JFFS2 invalid ZLIB stream"))?;
-    if status != flate2::Status::StreamEnd
-        || decoder.total_in() != input.len() as u64
-        || decoder.total_out() != out.len() as u64
-    {
+    use miniz_oxide::inflate::{
+        TINFLStatus,
+        core::{DecompressorOxide, decompress, inflate_flags},
+    };
+    let mut decoder = DecompressorOxide::new();
+    let (status, consumed, produced) = decompress(
+        &mut decoder,
+        input,
+        out,
+        0,
+        inflate_flags::TINFL_FLAG_PARSE_ZLIB_HEADER
+            | inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF,
+    );
+    if status != TINFLStatus::Done || consumed != input.len() || produced != out.len() {
         return Err(invalid("JFFS2 ZLIB exact stream/output length"));
     }
     Ok(())
@@ -284,6 +290,27 @@ impl ReadAt for CodecSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zlib_requires_exact_stream_output_and_checksum() {
+        let plain = b"bounded metadata bounded metadata bounded metadata";
+        let encoded = miniz_oxide::deflate::compress_to_vec_zlib(plain, 3);
+        let mut out = [0; 50];
+        assert_eq!(out.len(), plain.len());
+        decode_zlib(&encoded, &mut out).unwrap();
+        assert_eq!(&out, plain);
+        let mut trailing = encoded.clone();
+        trailing.push(0);
+        assert!(decode_zlib(&trailing, &mut out).is_err());
+        assert!(decode_zlib(&encoded[..encoded.len() - 1], &mut out).is_err());
+        assert!(decode_zlib(&encoded, &mut out[..49]).is_err());
+        let mut oversized = [0; 51];
+        assert!(decode_zlib(&encoded, &mut oversized).is_err());
+        let mut corrupt = encoded;
+        let last = corrupt.len() - 1;
+        corrupt[last] ^= 1;
+        assert!(decode_zlib(&corrupt, &mut out).is_err());
+    }
 
     // A borrowed positional source, deliberately without any ReadAt implementation.
     struct BorrowedBytes([u8; 8]);

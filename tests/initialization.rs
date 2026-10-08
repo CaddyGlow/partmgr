@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     codec::{edit_plan, initialize_plan},
     guid::Guid,

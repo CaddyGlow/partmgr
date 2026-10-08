@@ -1,15 +1,18 @@
 //! Independent e2fsprogs replay oracle for the staged native transaction codec.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 use crate::{
     fs_core::{Budget, Cancellation},
     storage::{FileStorage, Storage},
 };
 use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
 fn crc(mut state: u32, bytes: &[u8]) -> u32 {
     state = state.reverse_bits();
     for byte in bytes {
@@ -62,11 +65,12 @@ fn run(
     );
     output.stdout
 }
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit staged native JBD2 codec replay oracle; fresh PARTMGR_EXT_JBD_EVIDENCE and native tools required"]
 fn native_jbd2_codec_e2fsck_replay_and_payload() {
     let out = PathBuf::from(
-        std::env::var_os("PARTMGR_EXT_JBD_EVIDENCE")
+        crate::platform::env::var_os("PARTMGR_EXT_JBD_EVIDENCE")
             .expect("enabled native oracle requires evidence destination"),
     );
     assert!(out.is_absolute());
@@ -127,16 +131,18 @@ fn native_jbd2_codec_e2fsck_replay_and_payload() {
             Sha256::digest(bytes)
         ));
     }
-    let binary = fs::read(std::env::current_exe().unwrap()).unwrap();
+    let binary = fs::read(crate::platform::env::current_exe().unwrap()).unwrap();
     fs::write(out.join("gate-binary"), &binary).unwrap();
     receipt.push_str(&format!("binary_sha256={:x}\n", Sha256::digest(binary)));
     let mut tools = Vec::new();
     let mut commands = 0;
     for name in ["mke2fs", "debugfs", "e2fsck"] {
-        let tool = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-            .map(|p| p.join(name))
-            .find(|p| p.is_file())
-            .expect("enabled gate requires native tool");
+        let tool = crate::platform::env::split_paths(
+            &crate::platform::env::var_os("PATH").unwrap_or_default(),
+        )
+        .map(|p| p.join(name))
+        .find(|p| p.is_file())
+        .expect("enabled gate requires native tool");
         receipt.push_str(&format!(
             "tool={name} path={} sha256={:x}\n",
             tool.display(),

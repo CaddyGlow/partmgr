@@ -1,12 +1,9 @@
 //! Strict immutable single-FAT exFAT namespace and positional file access.
-use crate::{
-    fs_core::{
-        Error, ErrorKind, FileRead, LogicalExtent, ObjectId, Reservation, Resources, Result,
-    },
-    fs_exfat::{ExfatBoot, ExfatDecodeRead},
-    fs_file::{ExtentKind, ExtentMap, FileExtent},
-};
-use std::{
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     collections::HashSet,
     io,
     sync::{
@@ -14,7 +11,13 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-use virtdisk::ReadAt;
+use crate::{
+    fs_core::{
+        Error, ErrorKind, FileRead, LogicalExtent, ObjectId, Reservation, Resources, Result,
+    },
+    fs_exfat::{ExfatBoot, ExfatDecodeRead},
+    fs_file::{ExtentKind, ExtentMap, FileExtent},
+};
 static NEXT_SCOPE: AtomicU64 = AtomicU64::new(1);
 fn bad(context: &str) -> Error {
     Error::new(ErrorKind::InvalidData, context)

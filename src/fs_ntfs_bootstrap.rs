@@ -1,5 +1,8 @@
 //! Private staged MFT bootstrap: read extensions only through proven mappings.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 struct PartialMft {
     extents: Vec<FileExtent>,
     physical: Vec<(u64, u64)>,
@@ -224,7 +227,7 @@ impl PartialMft {
             .and_then(|n| {
                 n.checked_add(
                     (limits.extension_records as u64)
-                        .checked_mul(std::mem::size_of::<NtfsRecord>() as u64)?,
+                        .checked_mul(crate::platform::mem::size_of::<NtfsRecord>() as u64)?,
                 )
             })
             .ok_or_else(|| budget("NTFS bootstrap reference envelope"))?;
@@ -354,7 +357,7 @@ impl PartialMft {
                     ));
                 }
             }
-            for record in std::iter::once(base).chain(records.iter()) {
+            for record in crate::platform::iter::once(base).chain(records.iter()) {
                 work = work
                     .checked_add(
                         record
@@ -504,9 +507,10 @@ pub(super) fn mapped_mft(
     }
     map.complete(context, r)
 }
+#[cfg(feature = "std")]
 #[test]
 fn partial_mapping_never_guesses_unknown_extensions_and_finishes_indexed() {
-    use std::{io, sync::atomic::AtomicUsize};
+    use crate::platform::{io, sync::atomic::AtomicUsize};
     struct Source {
         bytes: Vec<u8>,
         reads: AtomicUsize,
@@ -601,9 +605,10 @@ fn partial_mapping_never_guesses_unknown_extensions_and_finishes_indexed() {
     drop(lease);
     assert_eq!(r.memory.used(), 0);
 }
+#[cfg(feature = "std")]
 #[test]
 fn unresolved_mapping_dependency_is_bounded_and_never_guessed() {
-    use std::io;
+    use crate::platform::io;
     struct Source(Vec<u8>);
     impl ReadAt for Source {
         fn len(&self) -> u64 {
@@ -695,9 +700,10 @@ fn unresolved_mapping_dependency_is_bounded_and_never_guessed() {
     drop(map);
     assert_eq!(r.memory.used(), 0);
 }
+#[cfg(feature = "std")]
 #[test]
 fn native_reference_fixpoint_loads_later_mapped_filename_and_complete_mft() {
-    use std::io;
+    use crate::platform::io;
     fn put16(b: &mut [u8], p: usize, n: u16) {
         b[p..p + 2].copy_from_slice(&n.to_le_bytes());
     }
@@ -749,13 +755,14 @@ fn native_reference_fixpoint_loads_later_mapped_filename_and_complete_mft() {
         }
         b
     }
-    struct Source(Vec<u8>, std::sync::atomic::AtomicUsize);
+    struct Source(Vec<u8>, crate::platform::sync::atomic::AtomicUsize);
     impl ReadAt for Source {
         fn len(&self) -> u64 {
             self.0.len() as u64
         }
         fn read_exact_at(&self, o: u64, b: &mut [u8]) -> io::Result<()> {
-            self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.1
+                .fetch_add(1, crate::platform::sync::atomic::Ordering::Relaxed);
             let at = o as usize;
             b.copy_from_slice(
                 self.0
@@ -793,10 +800,13 @@ fn native_reference_fixpoint_loads_later_mapped_filename_and_complete_mft() {
         put16(&mut list, at + 24, id);
     }
     let mut image = vec![0; 65536];
-    image[2048..3072].copy_from_slice(&raw(0, 0, std::slice::from_ref(&first)));
+    image[2048..3072].copy_from_slice(&raw(0, 0, crate::platform::slice::from_ref(&first)));
     image[2048 + 3072..2048 + 4096].copy_from_slice(&raw(3, 1 << 48, &[data(8, 15, 20, 9)]));
     image[10240 + 2048..10240 + 3072].copy_from_slice(&raw(6, 1 << 48, &[filename]));
-    let counted = Arc::new(Source(image, std::sync::atomic::AtomicUsize::new(0)));
+    let counted = Arc::new(Source(
+        image,
+        crate::platform::sync::atomic::AtomicUsize::new(0),
+    ));
     let source: Arc<dyn ReadAt> = counted.clone();
     let context = Context {
         original: source.clone(),
@@ -842,7 +852,9 @@ fn native_reference_fixpoint_loads_later_mapped_filename_and_complete_mft() {
     )
     .unwrap();
     {
-        let before = counted.1.load(std::sync::atomic::Ordering::Relaxed);
+        let before = counted
+            .1
+            .load(crate::platform::sync::atomic::Ordering::Relaxed);
         let mut capped = PartialMft::new(&first, geometry.clone(), read, &r).unwrap();
         let error = capped
             .resolve_extensions(
@@ -860,7 +872,10 @@ fn native_reference_fixpoint_loads_later_mapped_filename_and_complete_mft() {
         assert_eq!(error.kind, ErrorKind::BudgetExhausted);
         // Mapping extension3 was read; the late FILE_NAME extension6 was not.
         assert_eq!(
-            counted.1.load(std::sync::atomic::Ordering::Relaxed) - before,
+            counted
+                .1
+                .load(crate::platform::sync::atomic::Ordering::Relaxed)
+                - before,
             1
         );
     }

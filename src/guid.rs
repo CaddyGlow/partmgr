@@ -1,5 +1,8 @@
 //! GUID values and lossless GPT names and attributes.
-use std::{fmt, str::FromStr};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{fmt, str::FromStr};
 
 /// An identifier in canonical (network) byte order.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -12,7 +15,7 @@ impl fmt::Display for GuidError {
         f.write_str("invalid, nil, duplicate, or unavailable GUID")
     }
 }
-impl std::error::Error for GuidError {}
+impl crate::platform::error::Error for GuidError {}
 /// Generation failed either in the entropy source or after collision retries.
 #[derive(Debug)]
 pub enum GenerationError<E> {
@@ -29,8 +32,10 @@ impl<E: fmt::Display> fmt::Display for GenerationError<E> {
         }
     }
 }
-impl<E: std::error::Error + 'static> std::error::Error for GenerationError<E> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl<E: crate::platform::error::Error + 'static> crate::platform::error::Error
+    for GenerationError<E>
+{
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         match self {
             Self::Entropy(e) => Some(e),
             Self::Exhausted => None,
@@ -65,7 +70,7 @@ impl Guid {
     }
     /// Reject nil and duplicate identities supplied by a caller.
     pub fn validate_unique(ids: &[Self]) -> Result<(), GuidError> {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = crate::platform::collections::HashSet::new();
         for id in ids {
             if id.is_nil() || !seen.insert(*id) {
                 return Err(GuidError);
@@ -180,7 +185,7 @@ impl fmt::Display for NameError {
         f.write_str("GPT name contains NUL or exceeds 36 UTF-16 units")
     }
 }
-impl std::error::Error for NameError {}
+impl crate::platform::error::Error for NameError {}
 impl GptName {
     /// Preserve all raw code units without attempting Unicode decoding.
     pub const fn from_raw(raw: [u16; 36]) -> Self {
@@ -191,7 +196,7 @@ impl GptName {
         &self.0
     }
     /// Decode the name up to its first NUL, reporting malformed UTF-16.
-    pub fn to_string(&self) -> Result<String, std::string::FromUtf16Error> {
+    pub fn to_string(&self) -> Result<String, crate::platform::string::FromUtf16Error> {
         let end = self.0.iter().position(|&c| c == 0).unwrap_or(36);
         String::from_utf16(&self.0[..end])
     }

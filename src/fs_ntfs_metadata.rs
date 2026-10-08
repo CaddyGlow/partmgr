@@ -1,4 +1,7 @@
 //! Volume-bound native metadata with retained exact ACL bytes.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_core::*,
     fs_ntfs::{NtfsRecord, NtfsVolume},
@@ -82,7 +85,7 @@ pub fn inspect_ntfs_native_metadata(
     r.cancellation.check()?;
     let lease = r
         .memory
-        .reserve(std::mem::size_of::<NtfsNativeMetadata>() as u64)?;
+        .reserve(crate::platform::mem::size_of::<NtfsNativeMetadata>() as u64)?;
     Ok(NtfsNativeMetadata {
         base,
         security,
@@ -145,7 +148,7 @@ pub fn inspect_ntfs_resolved_attributes(
     r.cancellation.check()?;
     let attributes = volume.native_attributes(object, limits, r)?;
     check_resolved_attributes(volume, object, attributes.get(), r)?;
-    let charge = (std::mem::size_of::<NtfsResolvedAttributeMetadata>() as u64)
+    let charge = (crate::platform::mem::size_of::<NtfsResolvedAttributeMetadata>() as u64)
         .checked_add(object.native.len() as u64)
         .ok_or_else(|| metadata_cap("NTFS attribute metadata identity charge"))?;
     let lease = r.memory.reserve(charge)?;
@@ -256,7 +259,7 @@ fn map_resolved_attributes(
                         "NTFS metadata physical record identity",
                     )
                 })?);
-            use std::fmt::Write;
+            use crate::platform::fmt::Write;
             let mut label = String::new();
             // Maximum native numeric widths and separators fit below 256 bytes.
             // This allocation is covered by the per-attribute 512-byte envelope.
@@ -342,7 +345,7 @@ pub fn inspect_ntfs_resolved_metadata(
     check_resolved_attributes(volume, object, attributes.get(), r)?;
     let lease = r
         .memory
-        .reserve(std::mem::size_of::<NtfsResolvedNativeMetadata>() as u64)?;
+        .reserve(crate::platform::mem::size_of::<NtfsResolvedNativeMetadata>() as u64)?;
     Ok(NtfsResolvedNativeMetadata {
         attributes,
         security,

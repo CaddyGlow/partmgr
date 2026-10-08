@@ -1,5 +1,8 @@
 //! Staged exclusive native-journal editor bootstrap; no public mutation API yet.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_jfs_audit::{JfsAuditLimits, audit_decoded},
     storage::Storage,
@@ -78,6 +81,7 @@ impl FileRead for CowTestPayload {
         Err(Error::new(ErrorKind::Unsupported, "test payload only"))
     }
 }
+#[cfg(feature = "std")]
 #[test]
 fn bounded_recorded_run_cow_streams_multiple_blocks_and_preserves_hardlinks() {
     let r = Resources {
@@ -566,6 +570,7 @@ fn bounded_recorded_run_cow_streams_multiple_blocks_and_preserves_hardlinks() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn borrowed_dense_range_cow_preserves_old_spans_and_materializes_gap() {
     let r = Resources {
@@ -778,6 +783,7 @@ fn borrowed_dense_range_cow_preserves_old_spans_and_materializes_gap() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn dense_range_preflight_and_deferred_failure_preserve_exclusive_authority() {
     let r = Resources {
@@ -901,6 +907,7 @@ fn dense_range_preflight_and_deferred_failure_preserve_exclusive_authority() {
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn native_empty_truncation_frees_old_run_without_payload_programming() {
     let r = Resources {
@@ -1114,14 +1121,17 @@ fn native_empty_truncation_frees_old_run_without_payload_programming() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn fragmented_inline_cow_preserves_logical_holes_unwritten_data_and_hardlinks() {
     run_fragmented_cow_matrix(false, true);
 }
+#[cfg(feature = "std")]
 #[test]
 fn external_regular_cow_all_program_barrier_cuts_recover_four_persistence_profiles() {
     run_fragmented_cow_matrix(true, true);
 }
+#[cfg(feature = "std")]
 #[test]
 fn external_saved_root_and_metadata_free_errors_reject_before_mutation() {
     run_fragmented_cow_matrix(true, false);
@@ -1155,7 +1165,7 @@ fn run_fragmented_cow_matrix(external: bool, cuts: bool) {
     let old_blocks = if external { 18 } else { 4 };
     let new: usize = if external { 220 } else { 160 };
     let old_indices: Vec<usize> = if external {
-        std::iter::once(130)
+        crate::platform::iter::once(130)
             .chain((0..17).map(|index| 150 + index * 2))
             .collect()
     } else {
@@ -1956,9 +1966,10 @@ impl<'a> NativeSession<'a> {
 
 #[path = "../tests/fixtures/jfs_clean.rs"]
 mod fixture;
+#[cfg(feature = "std")]
 #[test]
 fn borrowed_storage_bootstrap_never_reads_payload_or_writes_and_refunds() {
-    use std::cell::RefCell;
+    use crate::platform::cell::RefCell;
     struct Backend {
         bytes: Vec<u8>,
         reads: RefCell<Vec<(u64, usize)>>,
@@ -2089,6 +2100,7 @@ fn external_regular_fixture(image: &mut [u8]) {
     fixture::rebuild_map(image, &used);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independently_authored_external_regular_tree_cow_preserves_hardlinks_and_frees_metadata() {
     let r = Resources {
@@ -2209,7 +2221,7 @@ fn independently_authored_external_regular_tree_cow_preserves_hardlinks_and_free
         }
     );
     assert_eq!(le32(&after.nodes[&6].raw, 40), 2);
-    for block in std::iter::once(130).chain((0..17).map(|index| 150 + index * 2)) {
+    for block in crate::platform::iter::once(130).chain((0..17).map(|index| 150 + index * 2)) {
         assert!(!after.bitmap[block]);
         assert_eq!(
             &storage.bytes[block * 4096..(block + 1) * 4096],
@@ -2238,6 +2250,7 @@ fn independently_authored_external_regular_tree_cow_preserves_hardlinks_and_free
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn external_regular_recovery_every_program_and_barrier_restarts_with_four_persistence_models() {
     let r = Resources {
@@ -2302,7 +2315,7 @@ fn external_regular_recovery_every_program_and_barrier_restarts_with_four_persis
         );
         assert!(node.pages.is_empty());
         assert_eq!(le32(&node.raw, 40), 2);
-        for block in std::iter::once(130).chain((0..17).map(|index| 150 + index * 2)) {
+        for block in crate::platform::iter::once(130).chain((0..17).map(|index| 150 + index * 2)) {
             assert!(!decoded.bitmap[block]);
             assert_eq!(
                 &storage.bytes[block * 4096..(block + 1) * 4096],
@@ -2413,6 +2426,7 @@ fn journal_seed() -> Vec<u8> {
     b
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn staged_native_uid_lifecycle_preserves_all_other_inode_bytes_and_is_sticky_after_write_failure() {
     struct Backend {
@@ -2523,6 +2537,7 @@ fn staged_native_uid_lifecycle_preserves_all_other_inode_bytes_and_is_sticky_aft
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn staged_native_committed_uid_recovery_validates_first_restarts_and_complete_does_not_write() {
     struct Backend {
@@ -2654,6 +2669,7 @@ fn staged_native_committed_uid_recovery_validates_first_restarts_and_complete_do
     assert_eq!(storage.writes, writes);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn staged_native_committed_barrier_restart_retains_or_discards_volatile_bytes() {
     #[derive(Clone)]
@@ -2876,29 +2892,31 @@ fn staged_native_committed_barrier_restart_retains_or_discards_volatile_bytes() 
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "requires fresh PARTMGR_JFS_LIFECYCLE_EVIDENCE and JFS_TOOLS; private UID/dense-COW staging"]
 fn native_owned_uid_publication_home_error_recovery_and_checker() {
-    use crate::storage::FileStorage;
-    use sha2::{Digest, Sha256};
-    use std::{
+    use crate::platform::{
         fs,
         io::Write,
         path::PathBuf,
         process::{Command, Stdio},
     };
+    use crate::storage::FileStorage;
+    use sha2::{Digest, Sha256};
     fn hash(b: &[u8]) -> String {
         format!("{:x}", Sha256::digest(b))
     }
     let root = PathBuf::from(
-        std::env::var_os("PARTMGR_JFS_LIFECYCLE_EVIDENCE")
+        crate::platform::env::var_os("PARTMGR_JFS_LIFECYCLE_EVIDENCE")
             .expect("fresh evidence directory required"),
     );
     assert!(root.is_dir());
     let receipt_path = root.join("receipt.txt");
     assert!(!receipt_path.exists());
-    let tools =
-        PathBuf::from(std::env::var_os("JFS_TOOLS").expect("native jfsutils tools required"));
+    let tools = PathBuf::from(
+        crate::platform::env::var_os("JFS_TOOLS").expect("native jfsutils tools required"),
+    );
     let sources = [
         ("src/lib.rs", include_bytes!("lib.rs").as_slice()),
         (
@@ -2961,7 +2979,7 @@ fn native_owned_uid_publication_home_error_recovery_and_checker() {
         fs::write(dst, baked).unwrap();
         receipt.push_str(&format!("source={name} sha256={}\n", hash(baked)));
     }
-    let binary = std::env::current_exe().unwrap();
+    let binary = crate::platform::env::current_exe().unwrap();
     let binary_hash = hash(&fs::read(&binary).unwrap());
     receipt.push_str(&format!(
         "binary={} sha256={binary_hash}\n",
@@ -4598,15 +4616,15 @@ fn native_owned_uid_publication_home_error_recovery_and_checker() {
     let bytes = fs::read(&image).unwrap();
     receipt.push_str(&format!("case=namespace-native-overlap output_sha256={} native_replay=diagnostic-clean native_fsck=clean inode512=exact cookie_reorder=exact UTF16_long_chain=exact unchanged_hardlinks=2 payload_nested=exact codec-only-no-owned-namespace-protocol\n",hash(&bytes)));
     struct NamespaceCaseContext<'a> {
-        root: &'a std::path::Path,
-        original: &'a std::path::Path,
+        root: &'a crate::platform::path::Path,
+        original: &'a crate::platform::path::Path,
         r: &'a Resources,
         limits: JfsReadLimits,
         audit: JfsAuditLimits,
         binding: [u8; 16],
     }
     type NativeNamespaceRunner<'a> =
-        dyn Fn(&str, &str, &[&str], Option<&str>) -> std::process::Output + 'a;
+        dyn Fn(&str, &str, &[&str], Option<&str>) -> crate::platform::process::Output + 'a;
     fn qualify_namespace_cases(
         context: NamespaceCaseContext<'_>,
         run: &NativeNamespaceRunner<'_>,
@@ -4765,6 +4783,7 @@ fn native_owned_uid_publication_home_error_recovery_and_checker() {
     fs::write(receipt_path, receipt).unwrap();
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn committed_native_cow_replay_preserves_namespace_payload_and_refunds() {
     struct Backend {
@@ -5338,6 +5357,7 @@ fn committed_native_cow_replay_preserves_namespace_payload_and_refunds() {
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn pristine_native_checkpoint_rollover_and_cold_cuts_preserve_every_home_byte() {
     let r = Resources {
@@ -5536,6 +5556,7 @@ fn pristine_native_checkpoint_rollover_and_cold_cuts_preserve_every_home_byte() 
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn pristine_rollover_caps_cancellation_and_read_failure_are_causal_and_prewrite() {
     let seed = journal_seed();
@@ -5621,6 +5642,7 @@ fn pristine_rollover_caps_cancellation_and_read_failure_are_causal_and_prewrite(
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn rotating_cow_prepares_complete_projection_before_any_program() {
     let r = Resources {
@@ -5694,6 +5716,7 @@ fn rotating_cow_prepares_complete_projection_before_any_program() {
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn rotating_cow_every_mutation_cut_cold_restarts_four_models() {
     let r = Resources {
@@ -5829,6 +5852,7 @@ fn rotating_cow_every_mutation_cut_cold_restarts_four_models() {
     );
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn rotating_session_preflight_failure_has_zero_writes_and_then_accepts_valid_operation() {
     let r = Resources {
@@ -5898,6 +5922,7 @@ fn rotating_session_preflight_failure_has_zero_writes_and_then_accepts_valid_ope
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn rotating_cow_every_recovery_position_restarts_under_four_persistence_profiles() {
     let r = Resources {
@@ -6067,6 +6092,7 @@ fn rotating_cow_every_recovery_position_restarts_under_four_persistence_profiles
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn rotating_cow_stale_ring_and_deferred_causal_failure_preserve_old_authority() {
     let r = Resources {
@@ -6208,6 +6234,7 @@ fn rotating_cow_stale_ring_and_deferred_causal_failure_preserve_old_authority() 
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn checkpointed_native_log_reuse_exceeds_two_laps_and_cold_cuts() {
     let r = Resources {
@@ -6309,6 +6336,7 @@ fn checkpointed_native_log_reuse_exceeds_two_laps_and_cold_cuts() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn recycled_journal_laps_include_native_cow_histories_and_preserve_hardlinks() {
     let r = Resources {
@@ -6385,6 +6413,7 @@ fn recycled_journal_laps_include_native_cow_histories_and_preserve_hardlinks() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn recycling_cow_every_mutation_cut_cold_restarts_four_models() {
     let r = Resources {
@@ -6535,6 +6564,7 @@ fn recycling_cow_every_mutation_cut_cold_restarts_four_models() {
     );
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn recycling_cow_every_recovery_position_restarts_under_four_persistence_profiles() {
     let r = Resources {
@@ -6713,6 +6743,7 @@ fn recycling_cow_every_recovery_position_restarts_under_four_persistence_profile
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn recycling_checkpoint_has_independent_ring_model_and_zero_write_negatives() {
     let r = Resources {

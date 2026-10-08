@@ -2,8 +2,11 @@
 //! The committed preparation and complete final-redo ownership audit close this
 //! candidate before any filesystem home block may be restored.
 use super::*;
+use crate::platform::collections::BTreeSet;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::storage::Storage;
-use std::collections::BTreeSet;
 pub(crate) struct Bootstrap {
     pub(crate) geometry: Geometry,
     pub(crate) primary: [u8; 1024],
@@ -456,7 +459,7 @@ impl Bootstrap {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -604,6 +607,7 @@ pub(super) mod tests {
         put32(journal, 252, sum);
         Owned(image)
     }
+    #[cfg(feature = "std")]
     #[test]
     fn independent_complete_classic_journal_bootstrap_cycles_limits_cancel_and_refunds() {
         let r = Resources {

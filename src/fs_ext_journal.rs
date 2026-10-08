@@ -1,5 +1,8 @@
 //! Read-only inactive internal JBD/JBD2 validation. No replay or writable journal authority.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 const MAX_JOURNAL_BLOCKS: usize = 65536;
 fn be32(b: &[u8], at: usize) -> u32 {
     u32::from_be_bytes(b[at..at + 4].try_into().unwrap())

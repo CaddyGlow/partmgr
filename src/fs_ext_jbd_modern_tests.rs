@@ -2,6 +2,9 @@
 
 use super::*;
 use crate::fs_core::{Budget, Cancellation};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 fn le(bytes: &mut [u8], at: usize, value: u32) {
     bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
 }
@@ -131,6 +134,7 @@ fn fixture() -> Vec<u8> {
     le(&mut bytes, 1024 + 1020, checksum);
     bytes
 }
+#[cfg(feature = "std")]
 #[test]
 fn independent_modern_extent_truncate_unwritten_ownership_checksum_and_refunds() {
     let r = Resources {
@@ -225,6 +229,7 @@ fn independent_modern_extent_truncate_unwritten_ownership_checksum_and_refunds()
     );
     assert_eq!(r.memory.used(), 0);
 }
+#[cfg(feature = "std")]
 #[test]
 fn modern_truncate_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -355,6 +360,7 @@ impl crate::fs_core::FileRead for Input {
         })
     }
 }
+#[cfg(feature = "std")]
 #[test]
 fn modern_deferred_append_unwritten_conversion_indexed_extents_then_truncate() {
     let r = Resources {
@@ -538,6 +544,7 @@ fn fragmented_fixture() -> Vec<u8> {
     le(&mut bytes, 2044, super_crc);
     bytes
 }
+#[cfg(feature = "std")]
 #[test]
 fn independent_depth_two_extent_writer_preserves_sparse_holes_and_refunds() {
     let r = Resources {
@@ -618,6 +625,7 @@ fn independent_depth_two_extent_writer_preserves_sparse_holes_and_refunds() {
     drop(owner);
     assert_eq!(r.memory.used(), 0);
 }
+#[cfg(feature = "std")]
 #[test]
 fn modern_append_indexed_restart_every_write_barrier_and_torn_cut() {
     let r = Resources {
@@ -726,12 +734,16 @@ fn modern_append_indexed_restart_every_write_barrier_and_torn_cut() {
 struct BadInput {
     inner: Input,
     next: crate::fs_core::ObjectId,
-    changed: std::sync::atomic::AtomicBool,
+    changed: crate::platform::sync::atomic::AtomicBool,
     kind: u8,
 }
 impl crate::fs_core::FileRead for BadInput {
     fn identity(&self) -> &crate::fs_core::ObjectId {
-        if self.kind == 0 && self.changed.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.kind == 0
+            && self
+                .changed
+                .load(crate::platform::sync::atomic::Ordering::Relaxed)
+        {
             &self.next
         } else {
             &self.inner.identity
@@ -739,7 +751,12 @@ impl crate::fs_core::FileRead for BadInput {
     }
     fn len(&self) -> u64 {
         self.inner.bytes.len() as u64
-            + u64::from(self.kind == 1 && self.changed.load(std::sync::atomic::Ordering::Relaxed))
+            + u64::from(
+                self.kind == 1
+                    && self
+                        .changed
+                        .load(crate::platform::sync::atomic::Ordering::Relaxed),
+            )
     }
     fn read_at(&self, at: u64, out: &mut [u8], r: &Resources) -> crate::fs_core::Result<usize> {
         if self.kind == 2 {
@@ -750,7 +767,7 @@ impl crate::fs_core::FileRead for BadInput {
         }
         let n = crate::fs_core::FileRead::read_at(&self.inner, at, out, r)?;
         self.changed
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            .store(true, crate::platform::sync::atomic::Ordering::Relaxed);
         if self.kind == 4 {
             r.cancellation.cancel();
         }
@@ -764,6 +781,7 @@ impl crate::fs_core::FileRead for BadInput {
         crate::fs_core::FileRead::visit_extents(&self.inner, r, visitor)
     }
 }
+#[cfg(feature = "std")]
 #[test]
 fn modern_append_deferred_failures_caps_and_cancellation_write_nothing() {
     for kind in 0..7 {
@@ -825,7 +843,7 @@ fn modern_append_deferred_failures_caps_and_cancellation_write_nothing() {
                 generation: 2,
                 native: vec![7],
             },
-            changed: std::sync::atomic::AtomicBool::new(false),
+            changed: crate::platform::sync::atomic::AtomicBool::new(false),
             kind,
         };
         let mut owner = session::Session::open(storage, limits, &r).unwrap();
@@ -892,6 +910,7 @@ fn uninitialized_second_group_fixture() -> Vec<u8> {
     bytes[2051 * 1024..2053 * 1024].fill(0xa7);
     bytes
 }
+#[cfg(feature = "std")]
 #[test]
 fn modern_allocate_materializes_uninitialized_bitmap_preserving_inode_flags() {
     let r = Resources {
@@ -1025,6 +1044,7 @@ fn full_fixture() -> Vec<u8> {
     le(&mut bytes, 2044, checksum);
     bytes
 }
+#[cfg(feature = "std")]
 #[test]
 fn modern_out_of_space_rejects_clean_fully_owned_volume_without_mutation() {
     let r = Resources {
@@ -1107,6 +1127,7 @@ mod namespace_tests;
 #[path = "fs_ext_jbd_modern_indirect_tests.rs"]
 mod indirect_tests;
 
+#[cfg(feature = "std")]
 #[test]
 fn independent_legacy_checksum_policy_allocation_namespace_projection() {
     for extents in [false, true] {

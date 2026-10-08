@@ -1,5 +1,8 @@
 //! Private deterministic codec authoring and authenticated node-shape policy.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) fn data_shape(
     profile: Option<journal::CompressionProfile>,

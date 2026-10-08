@@ -1,5 +1,8 @@
 //! Complete bounded regular-file relocation groups using NONE and ZERO nodes.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_regular(
     decoded: &Decoded,

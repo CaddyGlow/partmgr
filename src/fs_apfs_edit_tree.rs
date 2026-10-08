@@ -1,5 +1,8 @@
 //! Bounded bottom-up native COW tree layout; no source payload is inspected.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 struct Page {
     records: Records,
     level: u16,

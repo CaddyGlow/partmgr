@@ -1,5 +1,8 @@
 //! Bounded canonical checksum-aware extent-tree authoring for the owned modern planner.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) fn write_inode(
     context: &mut Context<'_, '_>,

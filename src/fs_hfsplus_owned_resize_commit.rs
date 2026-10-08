@@ -1,6 +1,9 @@
 //! Private consuming resize transaction; cold resize recovery is separate work.
 use super::*;
 use crate::fs_undo::{UndoBinding, UndoFailure, UndoLimits, UndoPlan};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 struct Held<'a>(&'a mut dyn Storage);
 impl Storage for Held<'_> {
     fn len(&self) -> io::Result<u64> {
@@ -35,7 +38,7 @@ impl<S: Storage> Prepared<S> {
         binding: UndoBinding,
         undo: UndoLimits,
         r: &Resources,
-    ) -> std::result::Result<Prepared<S>, ResizeFailure<S>> {
+    ) -> crate::platform::result::Result<Prepared<S>, ResizeFailure<S>> {
         let ResizeRequest {
             path,
             kind,
@@ -145,6 +148,7 @@ impl<S: Storage> Prepared<S> {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn private_resize_commit_reopens_clean_and_preserves_old_physical_bytes() {
     struct Memory(Vec<u8>);

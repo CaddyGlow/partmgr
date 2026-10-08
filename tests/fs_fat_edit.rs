@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, Resources},
     fs_fat_audit::FatAuditLimits,

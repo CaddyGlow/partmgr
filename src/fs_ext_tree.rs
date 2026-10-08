@@ -1,15 +1,18 @@
 //! Bounded classic ext2 namespace inventory with deferred shared-contract reads.
 //! This does not audit cross-inode allocation ownership or establish source isolation.
-use crate::{
-    fs_core::*,
-    fs_ext::{ExtInode, ExtVolume},
-};
-use std::{
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     collections::{HashMap, HashSet, VecDeque},
     io,
     sync::Arc,
 };
-fn allocation(error: impl std::fmt::Display) -> Error {
+use crate::{
+    fs_core::*,
+    fs_ext::{ExtInode, ExtVolume},
+};
+fn allocation(error: impl crate::platform::fmt::Display) -> Error {
     Error::new(ErrorKind::BudgetExhausted, error.to_string())
 }
 fn native(error: io::Error) -> Error {
@@ -416,7 +419,7 @@ impl TreeSource for ExtTreeSource {
         let inode = &self.node(object)?.inode;
         Budgeted::try_new(
             &resources.memory,
-            std::mem::size_of::<StreamInfo>() as u64,
+            crate::platform::mem::size_of::<StreamInfo>() as u64,
             || {
                 let mut result = Vec::new();
                 if kind(inode)? == ObjectKind::File {

@@ -1,11 +1,14 @@
 //! Fresh unpublished HFS+/HFSX construction. Existing-volume editing is separate.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{io, sync::Arc};
 use crate::{
     fs_copy::{CopyLimits, CopyNamePolicy, MetadataOutcome},
     fs_core::{Error, Reservation, Resources, Result, TreeSource},
     fs_hfsplus::{authoring_node::builder_inventory, bad, budget},
     storage::Storage,
 };
-use std::{io, sync::Arc};
 
 /// Native catalog comparison profile.
 #[derive(Clone, Copy, Debug)]

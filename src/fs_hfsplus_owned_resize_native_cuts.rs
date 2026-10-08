@@ -1,7 +1,10 @@
 //! Independent native validation of every cold-resolved resize persistence model.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{cell::Cell, fs, path::PathBuf, process::Command};
 use sha2::{Digest, Sha256};
-use std::{cell::Cell, fs, path::PathBuf, process::Command};
 const CHECKER: &str =
     "/nix/store/kvh9g90h1506i4q3ah4mf7v23f5agvr8-hfsprogs-627.40.1-linux/bin/fsck.hfsplus";
 const ICAT: &str = "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat";
@@ -21,14 +24,17 @@ impl NativeCutGate {
     #[cfg(target_os = "linux")]
     pub(super) fn open() -> Self {
         let output = PathBuf::from(
-            std::env::var_os("PARTMGR_HFSPLUS_RESIZE_CUT_EVIDENCE")
+            crate::platform::env::var_os("PARTMGR_HFSPLUS_RESIZE_CUT_EVIDENCE")
                 .expect("fresh native evidence directory required"),
         );
         assert!(!output.exists());
         fs::create_dir(&output).unwrap();
-        let source_directory = std::env::var_os("PARTMGR_HFSPLUS_RESIZE_CUT_SOURCE_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/data/cache/partmgr-hfsplus-populated-native-v1"));
+        let source_directory =
+            crate::platform::env::var_os("PARTMGR_HFSPLUS_RESIZE_CUT_SOURCE_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    PathBuf::from("/data/cache/partmgr-hfsplus-populated-native-v1")
+                });
         let sources = ["hfsplus", "hfsx"].map(|label| {
             let path = source_directory.join(format!("{label}-b4096.img"));
             let bytes = fs::read(&path).unwrap();

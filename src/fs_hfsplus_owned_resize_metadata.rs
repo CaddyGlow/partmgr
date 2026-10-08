@@ -1,6 +1,9 @@
 //! Projected resize metadata; caller still must establish commit/recovery authority.
 use super::*;
 use crate::fs_hfsplus as native;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 pub(in super::super) struct ResizeMetadata {
     pub(in super::super) patches: Vec<WriteRange>,
     _lease: Reservation,

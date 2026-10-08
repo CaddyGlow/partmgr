@@ -5,8 +5,11 @@
 //! Layout follows UEFI 2.10 section 5.
 
 use crate::gpt::read_header;
-use std::{collections::HashSet, io, sync::Arc};
-use virtdisk::{DiskView, ReadAt};
+use crate::io::{DiskView, ReadAt};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{collections::HashSet, io, sync::Arc};
 
 /// On-disk partition table scheme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

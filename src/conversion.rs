@@ -16,13 +16,16 @@
 //! and use appropriate ordering. GPT recovery never silently overwrites a current
 //! ordinary or hybrid MBR with an old GPT copy. Payload hashes remain independent
 //! of scheme metadata, and conversion never moves partition contents.
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     codec,
     guid::Guid,
     layout::{DiskLayout, GptLayout, MbrLayout},
     storage::{Barrier, ReadCondition, WritePlan, WriteRange},
 };
-use std::io;
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
@@ -189,7 +192,7 @@ pub fn convert(
 /// ranges are unchanged and never included in the plan. In-place conversion is
 /// not atomic; inspect/recover after interruption rather than blindly retrying.
 pub fn conversion_plan(
-    source: &dyn virtdisk::ReadAt,
+    source: &dyn crate::io::ReadAt,
     old: &DiskLayout,
     mappings: &[TypeMapping],
     policy: &ConversionPolicy,
@@ -366,7 +369,7 @@ pub fn gpt_to_extended(
 /// clearing obsolete GPT metadata afterward. Selected EBR locations must not
 /// overlap the old GPT metadata; payload positions remain unchanged.
 pub fn gpt_to_extended_plan(
-    source: &dyn virtdisk::ReadAt,
+    source: &dyn crate::io::ReadAt,
     old: &GptLayout,
     mappings: &[TypeMapping],
     policy: &ConversionPolicy,
@@ -407,7 +410,7 @@ pub fn gpt_to_extended_plan(
 /// and clearing obsolete EBRs afterward. EBR bytes covered by new GPT metadata
 /// are replaced by that metadata instead of receiving a second write.
 pub fn extended_to_gpt_plan(
-    source: &dyn virtdisk::ReadAt,
+    source: &dyn crate::io::ReadAt,
     old: &crate::extended::ExtendedLayout,
     mappings: &[TypeMapping],
     policy: &ConversionPolicy,
@@ -459,7 +462,7 @@ pub fn extended_to_gpt_plan(
     let plan = WritePlan::new(source.len(), stages)?.with_preconditions(conditions(saved)?)?;
     Ok((layout, plan))
 }
-fn verify_snapshots(source: &dyn virtdisk::ReadAt, saved: &[(u64, Vec<u8>)]) -> io::Result<()> {
+fn verify_snapshots(source: &dyn crate::io::ReadAt, saved: &[(u64, Vec<u8>)]) -> io::Result<()> {
     for (offset, expected) in saved {
         let mut current = vec![0; expected.len()];
         source.read_exact_at(*offset, &mut current)?;

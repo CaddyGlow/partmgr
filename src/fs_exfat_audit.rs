@@ -1,10 +1,13 @@
 //! Complete bounded read-only ownership audit for the strict basic exFAT profile.
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{collections::VecDeque, sync::Arc};
 use crate::{
     fs_core::{Error, ErrorKind, ObjectId, Reservation, Resources, Result},
     fs_exfat_volume::{ExfatDecoder, ExfatDirectory, ExfatReadLimits},
 };
-use std::{collections::VecDeque, sync::Arc};
-use virtdisk::ReadAt;
 
 /// Independent ceilings for complete inventory and diagnostics.
 #[derive(Clone, Copy, Debug)]

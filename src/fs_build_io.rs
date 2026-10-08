@@ -1,9 +1,12 @@
 //! Positional emission primitives; format-specific orchestration retains mutation state.
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_core::{Error, ErrorKind, Resources, Result},
     storage::Storage,
 };
-use std::io;
 
 pub(crate) fn write_all(
     storage: &mut (impl Storage + ?Sized),
@@ -64,7 +67,7 @@ pub(crate) fn verify(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -113,6 +116,7 @@ mod tests {
             cancel_write: None,
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn short_writes_are_completed_and_readback_mismatch_is_rejected() {
         let r = resources();
@@ -146,6 +150,7 @@ mod tests {
             ErrorKind::InvalidData
         );
     }
+    #[cfg(feature = "std")]
     #[test]
     fn cancelled_callback_and_zero_writes_retain_mutation_state() {
         let r = resources();
@@ -167,6 +172,7 @@ mod tests {
         assert_eq!(error.kind, ErrorKind::Io);
         assert!(mutated);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn flush_failure_keeps_cause_and_uncertain_durability() {
         let r = resources();
@@ -175,7 +181,7 @@ mod tests {
         let error = flush(&mut t, &r, "flush").unwrap_err();
         assert_eq!(error.kind, ErrorKind::UncertainDurability);
         assert!(
-            std::error::Error::source(&error)
+            crate::platform::error::Error::source(&error)
                 .unwrap()
                 .to_string()
                 .contains("durability cause")

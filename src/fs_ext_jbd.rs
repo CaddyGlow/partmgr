@@ -1,14 +1,17 @@
 //! Bounded native JBD2 transaction scan; no backend authority or replay writes.
 use super::{checksum::crc32c, invalid, unsupported};
 use crate::fs_core::{Error, ErrorKind, Reservation, Resources};
-use std::{cell::Cell, io};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{cell::Cell, io};
 #[path = "fs_ext_jbd_bootstrap.rs"]
 mod bootstrap;
 #[path = "fs_ext_jbd_legacy.rs"]
 mod legacy;
 #[path = "fs_ext_jbd_modern_plan.rs"]
 mod modern_plan;
-#[cfg(all(test, unix))]
+#[cfg(all(test, feature = "std", unix))]
 #[path = "fs_ext_jbd_native.rs"]
 mod native;
 #[path = "fs_ext_jbd_overlay.rs"]
@@ -439,7 +442,7 @@ pub(crate) fn encode(
         return Err(budget("JBD2 transaction exceeds bounded ring capacity"));
     }
     let charged = count
-        .checked_mul(std::mem::size_of::<LogBlock>())
+        .checked_mul(crate::platform::mem::size_of::<LogBlock>())
         .and_then(|n| n.checked_add(MAX_BLOCK + 128))
         .ok_or_else(|| budget("JBD2 encoding reservation overflow"))?;
     let reservation = resources
@@ -727,7 +730,7 @@ fn scan_profile(
     let capacity = blocks
         .capacity()
         .checked_add(pending.capacity())
-        .and_then(|n| n.checked_mul(std::mem::size_of::<ReplayBlock>()))
+        .and_then(|n| n.checked_mul(crate::platform::mem::size_of::<ReplayBlock>()))
         .and_then(|n| n.checked_add(revocations.capacity() * 4 + 3 * MAX_BLOCK + 512))
         .ok_or_else(|| budget("JBD2 actual capacity overflow"))?;
     if capacity > charged {
@@ -959,7 +962,7 @@ fn scan_profile(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -1072,6 +1075,7 @@ mod tests {
             },
         )
     }
+    #[cfg(feature = "std")]
     #[test]
     fn independent_v2_v3_legacy_ring_escape_complete_and_refunds() {
         for format in [Checksums::None, Checksums::V2, Checksums::V3] {
@@ -1090,6 +1094,7 @@ mod tests {
             assert_eq!(r.memory.used(), 0);
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn incomplete_commit_revoke_semantics_bad_data_and_semantic_binding() {
         let (g, mut log) = fixture(Checksums::V3);
@@ -1121,6 +1126,7 @@ mod tests {
         assert!(execute(&g, &log, &r, 4, 20).is_err());
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn bounded_work_memory_cancellation_unknown_flags_and_malformed_tags() {
         let (g, mut log) = fixture(Checksums::V3);
@@ -1144,6 +1150,7 @@ mod tests {
         assert!(execute(&g, &log, &r, 4, 20).is_err());
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn checked_encoder_multiple_descriptors_wrap_escape_and_replay() {
         for format in [Checksums::V2, Checksums::V3] {
@@ -1216,6 +1223,7 @@ mod tests {
             assert_eq!(r.memory.used(), 0);
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn journal_physical_map_boundaries_and_owned_constructor_no_readat_authority() {
         let r = resources(1 << 20);
@@ -1286,10 +1294,11 @@ mod tests {
             assert_eq!(r.memory.used(), 0);
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn native_log_publication_write_barrier_readback_and_torn_cuts() {
+        use crate::platform::cell::Cell;
         use crate::storage::Storage;
-        use std::cell::Cell;
         struct Fault {
             visible: Vec<u8>,
             durable: Vec<u8>,
@@ -1422,6 +1431,7 @@ mod tests {
         drop((encoded, proof));
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn preparation_capsule_preserves_native_header_and_rejects_rechecksummed_binding() {
         let r = resources(1 << 20);

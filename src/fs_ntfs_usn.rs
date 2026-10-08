@@ -1,6 +1,9 @@
 //! Bounded, allocation-free decoding of framed USN V2/V3 evidence.
 //! This is not extraction from NTFS, replay, recovery, or journal modification.
-use std::fmt;
+use crate::platform::fmt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 /// Caller-defined evidence identity and offset within that evidence stream.
 /// Identity is a label, not a verified digest or proof of a stable source.
@@ -64,7 +67,7 @@ impl fmt::Display for DecodeError {
         )
     }
 }
-impl std::error::Error for DecodeError {}
+impl crate::platform::error::Error for DecodeError {}
 
 /// Native identifiers: V3 bytes are opaque, never reduced to an MFT slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

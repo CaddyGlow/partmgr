@@ -5,8 +5,11 @@ use super::{
     fork_builder, keyed_tree, vector,
 };
 use crate::fs_core::{FileRead, Resources, Result};
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 use crate::fs_core::{LogicalExtent, ObjectId, Reservation};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) struct DirectorySource<'a> {
     pub(super) metadata: Option<&'a CatalogMetadata>,
@@ -22,7 +25,7 @@ pub(super) struct FileSource<'a> {
     pub(super) resource: Option<&'a dyn FileRead>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) fn empty_volume(
     block_size: u32,
     blocks: u32,
@@ -33,7 +36,7 @@ pub(super) fn empty_volume(
     fresh_volume(block_size, blocks, binary, name, None, r)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) fn fresh_volume(
     block_size: u32,
     blocks: u32,
@@ -45,7 +48,7 @@ pub(super) fn fresh_volume(
     fresh_files(block_size, blocks, binary, name, file.as_slice(), r)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) fn fresh_files(
     block_size: u32,
     blocks: u32,
@@ -57,7 +60,7 @@ pub(super) fn fresh_files(
     fresh_tree(block_size, blocks, binary, name, &[], files, r)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) fn fresh_tree(
     block_size: u32,
     blocks: u32,
@@ -502,16 +505,17 @@ pub(super) fn emit_tree(
     Ok(length)
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn complete_empty_fresh_layout_reopens_with_clean_ownership_and_refunds() {
+    use crate::platform::{io, sync::Arc};
     use crate::{
         fs_core::{Budget, Cancellation},
         fs_hfsplus::{HfsPlusReadLimits, HfsPlusVolume},
         fs_hfsplus_audit::{HfsPlusAuditLimits, audit_hfsplus},
     };
-    use std::{io, sync::Arc};
     struct Bytes(Vec<u8>);
-    impl virtdisk::ReadAt for Bytes {
+    impl crate::io::ReadAt for Bytes {
         fn len(&self) -> u64 {
             self.0.len() as u64
         }
@@ -575,12 +579,12 @@ fn complete_empty_fresh_layout_reopens_with_clean_ownership_and_refunds() {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 struct Model {
     id: ObjectId,
     bytes: Vec<u8>,
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 impl FileRead for Model {
     fn identity(&self) -> &ObjectId {
         &self.id
@@ -604,16 +608,17 @@ impl FileRead for Model {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn populated_fresh_layout_streams_short_reads_and_preserves_both_forks() {
+    use crate::platform::{io, sync::Arc};
     use crate::{
         fs_core::{Budget, Cancellation, NativeName, StreamKind},
         fs_hfsplus::{HfsPlusReadLimits, HfsPlusVolume},
         fs_hfsplus_audit::{HfsPlusAuditLimits, audit_hfsplus},
     };
-    use std::{io, sync::Arc};
     struct Bytes(Vec<u8>);
-    impl virtdisk::ReadAt for Bytes {
+    impl crate::io::ReadAt for Bytes {
         fn len(&self) -> u64 {
             self.0.len() as u64
         }
@@ -787,6 +792,7 @@ fn populated_fresh_layout_streams_short_reads_and_preserves_both_forks() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn multiple_file_catalog_order_collisions_and_budget_refunds() {
     use crate::fs_core::{Budget, Cancellation};
@@ -869,6 +875,7 @@ fn multiple_file_catalog_order_collisions_and_budget_refunds() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn streamed_large_layout_bounded_memory_sink_failures_and_refunds() {
     use crate::fs_core::{Budget, Cancellation};
@@ -924,6 +931,7 @@ fn streamed_large_layout_bounded_memory_sink_failures_and_refunds() {
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn staged_cancellation_during_payload_read_and_between_headers() {
     use crate::fs_core::{Budget, Cancellation, ErrorKind};
@@ -1029,12 +1037,13 @@ fn staged_cancellation_during_payload_read_and_between_headers() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native streamed HFS+/HFSX gate with 128MiB images and 256KiB builder budget"]
 fn native_streamed_large_volume_and_deferred_forks() {
     use crate::fs_core::{Budget, Cancellation, Error};
+    use crate::platform::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
     use sha2::{Digest, Sha256};
-    use std::{fs, os::unix::fs::FileExt, path::PathBuf, process::Command};
     struct Generated {
         id: ObjectId,
     }
@@ -1065,7 +1074,8 @@ fn native_streamed_large_volume_and_deferred_forks() {
         }
     }
     let output = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_STREAMED_EVIDENCE").expect("fresh evidence required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_STREAMED_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
     fs::create_dir(&output).unwrap();
@@ -1188,6 +1198,7 @@ fn native_streamed_large_volume_and_deferred_forks() {
     fs::write(output.join("receipt.txt"), receipt).unwrap();
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn directory_parent_graph_forward_references_cycles_and_refunds() {
     use crate::fs_core::{Budget, Cancellation, ErrorKind};
@@ -1251,6 +1262,7 @@ fn directory_parent_graph_forward_references_cycles_and_refunds() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native empty HFS+/HFSX formatter gate requires fresh evidence and fsck tools"]
 fn native_empty_fresh_volume_checker_and_space_accounting() {
@@ -1258,6 +1270,7 @@ fn native_empty_fresh_volume_checker_and_space_accounting() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native populated HFS+/HFSX formatter gate"]
 fn native_populated_fresh_volume_complete_fork_models() {
@@ -1265,6 +1278,7 @@ fn native_populated_fresh_volume_complete_fork_models() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native multiple-file indexed HFS+/HFSX formatter gate"]
 fn native_multiple_fresh_volume_indexed_catalog_and_forks() {
@@ -1272,20 +1286,21 @@ fn native_multiple_fresh_volume_indexed_catalog_and_forks() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native nested HFS+/HFSX formatter gate"]
 fn native_nested_fresh_volume_directory_graph_and_forks() {
     native_fresh_volume_gate(48, true);
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(all(test, feature = "std", target_os = "linux"))]
 fn native_fresh_volume_gate(file_count: usize, nested: bool) {
     let populated = file_count > 0;
     use crate::fs_core::{Budget, Cancellation};
+    use crate::platform::{fs, path::PathBuf, process::Command};
     use sha2::{Digest, Sha256};
-    use std::{fs, path::PathBuf, process::Command};
     let output = PathBuf::from(
-        std::env::var_os(if nested {
+        crate::platform::env::var_os(if nested {
             "PARTMGR_HFSPLUS_NESTED_EVIDENCE"
         } else if file_count > 1 {
             "PARTMGR_HFSPLUS_MULTIPLE_EVIDENCE"
@@ -1454,9 +1469,13 @@ fn native_fresh_volume_gate(file_count: usize, nested: bool) {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native common-tree HFS+/HFSX capture requires immutable native input artifacts"]
 fn native_common_tree_nested_capture_complete_forks() {
+    use crate::platform::{
+        fs, io, os::unix::fs::FileExt, path::PathBuf, process::Command, sync::Arc,
+    };
     use crate::{
         fs_core::{Budget, Cancellation, Error},
         fs_hfsplus::{HfsPlusReadLimits, HfsPlusVolume},
@@ -1464,12 +1483,11 @@ fn native_common_tree_nested_capture_complete_forks() {
         fs_hfsplus_tree::HfsPlusTreeSource,
     };
     use sha2::{Digest, Sha256};
-    use std::{fs, io, os::unix::fs::FileExt, path::PathBuf, process::Command, sync::Arc};
     struct Input {
         file: fs::File,
         length: u64,
     }
-    impl virtdisk::ReadAt for Input {
+    impl crate::io::ReadAt for Input {
         fn len(&self) -> u64 {
             self.length
         }
@@ -1481,7 +1499,8 @@ fn native_common_tree_nested_capture_complete_forks() {
         }
     }
     let output = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_CAPTURE_EVIDENCE").expect("fresh evidence required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_CAPTURE_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
     fs::create_dir(&output).unwrap();
@@ -1643,7 +1662,7 @@ fn native_common_tree_nested_capture_complete_forks() {
     fs::write(output.join("receipt.txt"), receipt).unwrap();
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn typed_metadata_volume(binary: bool, r: &Resources) -> Result<(Vec<u8>, Reservation)> {
     let root = CatalogMetadata {
         uid: 42,
@@ -1712,15 +1731,16 @@ fn typed_metadata_volume(binary: bool, r: &Resources) -> Result<(Vec<u8>, Reserv
     Ok((image, lease))
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn typed_metadata_root_directory_file_roundtrip_and_invalid_mode() {
+    use crate::platform::{io, sync::Arc};
     use crate::{
         fs_core::{Budget, Cancellation, MetadataField, NativeName},
         fs_hfsplus::{HfsPlusReadLimits, HfsPlusVolume},
     };
-    use std::{io, sync::Arc};
     struct Bytes(Vec<u8>);
-    impl virtdisk::ReadAt for Bytes {
+    impl crate::io::ReadAt for Bytes {
         fn len(&self) -> u64 {
             self.0.len() as u64
         }
@@ -1930,14 +1950,15 @@ fn typed_metadata_root_directory_file_roundtrip_and_invalid_mode() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native typed HFS+/HFSX catalog metadata gate"]
 fn native_typed_catalog_metadata_and_payload() {
     use crate::fs_core::{Budget, Cancellation};
+    use crate::platform::{fs, io, path::PathBuf, process::Command, sync::Arc};
     use sha2::{Digest, Sha256};
-    use std::{fs, io, path::PathBuf, process::Command, sync::Arc};
     struct Bytes(Vec<u8>);
-    impl virtdisk::ReadAt for Bytes {
+    impl crate::io::ReadAt for Bytes {
         fn len(&self) -> u64 {
             self.0.len() as u64
         }
@@ -1959,7 +1980,7 @@ fn native_typed_catalog_metadata_and_payload() {
             Ok(self.0.len() as u64)
         }
         fn read_exact_at(&self, at: u64, bytes: &mut [u8]) -> io::Result<()> {
-            virtdisk::ReadAt::read_exact_at(self, at, bytes)
+            crate::io::ReadAt::read_exact_at(self, at, bytes)
         }
         fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
             let at = usize::try_from(at).map_err(io::Error::other)?;
@@ -1978,7 +1999,8 @@ fn native_typed_catalog_metadata_and_payload() {
         }
     }
     let output = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_TYPED_EVIDENCE").expect("fresh evidence required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_TYPED_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
     fs::create_dir(&output).unwrap();

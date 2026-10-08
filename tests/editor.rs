@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     editor::Editor,
     guid::Guid,

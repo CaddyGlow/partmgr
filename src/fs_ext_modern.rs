@@ -2,7 +2,10 @@
 //! Metadata geometry proof is retained by immutable decoding; full inode ownership is audited separately.
 use super::{ExtDecodeRead, integrity::Integrity, invalid, u16le, u32le, unsupported};
 use crate::fs_core::{Error, ErrorKind, Reservation, Resources};
-use std::io;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 const MAX_GROUPS: usize = 1024;
 impl<R: ExtDecodeRead> super::ExtDecoder<R> {
@@ -176,7 +179,7 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
         Self::open_structural(source, source_id, resources, false)
     }
     // Private owned qualification only; immutable/public admission stays strict.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub(super) fn open_owned_profile_qualification(
         source: R,
         source_id: u128,
@@ -192,7 +195,7 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
             Self::open_reader(source, source_id, resources, true)
         }
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub(super) fn open_legacy_structural_qualification(
         source: R,
         source_id: u128,
@@ -208,7 +211,7 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
     ) -> io::Result<Self> {
         let mut sb = [0; 1024];
         source.decode_read_exact_at(1024, &mut sb)?;
-        let proof = std::sync::Arc::new(if legacy_qualification {
+        let proof = crate::platform::sync::Arc::new(if legacy_qualification {
             ModernProof::inspect_profile(&source, &sb, resources, true)?
         } else {
             ModernProof::inspect(&source, &sb, resources)?
@@ -682,12 +685,12 @@ impl ModernProof {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
-    use std::sync::Arc;
-    use virtdisk::ReadAt;
+    use crate::io::ReadAt;
+    use crate::platform::sync::Arc;
     struct Image(Vec<u8>);
     impl ReadAt for Image {
         fn len(&self) -> u64 {
@@ -787,6 +790,7 @@ pub(super) mod tests {
             findings: 32,
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn private_legacy_structural_ownership_payload_and_public_gate() {
         for extents in [false, true] {
@@ -916,6 +920,7 @@ pub(super) mod tests {
         d(&mut image, 2044, checksum);
         image
     }
+    #[cfg(feature = "std")]
     #[test]
     fn clean_orphan_hidden_ownership_rechecksummed_alias_and_active_slots() {
         for (alias, active) in [(false, false), (true, false), (false, true)] {
@@ -945,6 +950,7 @@ pub(super) mod tests {
             assert_eq!(r.memory.used(), 0);
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn independent_classic_orphan_map_checksum_hole_and_trailing_ownership() {
         for defect in 0..5 {
@@ -978,6 +984,7 @@ pub(super) mod tests {
             assert_eq!(r.memory.used(), 0);
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn independent_zero_reserved_gdt_resize_root_ownership_and_defects() {
         for defect in 0..4 {
@@ -1025,6 +1032,7 @@ pub(super) mod tests {
             assert_eq!(r.memory.used(), 0);
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn independent_complete_ownership_shared_xattrs_native_names_and_payload() {
         let (image, payload) = ownership_fixture();
@@ -1057,6 +1065,7 @@ pub(super) mod tests {
         drop(decoder);
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn rechecksummed_shared_xattr_refcount_and_inode_map_alias_fail() {
         for (mutation, image) in independent::mutation_seeds()
@@ -1075,14 +1084,15 @@ pub(super) mod tests {
             assert_eq!(r.memory.used(), 0);
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn public_source_scope_and_modern_owned_editor_zero_write_gate() {
+        use crate::platform::sync::atomic::{AtomicUsize, Ordering};
         use crate::{
             fs_ext_edit::{ExtEditBinding, ExtEditLimits, ExtEditRegion, ExtEditor},
             fs_undo::UndoLimits,
             storage::Storage,
         };
-        use std::sync::atomic::{AtomicUsize, Ordering};
         struct Owned {
             bytes: Vec<u8>,
             writes: Arc<AtomicUsize>,
@@ -1157,6 +1167,7 @@ pub(super) mod tests {
         assert_eq!(writes.load(Ordering::Relaxed), 0);
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn checksums_without_extents_public_facade_family_and_classic_rejection() {
         use crate::{
@@ -1205,6 +1216,7 @@ pub(super) mod tests {
         assert_eq!(denied.err().unwrap().kind, ErrorKind::Unsupported);
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn flex_global_exclusions_uninitialized_bitmaps_limits_and_refunds() {
         let (image, sb) = fixture();
@@ -1254,6 +1266,7 @@ pub(super) mod tests {
         assert!(ModernProof::inspect(&source, &sb, &r).is_err());
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn rechecksummed_metadata_alias_unknown_flags_and_high_addresses_fail() {
         for mutation in 0..4 {
@@ -1279,14 +1292,14 @@ pub(super) mod tests {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, feature = "std", unix))]
 mod native_checks {
     use super::*;
     use crate::fs_core::{Budget, Cancellation, MetadataField, TreeSource};
+    use crate::io::ReadAt;
+    use crate::platform::os::unix::ffi::OsStringExt;
+    use crate::platform::{fs, path::PathBuf, process::Command, sync::Arc};
     use sha2::{Digest, Sha256};
-    use std::os::unix::ffi::OsStringExt;
-    use std::{fs, path::PathBuf, process::Command, sync::Arc};
-    use virtdisk::ReadAt;
     struct Image(Vec<u8>);
     impl ReadAt for Image {
         fn len(&self) -> u64 {
@@ -1346,11 +1359,12 @@ mod native_checks {
             .map(|block| block.expect("native directory has no holes"))
             .collect()
     }
+    #[cfg(feature = "std")]
     #[test]
     #[ignore = "explicit modern default reader/audit/native metadata gate; requires fresh PARTMGR_EXT_METADATA_EVIDENCE and all e2fsprogs tools"]
     fn native_default_checksums_flex_and_uninitialized_geometry() {
         let out = PathBuf::from(
-            std::env::var_os("PARTMGR_EXT_METADATA_EVIDENCE")
+            crate::platform::env::var_os("PARTMGR_EXT_METADATA_EVIDENCE")
                 .expect("enabled oracle requires evidence destination"),
         );
         assert!(out.is_absolute());
@@ -1387,7 +1401,7 @@ mod native_checks {
                 Sha256::digest(bytes)
             ));
         }
-        let exe = std::env::current_exe().unwrap();
+        let exe = crate::platform::env::current_exe().unwrap();
         let binary = fs::read(&exe).unwrap();
         fs::write(out.join("gate-binary"), &binary).unwrap();
         fs::set_permissions(
@@ -1396,12 +1410,13 @@ mod native_checks {
         )
         .unwrap();
         receipt.push_str(&format!("binary_sha256={:x}\n", Sha256::digest(binary)));
-        let mut tools = std::collections::BTreeMap::new();
+        let mut tools = crate::platform::collections::BTreeMap::new();
         for tool in ["mke2fs", "debugfs", "e2fsck"] {
-            let path = std::env::split_paths(&std::env::var_os("PATH").unwrap())
-                .map(|path| path.join(tool))
-                .find(|path| path.is_file())
-                .expect("enabled oracle requires every tool");
+            let path =
+                crate::platform::env::split_paths(&crate::platform::env::var_os("PATH").unwrap())
+                    .map(|path| path.join(tool))
+                    .find(|path| path.is_file())
+                    .expect("enabled oracle requires every tool");
             receipt.push_str(&format!(
                 "tool={tool} path={} sha256={:x}\n",
                 path.display(),
@@ -1437,7 +1452,9 @@ mod native_checks {
         let expected_payload: Vec<u8> = (0..131089).map(|n| (n * 73 + n / 251) as u8).collect();
         fs::write(input.join("large"), &expected_payload).unwrap();
         fs::write(
-            input.join(std::ffi::OsString::from_vec(b"x\xffname".to_vec())),
+            input.join(crate::platform::ffi::OsString::from_vec(
+                b"x\xffname".to_vec(),
+            )),
             b"native byte name",
         )
         .unwrap();

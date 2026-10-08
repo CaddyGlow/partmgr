@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{fs_core::*, fs_fat::FatVolume, fs_fat_tree::FatTreeSource};
 use std::{io, sync::Arc};
 use virtdisk::ReadAt;

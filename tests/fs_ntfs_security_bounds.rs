@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{fs_core::*, fs_ntfs_security::*};
 
 // Self-relative descriptor with shared owner/group SID and one allow ACE.

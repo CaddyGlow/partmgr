@@ -9,12 +9,15 @@
 //! interrupted storage; damaged on-disk EBRs alone do not establish a source.
 //! Old obsolete EBR sectors remain untouched and unreachable. Durability remains
 //! uncertain after a failed flush; payload bytes are never part of these plans.
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{collections::HashSet, io};
 use crate::{
     layout::{Geometry, LbaRange},
     storage::{Barrier, WritePlan, WriteRange},
 };
-use std::{collections::HashSet, io};
-use virtdisk::ReadAt;
 fn invalid(s: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, s)
 }

@@ -1,6 +1,10 @@
 //! Immutable APFS checkpoint and object discovery. Volume access is a separate profile.
 use crate::fs_core::*;
-use std::{
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     collections::BTreeSet,
     io,
     sync::{
@@ -8,7 +12,6 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-use virtdisk::ReadAt;
 
 pub(crate) type ObjectPages = Vec<(u64, Vec<u8>)>;
 type CheckpointMappings = (Vec<ApfsEphemeralMapping>, ObjectPages);
@@ -414,7 +417,7 @@ impl ApfsContainer {
             }
             retained_headers.push((*at, copy(header)?));
         }
-        candidates.sort_by_key(|a| std::cmp::Reverse(a.0));
+        candidates.sort_by_key(|a| crate::platform::cmp::Reverse(a.0));
         let mut chosen = None;
         for (_, address, b) in candidates {
             if u64le(&b, 112) != base || u32le(&b, 104) != count as u32 {
@@ -585,8 +588,8 @@ impl ApfsContainer {
             limits: self.inner.limits,
             used: 0,
         };
-        for (at, expected) in std::iter::once((0, &self.inner.boot))
-            .chain(std::iter::once((
+        for (at, expected) in crate::platform::iter::once((0, &self.inner.boot))
+            .chain(crate::platform::iter::once((
                 self.inner.checkpoint.superblock,
                 &self.inner.header,
             )))
@@ -612,7 +615,7 @@ impl ApfsContainer {
 }
 
 use crate::fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent};
-use std::collections::BTreeMap;
+use crate::platform::collections::BTreeMap;
 #[derive(Clone)]
 pub(crate) struct Run {
     pub(crate) logical: u64,
@@ -663,7 +666,7 @@ fn native_name(b: &[u8]) -> Result<Vec<u8>> {
         || b.last() != Some(&0)
         || b[..b.len() - 1].contains(&0)
         || b[..b.len() - 1].contains(&b'/')
-        || std::str::from_utf8(&b[..b.len() - 1]).is_err()
+        || crate::platform::str::from_utf8(&b[..b.len() - 1]).is_err()
     {
         return Err(bad("APFS native UTF8 terminated name"));
     }
@@ -674,7 +677,7 @@ fn native_xattr_name(b: &[u8]) -> Result<Vec<u8>> {
         || b.len() > 822
         || b.last() != Some(&0)
         || b[..b.len() - 1].contains(&0)
-        || std::str::from_utf8(&b[..b.len() - 1]).is_err()
+        || crate::platform::str::from_utf8(&b[..b.len() - 1]).is_err()
     {
         return Err(bad("APFS native UTF8 xattr name"));
     }
@@ -1387,7 +1390,7 @@ impl ApfsVolume {
     pub(crate) fn directory_entries(
         &self,
         id: &ObjectId,
-        range: std::ops::Range<usize>,
+        range: crate::platform::ops::Range<usize>,
         r: &Resources,
     ) -> Result<Vec<DirectoryEntry>> {
         let node = self.node(id)?;

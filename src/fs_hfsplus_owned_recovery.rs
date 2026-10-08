@@ -1,6 +1,9 @@
 //! Closed same-fork undo validation and deferred native clean-state restoration.
 use super::*;
 use crate::fs_undo::{self, UndoRecoveryValidator, UndoState};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(crate) struct Selection<'a> {
     pub(crate) path: &'a [NativeName],
@@ -169,7 +172,7 @@ pub(crate) fn recover_range(
     limits: Limits,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     r.cancellation.check().map_err(recovery_failure)?;
     if selection.length == 0 || selection.length > limits.range_bytes {
         return Err(recovery_failure(budget("HFS+ recovery range byte ceiling")));
@@ -308,6 +311,7 @@ pub(crate) fn recover_range(
     )
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn cold_restore_interrupted_fragmented_range_and_retry_without_writes() {
     struct Memory {
@@ -499,7 +503,7 @@ fn cold_restore_interrupted_fragmented_range_and_retry_without_writes() {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[path = "fs_hfsplus_owned_cuts.rs"]
 pub(crate) mod cuts;
 
@@ -511,7 +515,7 @@ pub(crate) fn recover_patches(
     undo: UndoLimits,
     r: &Resources,
     expected: &[WriteRange],
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     struct Exact<'a> {
         patches: &'a [WriteRange],
         seen: Vec<bool>,

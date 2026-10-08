@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     guid::Guid,
     layout::LbaRange,

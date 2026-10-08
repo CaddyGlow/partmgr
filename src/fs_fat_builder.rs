@@ -1,15 +1,18 @@
 //! Deterministic FAT new-output authoring. Publication belongs to the caller.
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use crate::{
     fs_core::{Error, ErrorKind, ObjectId, Reservation, Resources, Result},
     fs_fat::FatFamily,
     storage::Storage,
 };
 use sha2::{Digest, Sha256};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
-use virtdisk::ReadAt;
 const SCRATCH: usize = 65536;
 
 /// Geometry and deterministic serial number for the initial authoring profile.
@@ -205,7 +208,7 @@ impl FatBuildPlan {
             path_reservations.push(
                 resources.memory.reserve(
                     (depth as u64)
-                        .checked_mul(std::mem::size_of::<usize>() as u64)
+                        .checked_mul(crate::platform::mem::size_of::<usize>() as u64)
                         .ok_or_else(|| invalid("tree path charge overflow"))?,
                 )?,
             );
@@ -541,9 +544,9 @@ impl FatBuildPlan {
         }
         let charge = (files.len() as u64)
             .checked_mul(
-                (std::mem::size_of::<PlannedFile>()
-                    + std::mem::size_of::<(u32, u32)>()
-                    + std::mem::size_of::<usize>()) as u64,
+                (crate::platform::mem::size_of::<PlannedFile>()
+                    + crate::platform::mem::size_of::<(u32, u32)>()
+                    + crate::platform::mem::size_of::<usize>()) as u64,
             )
             .ok_or_else(|| invalid("inventory charge overflow"))?;
         let reservation = resources.memory.reserve(charge)?;
@@ -973,7 +976,7 @@ fn copy_identity(id: &ObjectId) -> Result<ObjectId> {
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod render_tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -982,13 +985,14 @@ mod render_tests {
         fn len(&self) -> u64 {
             513
         }
-        fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> std::io::Result<()> {
+        fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> crate::platform::io::Result<()> {
             for (i, byte) in out.iter_mut().enumerate() {
                 *byte = (offset + i as u64) as u8;
             }
             Ok(())
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn partial_render_matches_complete_windows_across_packed_entries_and_regions() {
         let resources = Resources {

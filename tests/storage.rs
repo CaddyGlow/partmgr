@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::storage::{Barrier, CommitError, Storage, WritePlan, WriteRange};
 use std::io;
 

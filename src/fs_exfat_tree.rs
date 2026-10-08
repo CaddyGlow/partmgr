@@ -1,12 +1,15 @@
 //! Bounded exFAT tree inventory over the strict volume reader.
 //! No global allocation audit, writable profile or source snapshot is implied.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::Arc,
+};
 use crate::{
     fs_core::*,
     fs_exfat_volume::{ExfatDirectory, ExfatEntry, ExfatVolume},
-};
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    sync::Arc,
 };
 /// Retained tree/inventory ceilings, independent of the volume's per-operation limits.
 #[derive(Clone, Copy, Debug)]
@@ -29,7 +32,7 @@ impl Node {
         self.entry.as_ref().map(|e| &e.directory.entries()[e.slot])
     }
 }
-fn allocation(message: impl std::fmt::Display) -> Error {
+fn allocation(message: impl crate::platform::fmt::Display) -> Error {
     Error::new(ErrorKind::BudgetExhausted, message.to_string())
 }
 fn bytes(input: &[u8]) -> Result<Vec<u8>> {
@@ -347,7 +350,7 @@ impl TreeSource for ExfatTreeSource {
         let entry = self.node(object)?.entry();
         Budgeted::try_new(
             &resources.memory,
-            std::mem::size_of::<StreamInfo>() as u64,
+            crate::platform::mem::size_of::<StreamInfo>() as u64,
             || {
                 let mut streams = Vec::new();
                 if let Some(entry) = entry

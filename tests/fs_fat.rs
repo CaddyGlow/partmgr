@@ -1,3 +1,7 @@
+#![cfg(feature = "std")]
+
+#[path = "common/reader_contract.rs"]
+mod reader_contract;
 use partmgr::{
     fs_core::{Budget, Cancellation, Resources},
     fs_fat::{FatFamily, FatVolume},
@@ -308,6 +312,7 @@ fn namespace_short_alias_identity_and_positional_content() {
     assert_eq!(entry.short_name(), b"PAYLOAD BIN");
     let file = volume.open_entry(entry, 2, &resources).unwrap();
     assert_eq!(file.identity(), entry.identity());
+    reader_contract::assert_eof_contract(&file, &resources);
     let mut out = [0; 8];
     assert_eq!(file.read_at(508, &mut out, &resources).unwrap(), 8);
     assert_eq!(out, [0x41, 0x41, 0x41, 0x41, 0x42, 0x42, 0x42, 0x42]);

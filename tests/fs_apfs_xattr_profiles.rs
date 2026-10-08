@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 //! Independent candidate graphs distinguish unsupported profiles from allocation corruption.
 use partmgr::{fs_apfs::*, fs_core::*};
 use std::{io, sync::Arc};

@@ -1,11 +1,14 @@
 //! Whole-volume classic ext2 allocation and namespace reference accounting.
 //! Strict opening and ordinary file reads remain separate from this explicit audit.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{io, mem::size_of};
 use crate::{
     fs_core::{Error, ErrorKind, NativeName, Reservation, Resources, Result},
     fs_ext::{ExtDecodeRead, ExtDecoder, ExtStorageDecoder, ExtVolume},
     storage::Storage,
 };
-use std::{io, mem::size_of};
 /// Explicit geometry, namespace and work bounds for an immutable audit.
 #[derive(Clone, Copy, Debug)]
 pub struct ExtAuditLimits {

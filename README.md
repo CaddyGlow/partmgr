@@ -5,7 +5,7 @@ and explicit recovery. Partition metadata, filesystem operations, payload copyin
 and observed firmware boot have separate APIs and outcomes.
 
 ```toml
-partmgr = "0.1.0"
+partmgr = "0.1.1"
 ```
 
 ```sh
@@ -15,6 +15,53 @@ cargo test --all-features --locked
 Dependencies resolve from crates.io; no sibling checkout is required. CI checks
 formatting, Clippy and tests on Linux and Windows. Independent partition-tool and
 QEMU/OVMF jobs provide additional format and firmware evidence.
+
+The [refactoring benchmarks](docs/benchmarks.md) compare GPT edit batching,
+FAT planning/emission, APFS metadata access, NTFS MFT loading/parsing and USN
+record decoding in both library configurations.
+
+## Building without std
+
+Disable the default `std` feature to build the entire library with `core` and
+`alloc`, including every filesystem reader, builder and owned editor:
+
+```toml
+partmgr = { version = "0.1.1", default-features = false }
+```
+
+```sh
+cargo build --no-default-features --locked
+# With the target's core/alloc libraries installed:
+cargo build --no-default-features --target x86_64-unknown-none --locked
+cargo test --no-default-features --lib --test no_std --test no_std_readers --test no_std_owned --locked
+cargo clippy --no-default-features --all-targets --locked -- -D warnings
+```
+
+The final application supplies an allocator, panic handling and its storage
+backend. Targets must support pointer and 64-bit atomics. Implement
+`partmgr::io::ReadAt` for immutable positional reads and `storage::Storage` for
+exclusive writes and durable flushes. The portable I/O module retains typed
+errors, reader provenance, bounded views and metadata budgets. With `std` enabled,
+it reexports the existing standard I/O and virtdisk types, preserving host APIs.
+Without `std`, virtdisk and host image/file adapters are excluded; published
+crates.io dependencies still suffice.
+
+Portable caches use non-poisoning spin locks. Callers must prevent interrupt
+handlers or backend callbacks from reentering the same cached reader while it
+holds its lock. Portable hash maps use hashbrown's allocation-only default hasher;
+no operating-system randomness is required. All existing format limits and
+memory reservations remain active.
+
+APFS and HFS+ owned metadata discovery runs synchronously without `std`. It
+retains a single page index, retries the decoder when another page is required,
+and charges every additional decoder pass against the explicit work ceiling.
+This path can require a larger work budget than the default scoped-thread
+implementation. Payload reads stay deferred. JFFS2 ZLIB decoding and encoding
+use bounded miniz_oxide buffers in both builds.
+
+The separate optical integration remains a host crate. The proposed upstream
+portable virtdisk boundary is documented in
+[the virtdisk refactoring plan](docs/virtdisk-no-std-plan.md).
 
 The development filesystem framework provides lossless contracts, bounded
 storage sessions and indexed positional reads. Explicit read-profile dispatch

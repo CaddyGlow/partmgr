@@ -1,6 +1,9 @@
 //! Staged COW fork allocation. No target mutation or free-space publication.
 use super::super::fork_builder;
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 struct ResizeAllocation {
     fork: fork_builder::PlannedFork,
     allocated: Vec<(u32, u32)>,
@@ -208,6 +211,7 @@ impl<S: Storage> Prepared<S> {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn resize_cow_allocations_use_only_audited_free_and_preserve_other_fork() {
     struct ReadOnly(Vec<u8>);
@@ -349,15 +353,15 @@ pub(crate) mod commit;
 #[path = "fs_hfsplus_owned_resize_recovery.rs"]
 pub(crate) mod recovery;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[path = "fs_hfsplus_owned_resize_cuts.rs"]
 mod cuts;
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(all(test, feature = "std", target_os = "linux"))]
 #[path = "fs_hfsplus_owned_resize_native.rs"]
 mod native_gate;
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(all(test, feature = "std", target_os = "linux"))]
 #[path = "fs_hfsplus_owned_resize_forks_native.rs"]
 mod native_forks_gate;
 

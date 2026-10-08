@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_copy::{CopyLimits, CopyNamePolicy},
     fs_core::*,

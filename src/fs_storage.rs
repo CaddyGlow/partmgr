@@ -2,10 +2,13 @@
 //!
 //! A session keeps its backend private until it is dropped. Backend locks can
 //! be advisory: callers must exclude mounted access and external writers, and
-//! keep backing parents immutable. No immutable `virtdisk::ReadAt` contract is
+//! keep backing parents immutable. No immutable `crate::io::ReadAt` contract is
 //! implemented, and no resize or snapshot-management capability is exposed.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{fmt, io};
 use crate::storage::Storage;
-use std::{fmt, io};
 
 /// Backend sector facts. Unknown geometry remains `None`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -52,8 +55,8 @@ impl fmt::Display for UncertainMutation {
         )
     }
 }
-impl std::error::Error for UncertainMutation {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for UncertainMutation {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         Some(&self.source)
     }
 }
@@ -225,11 +228,14 @@ impl<S: Storage> Storage for BoundedSession<S> {
 ///
 /// This is separate from editor sessions. The caller must keep the backing
 /// source stable for every deferred read; a read-only handle alone is insufficient.
-pub use virtdisk::DiskView as ImmutableRegion;
+pub use crate::io::DiskView as ImmutableRegion;
 
-use virtdisk::{Capability, ImageOperation, ImageWriter, InspectImage, WriteAt};
+#[cfg(feature = "std")]
+use crate::io::{Capability, ImageOperation, ImageWriter, InspectImage, WriteAt};
 
+#[cfg(feature = "std")]
 struct WriterStorage(ImageWriter);
+#[cfg(feature = "std")]
 impl Storage for WriterStorage {
     fn len(&self) -> io::Result<u64> {
         Ok(WriteAt::len(&self.0))
@@ -250,9 +256,11 @@ impl Storage for WriterStorage {
 /// Locks may be advisory. Callers must exclude mounted access and external writers,
 /// keep every backing parent immutable, and own later publication/directory sync.
 /// This mutable session does not implement immutable ReadAt.
+#[cfg(feature = "std")]
 pub struct ImageWriterSession {
     region: BoundedSession<WriterStorage>,
 }
+#[cfg(feature = "std")]
 impl ImageWriterSession {
     /// Consume an already explicitly opened writer and inspect actual handle capabilities.
     /// Supplied sector facts fill unknown values; conflicting known facts reject.
@@ -309,6 +317,7 @@ impl ImageWriterSession {
         self.region.zero_at(at, length)
     }
 }
+#[cfg(feature = "std")]
 impl Storage for ImageWriterSession {
     fn len(&self) -> io::Result<u64> {
         self.region.len()
@@ -324,10 +333,10 @@ impl Storage for ImageWriterSession {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod faults {
     use super::*;
-    use virtdisk::{Image, ImageFormat, ReadAt};
+    use crate::io::{Image, ImageFormat, ReadAt};
     struct FaultWriter {
         inner: WriterStorage,
         partial: bool,
@@ -356,6 +365,7 @@ mod faults {
             self.inner.flush()
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn partial_mutation_and_flush_failure_retain_actual_writer_and_sticky_uncertainty() {
         for partial in [true, false] {

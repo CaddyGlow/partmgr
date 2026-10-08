@@ -1,5 +1,8 @@
 //! Allocation plans are derived only from the retained exclusive-session audit.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{fs_core::FileRead, fs_fat::FatFamily};
 
 /// Reviewable resize outcome. Times, attributes, names and unrelated slots are preserved.
@@ -369,7 +372,7 @@ impl<S: Storage, J: Storage> FatEditor<S, J> {
             .and_then(|n| {
                 n.checked_add(
                     (self.limits.undo.patches as u64)
-                        .checked_mul(std::mem::size_of::<WriteRange>() as u64)?,
+                        .checked_mul(crate::platform::mem::size_of::<WriteRange>() as u64)?,
                 )
             })
             .ok_or_else(|| exhausted("FAT resize reservation overflow"))?;

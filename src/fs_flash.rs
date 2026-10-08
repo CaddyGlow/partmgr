@@ -1,10 +1,13 @@
 //! Declared logical NOR flash emulation over exclusively owned regular image storage.
 //! This is a storage contract, not JFFS2 decoding, physical-device publication or NAND ECC.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{fmt, io};
 use crate::{
     fs_core::{Error, ErrorKind, Reservation, Resources, Result},
     storage::Storage,
 };
-use std::{fmt, io};
 
 /// Caller-declared dump interpretation; no layout is inferred from payload bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,8 +79,8 @@ impl fmt::Display for FlashFailure {
         write!(f, "flash {}: {}", self.operation, self.source)
     }
 }
-impl std::error::Error for FlashFailure {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for FlashFailure {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         Some(&self.source)
     }
 }
@@ -101,16 +104,16 @@ pub trait FlashStorage {
         at: u64,
         bytes: &[u8],
         r: &Resources,
-    ) -> std::result::Result<FlashProgress, FlashFailure>;
+    ) -> crate::platform::result::Result<FlashProgress, FlashFailure>;
     /// Erase complete aligned blocks according to declared geometry.
     fn erase(
         &mut self,
         at: u64,
         count: u64,
         r: &Resources,
-    ) -> std::result::Result<FlashProgress, FlashFailure>;
+    ) -> crate::platform::result::Result<FlashProgress, FlashFailure>;
     /// Explicit backend persistence boundary, separate from publication-directory durability.
-    fn flush(&mut self, r: &Resources) -> std::result::Result<(), FlashFailure>;
+    fn flush(&mut self, r: &Resources) -> crate::platform::result::Result<(), FlashFailure>;
     /// Sticky uncertainty cannot be erased by a later successful flush alone.
     fn mutation_uncertain(&self) -> bool;
 }
@@ -303,7 +306,7 @@ impl<S: Storage> FlashImage<S> {
         at: u64,
         bytes: &[u8],
         r: &Resources,
-    ) -> std::result::Result<FlashProgress, FlashFailure> {
+    ) -> crate::platform::result::Result<FlashProgress, FlashFailure> {
         self.mutate("program", at, bytes.len() as u64, Some(bytes), r)
     }
     /// Erase complete aligned blocks to 0xff with bounded writes and readback.
@@ -313,7 +316,7 @@ impl<S: Storage> FlashImage<S> {
         at: u64,
         count: u64,
         r: &Resources,
-    ) -> std::result::Result<FlashProgress, FlashFailure> {
+    ) -> crate::platform::result::Result<FlashProgress, FlashFailure> {
         self.mutate("erase", at, count, None, r)
     }
     fn mutate(
@@ -323,7 +326,7 @@ impl<S: Storage> FlashImage<S> {
         count: u64,
         input: Option<&[u8]>,
         r: &Resources,
-    ) -> std::result::Result<FlashProgress, FlashFailure> {
+    ) -> crate::platform::result::Result<FlashProgress, FlashFailure> {
         let mut progress = FlashProgress::default();
         let mut attempted = false;
         let result: Result<()> = (|| {
@@ -413,7 +416,7 @@ impl<S: Storage> FlashImage<S> {
         }
     }
     /// Delegate persistence to the backend; failure retains sticky uncertain durability.
-    pub fn flush(&mut self, r: &Resources) -> std::result::Result<(), FlashFailure> {
+    pub fn flush(&mut self, r: &Resources) -> crate::platform::result::Result<(), FlashFailure> {
         let result = r
             .cancellation
             .check()
@@ -469,7 +472,7 @@ impl<S: Storage> FlashStorage for FlashImage<S> {
         at: u64,
         bytes: &[u8],
         r: &Resources,
-    ) -> std::result::Result<FlashProgress, FlashFailure> {
+    ) -> crate::platform::result::Result<FlashProgress, FlashFailure> {
         FlashImage::program(self, at, bytes, r)
     }
     fn erase(
@@ -477,10 +480,10 @@ impl<S: Storage> FlashStorage for FlashImage<S> {
         at: u64,
         count: u64,
         r: &Resources,
-    ) -> std::result::Result<FlashProgress, FlashFailure> {
+    ) -> crate::platform::result::Result<FlashProgress, FlashFailure> {
         FlashImage::erase(self, at, count, r)
     }
-    fn flush(&mut self, r: &Resources) -> std::result::Result<(), FlashFailure> {
+    fn flush(&mut self, r: &Resources) -> crate::platform::result::Result<(), FlashFailure> {
         FlashImage::flush(self, r)
     }
     fn mutation_uncertain(&self) -> bool {

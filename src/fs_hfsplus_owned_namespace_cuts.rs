@@ -2,7 +2,11 @@
 use super::super::transaction::recovery::cuts::{Clock, Model};
 use super::*;
 use crate::fs_undo::{UndoBinding, UndoLimits, UndoState};
-use std::sync::{Arc, Mutex};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::sync::{Arc, Mutex};
+#[cfg(feature = "std")]
 #[test]
 fn every_rename_commit_cut_recovers_exact_old_or_committed_projection() {
     commit_cuts(None, false, false);
@@ -202,6 +206,7 @@ fn commit_cuts(native: Option<&native_gate::Gate>, moving: bool, deleting: bool)
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn every_rename_rollback_cut_cold_retry_restores_complete_original() {
     rollback_cuts(None, false, false);
@@ -366,6 +371,7 @@ fn rollback_cuts(native: Option<&native_gate::Gate>, moving: bool, deleting: boo
 #[path = "fs_hfsplus_owned_namespace_native_cuts.rs"]
 mod native_gate;
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native all-position rename commit and recovery gate"]
 fn native_all_rename_commit_and_recovery_cuts() {
@@ -375,6 +381,7 @@ fn native_all_rename_commit_and_recovery_cuts() {
     gate.finish();
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn every_move_commit_and_rollback_cut_recovers() {
     commit_cuts(None, true, false);
@@ -382,6 +389,7 @@ fn every_move_commit_and_rollback_cut_recovers() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native all-position cross-parent file move commit/recovery gate"]
 fn native_all_move_commit_and_recovery_cuts() {
@@ -392,6 +400,7 @@ fn native_all_move_commit_and_recovery_cuts() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native populated directory move all-position gate"]
 fn native_all_directory_move_commit_and_recovery_cuts() {
@@ -419,7 +428,7 @@ fn commit_public<S: Storage>(
     binding: UndoBinding,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<Prepared<S>, RenameFailure<S>> {
+) -> crate::platform::result::Result<Prepared<S>, RenameFailure<S>> {
     use crate::fs_hfsplus::edit::*;
     let limits = prepared.limits;
     let session =
@@ -469,7 +478,7 @@ fn recover_public(
     limits: Limits,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     use crate::fs_hfsplus::edit::*;
     if request.deleting {
         return recover_delete(
@@ -508,6 +517,7 @@ fn recover_public(
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn every_file_and_empty_directory_delete_commit_and_rollback_cut_recovers() {
     commit_cuts(None, false, true);
@@ -515,6 +525,7 @@ fn every_file_and_empty_directory_delete_commit_and_rollback_cut_recovers() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native empty-directory deletion all-position gate"]
 fn native_all_empty_directory_delete_commit_and_recovery_cuts() {
@@ -525,6 +536,7 @@ fn native_all_empty_directory_delete_commit_and_recovery_cuts() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native fragmented DATA/resource file deletion all-position gate"]
 fn native_all_file_delete_commit_and_recovery_cuts() {

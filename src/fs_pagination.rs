@@ -1,6 +1,9 @@
 //! Source-bound native directory continuation mechanics.
 use crate::fs_core::{Error, ErrorKind, ObjectId, Result};
-use std::ops::Range;
+use crate::platform::ops::Range;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(crate) fn token(id: &ObjectId, index: usize) -> Result<Vec<u8>> {
     let index = u64::try_from(index)
@@ -59,9 +62,10 @@ pub(crate) fn range(
     Ok(start..start + maximum.min(count - start))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
+    #[cfg(feature = "std")]
     #[test]
     fn continuation_binds_source_generation_and_native_identity() {
         let id = ObjectId {

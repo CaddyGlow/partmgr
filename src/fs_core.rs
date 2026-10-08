@@ -4,7 +4,10 @@
 //! than host path APIs, own comparison and normalization. Deferred sources must
 //! remain stable throughout inventory and all repeated positional reads.
 
-use std::{
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     fmt, io,
     sync::{
         Arc,
@@ -355,13 +358,13 @@ impl fmt::Display for Error {
         write!(f, "{:?}: {}", self.kind, self.context)
     }
 }
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for Error {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         self.source.as_ref().map(|e| e as _)
     }
 }
 /// Filesystem operation result.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = crate::platform::result::Result<T, Error>;
 
 #[derive(Clone, Default, Debug)]
 /// Shareable cooperative cancellation signal.
@@ -497,7 +500,7 @@ impl<T> Budgeted<T> {
         Ok(Budgeted { value, reservation })
     }
 }
-impl<T> std::ops::Deref for Budgeted<T> {
+impl<T> crate::platform::ops::Deref for Budgeted<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -708,9 +711,10 @@ pub trait TreeSink {
     ) -> Result<Self::Report>;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod error_tests {
     use super::*;
+    #[cfg(feature = "std")]
     #[test]
     fn classified_native_errors_retain_embedded_causes() {
         let original = Error::io(

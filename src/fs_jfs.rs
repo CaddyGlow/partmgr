@@ -1,9 +1,9 @@
 //! Strict immutable Linux JFS baseline, with native inode maps and bounded extent/directory trees.
-use crate::{
-    fs_core::*,
-    fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent},
-};
-use std::{
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     collections::{BTreeMap, BTreeSet},
     io,
     sync::{
@@ -11,7 +11,10 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-use virtdisk::ReadAt;
+use crate::{
+    fs_core::*,
+    fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent},
+};
 static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
 pub(crate) fn bad(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
@@ -884,9 +887,9 @@ pub(crate) struct Decoded {
     pub(crate) system: Vec<Physical>,
     pub(crate) bitmap: Vec<bool>,
     pub(crate) allocation_agreement: bool,
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     map_length: u64,
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     map_runs: Vec<Run>,
     pub(crate) mirror_valid: bool,
     limits: JfsReadLimits,
@@ -897,7 +900,7 @@ pub(crate) struct Inner {
     pub(crate) scope: u128,
     decoded: Decoded,
 }
-impl std::ops::Deref for Inner {
+impl crate::platform::ops::Deref for Inner {
     type Target = Decoded;
     fn deref(&self) -> &Decoded {
         &self.decoded
@@ -910,7 +913,7 @@ pub(crate) fn decode(
 ) -> Result<Decoded> {
     decode_inner(source, limits, r, None)
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn decode_recovery(
     source: &dyn DecodeRead,
     limits: JfsReadLimits,
@@ -1329,7 +1332,7 @@ fn decode_inner(
     if ![0, 1, 2, 3].iter().all(|id| nodes.contains_key(id)) {
         return Err(bad("JFS required fileset inodes"));
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     let (map_length, map_runs) = {
         let mut retained = vector(mapruns.len())?;
         retained.extend(mapruns.iter().cloned());
@@ -1348,9 +1351,9 @@ fn decode_inner(
         system,
         bitmap,
         allocation_agreement: changes.is_none(),
-        #[cfg(test)]
+        #[cfg(all(test, feature = "std"))]
         map_length,
-        #[cfg(test)]
+        #[cfg(all(test, feature = "std"))]
         map_runs,
         mirror_valid,
         limits,
@@ -1461,7 +1464,7 @@ impl JfsVolume {
     pub(crate) fn directory_entries(
         &self,
         id: &ObjectId,
-        range: std::ops::Range<usize>,
+        range: crate::platform::ops::Range<usize>,
         r: &Resources,
     ) -> Result<Vec<DirectoryEntry>> {
         let node = self.node(id)?;
@@ -1639,6 +1642,6 @@ impl FileRead for JfsFile {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[path = "fs_jfs_edit.rs"]
 mod edit;

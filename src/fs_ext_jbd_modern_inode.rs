@@ -1,5 +1,8 @@
 //! Bounded inode bitmap/counter projection and exact native inode checksum updates.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 impl Context<'_, '_> {
     pub(super) fn allocate_inode(&mut self, directory: bool) -> io::Result<(u32, u32)> {

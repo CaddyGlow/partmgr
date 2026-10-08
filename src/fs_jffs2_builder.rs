@@ -1,4 +1,12 @@
 //! Deterministic new-image JFFS2 logical NOR authoring from a bounded common tree.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashMap, VecDeque},
+    fmt, io,
+    sync::Arc,
+};
 use crate::{
     fs_core::*,
     fs_flash::{FlashGeometry, FlashLayout, FlashProgramming},
@@ -6,11 +14,6 @@ use crate::{
     storage::Storage,
 };
 use sha2::{Digest, Sha256};
-use std::{
-    collections::{HashMap, VecDeque},
-    fmt, io,
-    sync::Arc,
-};
 #[path = "fs_jffs2_builder_compression.rs"]
 mod compression;
 pub use compression::Jffs2BuildCompression;
@@ -208,8 +211,8 @@ impl fmt::Display for Jffs2BuildFailure {
         write!(f, "JFFS2 staged authoring: {}", self.source)
     }
 }
-impl std::error::Error for Jffs2BuildFailure {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for Jffs2BuildFailure {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         Some(&self.source)
     }
 }
@@ -909,7 +912,7 @@ impl Jffs2BuildPlan {
         &self,
         target: &mut (impl Storage + ?Sized),
         r: &Resources,
-    ) -> std::result::Result<Jffs2BuildReport, Jffs2BuildFailure> {
+    ) -> crate::platform::result::Result<Jffs2BuildReport, Jffs2BuildFailure> {
         let mut mutated = false;
         let mut accepted = 0u64;
         let mut verified = 0u64;

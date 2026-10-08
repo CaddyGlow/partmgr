@@ -1,5 +1,8 @@
 //! Bounded checksum-aware inode authoring with unchanged native indirect-map profile.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) fn decode(
     context: &mut Context<'_, '_>,
@@ -23,7 +26,7 @@ pub(super) fn decode(
         end,
         allocations: Vec::new(),
         metadata: Vec::new(),
-        seen: std::collections::BTreeSet::new(),
+        seen: crate::platform::collections::BTreeSet::new(),
         cap,
     };
     if walk.end > cap as u64 {
@@ -67,7 +70,7 @@ struct Walk<'a, 'd, 's> {
     end: u64,
     allocations: Vec<super::super::super::extent::ExtentAllocation>,
     metadata: Vec<u32>,
-    seen: std::collections::BTreeSet<u32>,
+    seen: crate::platform::collections::BTreeSet<u32>,
     cap: usize,
 }
 impl Walk<'_, '_, '_> {

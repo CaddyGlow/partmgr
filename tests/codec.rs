@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{codec::edit_plan, layout::DiskLayout};
 use std::io;
 use virtdisk::ReadAt;

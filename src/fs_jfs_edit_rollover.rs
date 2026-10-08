@@ -1,5 +1,8 @@
 //! Private pristine-page native checkpoint rollover; no filesystem home changes.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::storage::Storage;
 use sha2::{Digest, Sha256};
 

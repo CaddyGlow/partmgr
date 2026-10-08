@@ -1,11 +1,14 @@
 //! Explicit GPT source selection and bounded repair/geometry planning.
 use crate::gpt::crc32 as crc;
+use crate::io::ReadAt;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     layout::{DiskLayout, Geometry, GptLayout},
     storage::{Barrier, ReadCondition, WritePlan, WriteRange},
 };
-use std::io;
-use virtdisk::ReadAt;
 fn invalid(s: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, s)
 }
@@ -433,8 +436,8 @@ pub enum ResizeError {
     /// Final storage geometry or strict GPT readback failed after mutation.
     Verification(io::Error),
 }
-impl std::fmt::Display for ResizeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl crate::platform::fmt::Display for ResizeError {
+    fn fmt(&self, f: &mut crate::platform::fmt::Formatter<'_>) -> crate::platform::fmt::Result {
         match self {
             Self::Preflight(e) => write!(f, "resize preflight: {e}"),
             Self::StorageResize(e) => write!(f, "storage resize uncertain: {e}"),
@@ -443,8 +446,8 @@ impl std::fmt::Display for ResizeError {
         }
     }
 }
-impl std::error::Error for ResizeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for ResizeError {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         Some(match self {
             Self::Preflight(e) | Self::StorageResize(e) | Self::Verification(e) => e,
             Self::Commit(e) => e,

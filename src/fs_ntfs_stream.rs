@@ -1,5 +1,8 @@
 //! Isolated draft: exact DATA streams and bounded attribute-list resolution.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 /// Additional aggregate ceilings, independent of per-record decoder limits.
 #[derive(Clone, Copy, Debug)]
 pub struct NtfsStreamLimits {
@@ -334,10 +337,11 @@ impl NtfsVolume {
             .checked_add(1)
             .ok_or_else(|| budget("NTFS resolved record cap overflow"))?;
         let charge = (records_cap as u64)
-            .checked_mul(std::mem::size_of::<NtfsRecord>() as u64)
+            .checked_mul(crate::platform::mem::size_of::<NtfsRecord>() as u64)
             .and_then(|n| {
                 n.checked_add(
-                    (limits.attributes as u64).checked_mul(std::mem::size_of::<Located>() as u64)?,
+                    (limits.attributes as u64)
+                        .checked_mul(crate::platform::mem::size_of::<Located>() as u64)?,
                 )
             })
             .and_then(|n| n.checked_add(limits.list_bytes as u64))
@@ -345,7 +349,7 @@ impl NtfsVolume {
             .and_then(|n| {
                 n.checked_add(
                     (self.limits.attributes as u64)
-                        .checked_mul(std::mem::size_of::<Attribute>() as u64)?,
+                        .checked_mul(crate::platform::mem::size_of::<Attribute>() as u64)?,
                 )
             })
             .ok_or_else(|| budget("NTFS resolution charge overflow"))?;
@@ -685,7 +689,7 @@ impl NtfsVolume {
         r: &Resources,
     ) -> Result<(Content, usize, u64, bool, Reservation)> {
         let selected_charge = (limits.attributes as u64)
-            .checked_mul(std::mem::size_of::<Located>() as u64)
+            .checked_mul(crate::platform::mem::size_of::<Located>() as u64)
             .ok_or_else(|| budget("NTFS selected segment charge"))?;
         let _selected_lease = r.memory.reserve(selected_charge)?;
         let mut selected = vector(limits.attributes)?;

@@ -1,6 +1,9 @@
 //! Domain failures retaining original I/O errors as sources.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{fmt, io};
 use crate::storage::CommitError;
-use std::{fmt, io};
 /// Errors grouped by the operation and its recovery implications.
 #[derive(Debug)]
 pub enum Error {
@@ -53,8 +56,8 @@ impl fmt::Display for Error {
         }
     }
 }
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for Error {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         Some(match self {
             Self::InvalidData(e) | Self::Unsupported(e) | Self::InvalidEdit(e) | Self::Io(e) => e,
             Self::StalePlan(e) | Self::PartialCommit(e) => e,
@@ -63,7 +66,7 @@ impl std::error::Error for Error {
 }
 /// Strict owned inspection with classified domain errors.
 pub fn inspect(
-    source: &dyn virtdisk::ReadAt,
+    source: &dyn crate::io::ReadAt,
     sector_size: u32,
 ) -> Result<crate::layout::DiskLayout, Error> {
     crate::layout::DiskLayout::inspect(source, sector_size).map_err(Error::inspection)

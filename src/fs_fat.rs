@@ -3,11 +3,10 @@
 //! This is not an ownership audit or writable FAT profile.
 //! Inputs must remain immutable for all deferred reads. Files are opened from
 //! caller-supplied cluster/size facts; callers must establish their provenance.
-use crate::{
-    fs_core::{NativeName, ObjectId, Reservation, Resources},
-    fs_file::{ExtentFile, ExtentKind, FileExtent},
-};
-use std::{
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     collections::HashSet,
     io,
     sync::{
@@ -15,9 +14,13 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+use crate::{
+    fs_core::{NativeName, ObjectId, Reservation, Resources},
+    fs_file::{ExtentFile, ExtentKind, FileExtent},
+};
 static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
+use crate::io::{DiskView, ReadAt};
 use crate::storage::Storage;
-use virtdisk::{DiskView, ReadAt};
 
 /// FAT entry width selected solely from the data cluster count.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -386,7 +389,7 @@ impl<R: FatDecodeRead> FatDecoder<R> {
         }
         // Includes the input map, coalescing scratch, and final shared map.
         let bytes = count
-            .checked_mul((3 * std::mem::size_of::<FileExtent>()) as u64)
+            .checked_mul((3 * crate::platform::mem::size_of::<FileExtent>()) as u64)
             .ok_or_else(|| io::Error::other("FAT map budget overflow"))?;
         let reservation = resources.memory.reserve(bytes).map_err(io::Error::other)?;
         let mut extents = Vec::new();
@@ -596,7 +599,7 @@ impl<R: FatDecodeRead> FatDecoder<R> {
     ) -> io::Result<FatDirectory> {
         resources.cancellation.check().map_err(io::Error::other)?;
         let charge = (max_slots as u64)
-            .checked_mul((std::mem::size_of::<FatEntry>() + 540) as u64)
+            .checked_mul((crate::platform::mem::size_of::<FatEntry>() + 540) as u64)
             .and_then(|v| v.checked_add((max_clusters as u64).checked_mul(64)?))
             .and_then(|v| v.checked_add(1100))
             .ok_or_else(|| io::Error::other("FAT directory budget overflow"))?;
@@ -832,6 +835,9 @@ impl crate::fs_core::FileRead for FatNamespaceFile {
         resources: &Resources,
     ) -> crate::fs_core::Result<usize> {
         resources.cancellation.check()?;
+        if offset >= self.len() || buffer.is_empty() {
+            return Ok(0);
+        }
         self.file
             .read_at(offset, buffer, resources)
             .map_err(|e| crate::fs_core::Error::io("FAT payload read", e))

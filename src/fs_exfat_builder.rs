@@ -1,15 +1,18 @@
 //! Deterministic direct exFAT authoring for unpublished new images.
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashMap, HashSet, VecDeque},
+    io,
+    sync::Arc,
+};
 use crate::{
     fs_core::{Error, ErrorKind, FileRead, ObjectId, Reservation, Resources, Result},
     storage::Storage,
 };
 use sha2::{Digest, Sha256};
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    io,
-    sync::Arc,
-};
-use virtdisk::ReadAt;
 const SECTOR: u64 = 512;
 const SCRATCH: usize = 65536;
 /// Immutable deferred content; caller guarantees stability through verification.

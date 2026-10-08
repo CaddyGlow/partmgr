@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::extended::ExtendedLayout;
 use std::io;
 use virtdisk::ReadAt;

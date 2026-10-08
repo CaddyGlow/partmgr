@@ -1,12 +1,15 @@
 //! Borrowed same-owner modern extent mutation planning; publication belongs to JBD2.
 use super::*;
+use crate::platform::collections::BTreeMap;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_ext::{ExtInode, ExtStorageDecoder},
     fs_ext_audit::ExtAuditReport,
     fs_ext_edit::ExtEditLimits,
     storage::WriteRange,
 };
-use std::collections::BTreeMap;
 #[path = "fs_ext_jbd_modern_extent.rs"]
 mod extent_writer;
 #[path = "fs_ext_jbd_modern_indirect.rs"]
@@ -89,7 +92,7 @@ impl<'a, 's> Context<'a, 's> {
             .and_then(|n| {
                 n.checked_add(
                     u64::from(limits.undo.patches)
-                        * (std::mem::size_of::<WriteRange>() as u64 + 128),
+                        * (crate::platform::mem::size_of::<WriteRange>() as u64 + 128),
                 )
             })
             .and_then(|n| {
@@ -161,7 +164,9 @@ impl<'a, 's> Context<'a, 's> {
     fn ensure_group(&mut self, group: u32) -> io::Result<()> {
         let g = &self.decoder.geometry;
         let proof = g.modern.as_ref().unwrap();
-        if let std::collections::btree_map::Entry::Vacant(entry) = self.groups.entry(group) {
+        if let crate::platform::collections::btree_map::Entry::Vacant(entry) =
+            self.groups.entry(group)
+        {
             let descriptor = *proof
                 .descriptors
                 .get(group as usize)
@@ -294,7 +299,7 @@ impl<'a, 's> Context<'a, 's> {
     fn finish(mut self) -> io::Result<Plan> {
         let g = &self.decoder.geometry;
         let proof = g.modern.as_ref().unwrap();
-        for (number, mut row) in std::mem::take(&mut self.groups) {
+        for (number, mut row) in crate::platform::mem::take(&mut self.groups) {
             self.tick(g.blocks_per_group as usize / 8 + usize::from(proof.descriptor_size))?;
             if row.block_dirty {
                 if proof.checksums.has_metadata() {
@@ -587,6 +592,6 @@ pub(super) fn extend(
     context.finish()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[path = "fs_ext_jbd_modern_tests.rs"]
 mod tests;

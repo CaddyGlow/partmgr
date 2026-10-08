@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{fs_core::*, fs_ntfs::*, fs_ntfs_usn::RecordLimits, fs_ntfs_usn_extract::*};
 use std::{
     io,

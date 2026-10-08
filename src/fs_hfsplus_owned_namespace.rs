@@ -1,6 +1,9 @@
 //! Exclusive same-parent catalog rename with external undo and cold recovery.
 use super::*;
 use crate::fs_hfsplus as native;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 struct RenamePlan {
     patches: Vec<WriteRange>,
     _lease: Reservation,
@@ -301,6 +304,7 @@ impl<S: Storage> Prepared<S> {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn rename_preparation_preserves_objects_threads_header_and_exclusive_target() {
     struct ReadOnly(Vec<u8>);
@@ -484,7 +488,7 @@ impl<S: Storage> Prepared<S> {
         binding: UndoBinding,
         undo: UndoLimits,
         r: &Resources,
-    ) -> std::result::Result<Self, RenameFailure<S>> {
+    ) -> crate::platform::result::Result<Self, RenameFailure<S>> {
         let prepared = {
             if request.deleting {
                 self.plan_delete_entry(request.path, r)
@@ -510,7 +514,7 @@ impl<S: Storage> Prepared<S> {
         binding: UndoBinding,
         undo: UndoLimits,
         r: &Resources,
-    ) -> std::result::Result<Self, RenameFailure<S>> {
+    ) -> crate::platform::result::Result<Self, RenameFailure<S>> {
         let planned = (|| -> Result<_> {
             let rename = prepared?;
             let clean = self.volume.header()[6];
@@ -614,7 +618,7 @@ pub(crate) fn recover_rename(
     limits: Limits,
     undo: UndoLimits,
     r: &Resources,
-) -> std::result::Result<UndoStatus, UndoFailure> {
+) -> crate::platform::result::Result<UndoStatus, UndoFailure> {
     let proof = (|| -> Result<_> {
         let length = target
             .len()
@@ -678,6 +682,7 @@ pub(crate) fn recover_rename(
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn rename_consuming_commit_and_cold_semantic_recovery() {
     struct Memory {
@@ -875,14 +880,15 @@ fn rename_consuming_commit_and_cold_semantic_recovery() {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[path = "fs_hfsplus_owned_namespace_cuts.rs"]
 mod cuts;
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(all(test, feature = "std", target_os = "linux"))]
 #[path = "fs_hfsplus_owned_namespace_native.rs"]
 mod native_gate;
 
+#[cfg(feature = "std")]
 #[test]
 fn move_preparation_updates_parent_counts_threads_and_rejects_cycles() {
     for binary in [false, true] {
@@ -968,6 +974,7 @@ fn move_preparation_updates_parent_counts_threads_and_rejects_cycles() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn move_consuming_commit_and_cold_semantic_recovery() {
     struct Memory {
@@ -1195,10 +1202,11 @@ fn move_consuming_commit_and_cold_semantic_recovery() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn empty_directory_deletion_preparation_audits_counters_and_rejects_nonempty() {
     use super::transaction::recovery::cuts::{Clock, Model};
-    use std::sync::{Arc, Mutex};
+    use crate::platform::sync::{Arc, Mutex};
     for binary in [false, true] {
         let r = Resources {
             memory: Budget::new(16 << 20),
@@ -1403,10 +1411,11 @@ impl<S: Storage> Prepared<S> {
         })
     }
 }
+#[cfg(feature = "std")]
 #[test]
 fn file_deletion_preparation_releases_both_forks_overflow_and_preserves_payload() {
     use super::transaction::recovery::cuts::{Clock, Model};
-    use std::sync::{Arc, Mutex};
+    use crate::platform::sync::{Arc, Mutex};
     for binary in [false, true] {
         let r = Resources {
             memory: Budget::new(16 << 20),

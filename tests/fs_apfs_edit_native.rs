@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 //! Enabled native COW gate never skips missing tools. Initial source is freshly framework-authored.
 #![cfg(unix)]
 use partmgr::{

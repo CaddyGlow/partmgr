@@ -1,5 +1,8 @@
 //! Exact sensitive native namespace and bounded data projections for native COW.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 /// Native metadata supplied explicitly for newly authored APFS objects.
 #[derive(Clone, Copy, Debug)]
@@ -42,7 +45,7 @@ fn xattr_name(name: &[u8]) -> Result<()> {
     if name.is_empty()
         || name.len() > 821
         || name.contains(&0)
-        || std::str::from_utf8(name).is_err()
+        || crate::platform::str::from_utf8(name).is_err()
     {
         return Err(invalid("APFS native xattr name bounds"));
     }
@@ -81,7 +84,7 @@ fn name_valid(name: &[u8]) -> Result<()> {
         || name.contains(&b'/')
         || name == b"."
         || name == b".."
-        || std::str::from_utf8(name).is_err()
+        || crate::platform::str::from_utf8(name).is_err()
     {
         return Err(invalid("APFS exact native UTF8 name"));
     }

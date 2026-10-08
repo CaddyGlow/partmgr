@@ -1,7 +1,10 @@
 //! Bounded native ext4 xattr structure validation; values and ACL encodings remain opaque.
 use super::{invalid, u16le, u32le, unsupported};
 use crate::fs_core::Resources;
-use std::io;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct XattrSummary {
     pub entries: usize,
@@ -121,7 +124,7 @@ pub(super) fn validate(
         security_namespaces: security,
     })
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -159,6 +162,7 @@ mod tests {
         b[value..value + 5].copy_from_slice(b"value");
         (b, header)
     }
+    #[cfg(feature = "std")]
     #[test]
     fn inline_and_external_native_names_values_bounds_cancel_and_refunds() {
         for external in [false, true] {

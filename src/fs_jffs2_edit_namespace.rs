@@ -1,5 +1,8 @@
 //! Private operation-specific namespace intents using the shared NOR transaction engine.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 /// Explicit native metadata for a newly created object; no source metadata is inferred.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Jffs2CreateMetadata {

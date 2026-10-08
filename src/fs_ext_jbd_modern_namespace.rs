@@ -2,6 +2,9 @@
 use super::inode_writer::patch_inode;
 use super::*;
 use crate::fs_core::NativeName;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(in super::super) struct Create<'a> {
     pub(in super::super) parent: &'a [NativeName],

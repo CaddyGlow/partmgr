@@ -1,6 +1,9 @@
 //! Private closed-body integrity for native legacy JBD transactions.
 //! This occupies unused commit padding; native journal features remain unchanged.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use sha2::{Digest, Sha256};
 const MAGIC: &[u8; 16] = b"PMGRJBD2SHA256V1";
 const FOOTER: usize = 640;
@@ -85,7 +88,7 @@ pub(super) fn stamp(g: &Geometry, blocks: &mut [LogBlock]) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -134,6 +137,7 @@ mod tests {
         let digest = Sha256::digest(input);
         blocks[3][672..704].copy_from_slice(&digest);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn independently_sealed_legacy_body_corruption_and_rehashed_semantics() {
         let r = Resources {
@@ -190,6 +194,7 @@ mod tests {
         );
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn owned_legacy_native_prepare_publication_recovery_all_write_barrier_torn_cuts() {
         let r = Resources {

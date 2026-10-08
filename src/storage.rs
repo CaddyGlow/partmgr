@@ -3,7 +3,10 @@
 //! A plan is not atomic. Callers must hold exclusive access for its entire
 //! preflight, write, flush and verification sequence. Preconditions detect stale
 //! snapshots, but cannot enforce that contract against concurrent writers.
-use std::{fmt, io};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{fmt, io};
 
 /// Exclusive positional storage capability.
 ///
@@ -176,8 +179,8 @@ impl fmt::Display for CommitError {
         }
     }
 }
-impl std::error::Error for CommitError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for CommitError {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         match self {
             Self::Preflight(e) | Self::Interrupted { source: e, .. } => Some(e),
             Self::Stale { .. } => None,
@@ -338,13 +341,15 @@ impl WritePlan {
 ///
 /// File locks may be advisory on Unix; all writers must honor the lock. This
 /// adapter rejects device nodes and does not advertise raw block-device support.
+#[cfg(feature = "std")]
 pub struct FileStorage {
-    file: std::sync::Mutex<std::fs::File>,
+    file: crate::platform::sync::Mutex<crate::platform::fs::File>,
 }
+#[cfg(feature = "std")]
 impl FileStorage {
     /// Open a preexisting image read/write and acquire its exclusive lock.
-    pub fn open(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
-        let file = std::fs::OpenOptions::new()
+    pub fn open(path: impl AsRef<crate::platform::path::Path>) -> io::Result<Self> {
+        let file = crate::platform::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)?;
@@ -356,21 +361,24 @@ impl FileStorage {
         }
         file.try_lock().map_err(io::Error::other)?;
         Ok(Self {
-            file: std::sync::Mutex::new(file),
+            file: crate::platform::sync::Mutex::new(file),
         })
     }
-    fn locked(&self) -> io::Result<std::sync::MutexGuard<'_, std::fs::File>> {
+    fn locked(
+        &self,
+    ) -> io::Result<crate::platform::sync::MutexGuard<'_, crate::platform::fs::File>> {
         self.file
             .lock()
             .map_err(|_| io::Error::other("file lock poisoned"))
     }
 }
+#[cfg(feature = "std")]
 impl Storage for FileStorage {
     fn len(&self) -> io::Result<u64> {
         Ok(self.locked()?.metadata()?.len())
     }
     fn read_exact_at(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
-        use std::io::{Read, Seek, SeekFrom};
+        use crate::platform::io::{Read, Seek, SeekFrom};
         let mut file = self.locked()?;
         let length = file.metadata()?.len();
         if offset
@@ -383,7 +391,7 @@ impl Storage for FileStorage {
         file.read_exact(out)
     }
     fn write_at(&mut self, offset: u64, bytes: &[u8]) -> io::Result<usize> {
-        use std::io::{Seek, SeekFrom, Write};
+        use crate::platform::io::{Seek, SeekFrom, Write};
         let mut file = self.locked()?;
         let length = file.metadata()?.len();
         if offset
@@ -402,6 +410,7 @@ impl Storage for FileStorage {
         self.locked()?.sync_all()
     }
 }
+#[cfg(feature = "std")]
 impl ResizableStorage for FileStorage {
     fn resize(&mut self, bytes: u64) -> io::Result<()> {
         let file = self.locked()?;
@@ -427,7 +436,7 @@ impl<'a, S: Storage> StorageReader<'a, S> {
         })
     }
 }
-impl<S: Storage + Send + Sync> virtdisk::ReadAt for StorageReader<'_, S> {
+impl<S: Storage + Send + Sync> crate::io::ReadAt for StorageReader<'_, S> {
     fn len(&self) -> u64 {
         self.length
     }

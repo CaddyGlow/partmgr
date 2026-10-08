@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::partition::{PartitionTable, Scheme};
 use std::{
     io::{self, Write},

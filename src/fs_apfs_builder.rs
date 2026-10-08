@@ -1,6 +1,9 @@
 //! Deterministic native APFS construction for unpublished single-store images.
 use crate::fs_core::*;
-use std::{
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
@@ -9,6 +12,7 @@ mod disk;
 use disk::*;
 #[path = "fs_apfs_builder_layout.rs"]
 mod layout;
+use crate::io::ReadAt;
 use crate::{
     fs_apfs::{ApfsContainer, ApfsReadLimits, ApfsVolume},
     fs_apfs_audit::{ApfsAuditLimits, ApfsAuditReport, audit_apfs},
@@ -16,7 +20,6 @@ use crate::{
 };
 use layout::Layout;
 use sha2::{Digest, Sha256};
-use virtdisk::ReadAt;
 
 /// Explicit interpretation of source names.
 #[derive(Clone, Copy, Debug)]
@@ -327,7 +330,7 @@ impl ApfsBuildPlan {
         if options.volume_label.is_empty()
             || options.volume_label.len() > 255
             || options.volume_label.contains(&0)
-            || std::str::from_utf8(&options.volume_label).is_err()
+            || crate::platform::str::from_utf8(&options.volume_label).is_err()
             || options.container_uuid == [0; 16]
             || options.volume_uuid == [0; 16]
         {
@@ -627,7 +630,7 @@ fn read_file(file: &dyn FileRead, at: u64, out: &mut [u8], r: &Resources) -> Res
         if n == 0 || n > out.len() - done {
             return Err(Error::io(
                 "APFS deferred short read",
-                std::io::ErrorKind::UnexpectedEof.into(),
+                crate::platform::io::ErrorKind::UnexpectedEof.into(),
             ));
         }
         done += n;
@@ -641,7 +644,10 @@ fn write(target: &mut dyn Storage, at: u64, b: &[u8], stage: &str) -> Result<()>
             .write_at(at + done as u64, &b[done..])
             .map_err(|e| Error::io(stage, e))?;
         if n == 0 || n > b.len() - done {
-            return Err(Error::io(stage, std::io::ErrorKind::WriteZero.into()));
+            return Err(Error::io(
+                stage,
+                crate::platform::io::ErrorKind::WriteZero.into(),
+            ));
         }
         done += n;
     }
@@ -692,7 +698,7 @@ fn native_name(n: &NativeName, p: ApfsBuildNames) -> Result<Vec<u8>> {
         || b == b"."
         || b == b".."
         || b.iter().any(|c| *c == 0 || *c == b'/')
-        || std::str::from_utf8(&b).is_err()
+        || crate::platform::str::from_utf8(&b).is_err()
     {
         return Err(unsupported("APFS name is outside exact UTF-8 profile"));
     }
@@ -818,7 +824,7 @@ fn canonical_inventory(inputs: Vec<Input>, work: &mut Work, r: &Resources) -> Re
     for old in order {
         let mut input = slots[old].take().unwrap();
         input.parent = parent[old];
-        input.primary = std::mem::take(&mut names[old]);
+        input.primary = crate::platform::mem::take(&mut names[old]);
         for (_, child) in &mut input.children {
             *child = map[*child];
         }
@@ -1032,7 +1038,7 @@ fn inventory(
                 if bytes.is_empty()
                     || bytes.len() > 821
                     || bytes.contains(&0)
-                    || std::str::from_utf8(bytes).is_err()
+                    || crate::platform::str::from_utf8(bytes).is_err()
                 {
                     return Err(invalid("APFS named xattr native name"));
                 }

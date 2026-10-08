@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::layout::{DiskLayout, Geometry, LbaRange};
 use std::io;
 use virtdisk::ReadAt;

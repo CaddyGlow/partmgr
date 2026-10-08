@@ -1,14 +1,17 @@
 //! Strict NTFS 3.1 positional reads: fixed-up base FILE records and unnamed data.
 //! Immutable caller-controlled sources only; no journal replay or ownership audit.
+use crate::io::{DiskView, ReadAt};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 use crate::{
     fs_core::*,
     fs_file::{ExtentFile, ExtentKind as MapKind, FileExtent},
 };
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
-use virtdisk::{DiskView, ReadAt};
 #[path = "fs_ntfs_bootstrap.rs"]
 mod bootstrap;
 #[path = "fs_ntfs_stream.rs"]
@@ -562,7 +565,7 @@ impl NtfsVolume {
 }
 fn map_charge(runs: usize) -> Result<u64> {
     (runs as u64)
-        .checked_mul((6 * std::mem::size_of::<FileExtent>() + 32) as u64)
+        .checked_mul((6 * crate::platform::mem::size_of::<FileExtent>() + 32) as u64)
         .ok_or_else(|| budget("NTFS map envelope overflow"))
 }
 fn unnamed_data(record: &NtfsRecord) -> Result<Attribute> {

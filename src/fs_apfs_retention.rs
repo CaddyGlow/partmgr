@@ -1,5 +1,8 @@
 //! Independently retained live-reference and pending-reservation classifications.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 /// Native block classification under an explicitly selected retention horizon.
 /// A pending reservation is not a live reference and neither grants mutation authority.

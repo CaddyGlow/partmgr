@@ -1,6 +1,9 @@
 //! Bounded native ext directory hash algorithms; no Unicode/casefold transformation.
 use super::{invalid, unsupported};
-use std::io;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 pub(super) fn hash(version: u8, name: &[u8], seed: [u32; 4]) -> io::Result<u32> {
     if version > 5 {
         return Err(unsupported("ext directory hash version"));
@@ -101,9 +104,10 @@ pub(super) fn hash(version: u8, name: &[u8], seed: [u32; 4]) -> io::Result<u32> 
     } & !1;
     Ok(if raw == 0xfffffffe { 0xfffffffc } else { raw })
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
+    #[cfg(feature = "std")]
     #[test]
     fn independent_debugfs_half_md4_vector_and_profile_bounds() {
         // e2fsprogs debugfs 1.47.4: dx_hash -h half_md4 -s

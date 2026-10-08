@@ -1,6 +1,9 @@
 //! Fresh-volume layout only. This bitmap never authorizes reuse in an existing image.
 use super::{bad, budget, vector};
 use crate::fs_core::{Reservation, Resources, Result};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) struct FreshAllocation {
     block_size: u32,
@@ -89,6 +92,7 @@ impl FreshAllocation {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn fresh_layout_header_bitmap_payload_tail_accounting_and_failures() {
     use crate::fs_core::{Budget, Cancellation};

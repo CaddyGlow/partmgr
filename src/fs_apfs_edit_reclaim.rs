@@ -1,6 +1,9 @@
 //! Native retirement queue reclamation after independently proved checkpoint pruning.
 use super::*;
 use crate::fs_apfs_audit::{ApfsRetentionProof, prove_apfs_retention};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) struct Reclamation {
     pub(super) main: Vec<u64>,

@@ -7,11 +7,14 @@
 //! Reference: [UEFI Hard Drive Media Device Path](https://uefi.org/specs/UEFI/2.10/10_Protocols_Device_Path_Protocol.html#hard-drive-media-device-path).
 //! The node uses one-based partition numbers, little-endian start/size LBAs,
 //! and a GPT unique-partition GUID or an MBR disk signature.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{fmt, io};
 use crate::{
     guid::{EFI_SYSTEM_PARTITION, Guid, MICROSOFT_RESERVED},
     layout::{DiskLayout, LbaRange},
 };
-use std::{fmt, io};
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
@@ -209,8 +212,8 @@ impl fmt::Display for EspPreparationError {
         )
     }
 }
-impl std::error::Error for EspPreparationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl crate::platform::error::Error for EspPreparationError {
+    fn source(&self) -> Option<&(dyn crate::platform::error::Error + 'static)> {
         Some(&self.source)
     }
 }

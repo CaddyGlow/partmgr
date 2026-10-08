@@ -3,6 +3,13 @@
 //! No metadata-preserving copy is advertised. The caller chooses name conversion
 //! and deterministic metadata replacement before planning. Unsupported object
 //! kinds, hard links and additional streams fail before any destination writes.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{
+    collections::{HashSet, VecDeque},
+    sync::Arc,
+};
 use crate::{
     fs_copy::{CopyLimits, CopyNamePolicy, FileInput, MetadataOutcome, native_name},
     fs_copy::{CopyPages, MetadataStatus, visit_metadata_fields},
@@ -12,10 +19,6 @@ use crate::{
         ExfatBuildPlan, ExfatBuildReport, ExfatBuildSource,
     },
     storage::Storage,
-};
-use std::{
-    collections::{HashSet, VecDeque},
-    sync::Arc,
 };
 
 /// Required explicit metadata treatment.

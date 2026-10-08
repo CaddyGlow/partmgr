@@ -1,6 +1,9 @@
 //! Checked fork bytes for the staged HFS+ builder; no allocation ownership grant.
 use super::{bad, budget, vector};
 use crate::fs_core::{Reservation, Resources, Result};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) struct PlannedFork {
     pub(super) header: [u8; 80],
@@ -89,6 +92,7 @@ pub(super) fn plan(
     })
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn fragmented_fork_bytes_overflow_keys_and_invalid_ranges() {
     use crate::fs_core::{Budget, Cancellation};

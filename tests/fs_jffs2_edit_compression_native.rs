@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::fs_jffs2_builder::Jffs2BuildCompression;
 use partmgr::{
     fs_core::{

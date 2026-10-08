@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, ExtentKind, FileRead, Resources},
     fs_exfat_volume::{ExfatReadLimits, ExfatVolume},

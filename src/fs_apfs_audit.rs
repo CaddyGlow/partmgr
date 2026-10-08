@@ -1,4 +1,8 @@
 //! Complete selected-profile APFS container allocation/reference proof. No repair authority.
+use crate::platform::collections::{BTreeMap, BTreeSet, VecDeque};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_apfs::{
         index::{self, TreeKind},
@@ -6,7 +10,6 @@ use crate::{
     },
     fs_core::*,
 };
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
 #[path = "fs_apfs_retention.rs"]
 mod retention;
 pub use retention::{ApfsRetainedBlock, ApfsRetentionProof, prove_apfs_retention};

@@ -1,9 +1,12 @@
 //! Complete physical/reference proof for the explicitly accepted JFS Linux profile.
+use crate::platform::collections::{BTreeMap, BTreeSet, VecDeque};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{
     fs_core::*,
     fs_jfs::{Decoded, JfsVolume, bad, budget, le32, le64, vector},
 };
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
 /// Independent global work/report/memory ceilings.
 #[derive(Clone, Copy, Debug)]
 pub struct JfsAuditLimits {

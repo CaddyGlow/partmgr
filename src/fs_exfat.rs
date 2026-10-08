@@ -1,8 +1,11 @@
 //! exFAT revision 1.00 boot-region inspection and shared bounded positional decoding.
 use crate::fs_core::{Error, ErrorKind, Resources, Result};
+use crate::io::ReadAt;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{io, sync::Arc};
 use crate::storage::Storage;
-use std::{io, sync::Arc};
-use virtdisk::ReadAt;
 pub(crate) trait ExfatDecodeRead {
     fn len(&self) -> io::Result<u64>;
     fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()>;

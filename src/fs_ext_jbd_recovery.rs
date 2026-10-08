@@ -1,6 +1,9 @@
 //! Native redo checkpointing after complete preparation and ownership preflight.
 //! Private staging only; this is not a public editor or recovery capability.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 use crate::{fs_ext_audit::ExtAuditLimits, storage::Storage};
 
 pub(crate) struct Outcome {
@@ -191,7 +194,7 @@ pub(crate) fn recover(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -303,6 +306,7 @@ pub(super) mod tests {
         image[1024..2048].copy_from_slice(&prepared.blocks[1].bytes[..1024]);
         image
     }
+    #[cfg(feature = "std")]
     #[test]
     fn complete_native_recovery_restart_every_write_barrier_torn_cut_and_refunds() {
         let r = resources();
@@ -376,6 +380,7 @@ pub(super) mod tests {
         assert_eq!(cancelled.events, 0);
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn complete_native_publication_lifecycle_every_write_barrier_cut_old_or_new() {
         let r = resources();

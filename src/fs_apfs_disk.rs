@@ -1,5 +1,8 @@
 //! Pure APFS block encoding shared by authoring and owned editing.
 use crate::fs_core::{Error, ErrorKind, Result};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 pub(crate) const BLOCK: usize = 4096;
 pub(crate) fn invalid(s: &str) -> Error {
     Error::new(ErrorKind::InvalidOperation, s)
@@ -42,7 +45,7 @@ pub(crate) fn object(id: u64, kind: u32, subtype: u32) -> Result<Vec<u8>> {
     d(&mut b, 28, subtype);
     Ok(b)
 }
-pub(crate) fn compare(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+pub(crate) fn compare(a: &[u8], b: &[u8]) -> crate::platform::cmp::Ordering {
     let scalar = |k: &[u8], p| u64::from_le_bytes(k[p..p + 8].try_into().unwrap());
     let (x, y) = (scalar(a, 0), scalar(b, 0));
     (x & 0x0fff_ffff_ffff_ffff)
@@ -177,7 +180,7 @@ pub(crate) fn node(
     Ok(b)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
 
@@ -193,6 +196,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "std")]
     #[test]
     fn ghost_values_require_the_editing_object_map_leaf_profile() {
         let records = vec![(vec![0; 16], vec![])];
@@ -209,6 +213,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "std")]
     #[test]
     fn ordinary_records_encode_identically_under_both_profiles() {
         let records = vec![(vec![0; 16], vec![1; 8])];

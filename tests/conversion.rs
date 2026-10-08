@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use partmgr::{
     conversion::{BootCodePolicy, ConversionPolicy, TypeMapping, convert},
     guid::{EFI_SYSTEM_PARTITION, Guid},

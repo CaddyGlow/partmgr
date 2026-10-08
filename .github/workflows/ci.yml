@@ -36,6 +36,23 @@ jobs:
       - run: cargo clippy --all-targets --all-features --locked -- -D warnings
       - run: cargo test --all-features --locked
 
+  no-std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: partmgr
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: clippy
+          targets: x86_64-unknown-none
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: partmgr -> target
+      - run: cargo build --no-default-features --target x86_64-unknown-none --locked
+      - run: cargo clippy --no-default-features --all-targets --locked -- -D warnings
+      - run: cargo test --no-default-features --lib --test no_std --test no_std_readers --test no_std_owned --locked
+
   fuzz-check:
     runs-on: ubuntu-latest
     defaults:

@@ -1,7 +1,10 @@
 //! Bounded canonical ext4 resize-inode reserved-GDT ownership validator.
 use super::{ExtDecodeRead, invalid, modern::ModernProof, u16le, u32le, unsupported};
 use crate::fs_core::Resources;
-use std::io;
+use crate::platform::io;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 #[derive(Debug)]
 pub(super) struct ResizeOwnership {
     pub double_indirect: u32,

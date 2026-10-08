@@ -1,9 +1,12 @@
 //! Common lossless-byte namespace adapter for the strict XFS v5 shortform baseline.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::{collections::VecDeque, sync::Arc};
 use crate::{
     fs_core::*,
     fs_xfs::{XfsVolume, budget, bytes, invalid, u32be},
 };
-use std::{collections::VecDeque, sync::Arc};
 /// Independent bounds for retained namespace inventory.
 #[derive(Clone, Copy, Debug)]
 pub struct XfsTreeLimits {

@@ -1,10 +1,13 @@
 //! Complete common native tree inventory for the explicitly audited JFS Linux profiles.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::sync::Arc;
 use crate::{
     fs_core::*,
     fs_jfs::{JfsVolume, bad, budget, vector},
     fs_jfs_audit::{JfsAuditLimits, audit_jfs},
 };
-use std::sync::Arc;
 /// Complete user namespace for the explicitly supported JFS profiles.
 /// Unsupported inode payload and security profiles fail before inventory publication.
 pub struct JfsTreeSource {

@@ -2,6 +2,9 @@
 //! This codec supplies bytes only; it grants no allocation or publication authority.
 use super::{bad, budget, vector};
 use crate::fs_core::{Reservation, Resources, Result};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 #[path = "fs_hfsplus_allocation_builder.rs"]
 mod allocation_builder;
 #[path = "fs_hfsplus_builder_inventory.rs"]
@@ -10,7 +13,7 @@ pub(crate) mod builder_inventory;
 mod builder_layout;
 #[path = "fs_hfsplus_fork_builder.rs"]
 mod fork_builder;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[path = "../tests/fixtures/hfsplus_clean.rs"]
 mod independent;
 #[path = "fs_hfsplus_metadata_builder.rs"]
@@ -22,7 +25,7 @@ pub(crate) mod owned_prepare;
 enum Kind {
     Leaf,
     Header,
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     Map,
     Index {
         height: u8,
@@ -51,7 +54,7 @@ fn assemble(
     let (native_kind, height) = match kind {
         Kind::Leaf => (0xff, 1),
         Kind::Header => (1, 0),
-        #[cfg(test)]
+        #[cfg(all(test, feature = "std"))]
         Kind::Map => (2, 0),
         Kind::Index {
             height: height @ 2..=64,
@@ -67,7 +70,7 @@ fn assemble(
         {
             return Err(bad("HFS+ authoring header records"));
         }
-        #[cfg(test)]
+        #[cfg(all(test, feature = "std"))]
         Kind::Map if records.len() != 1 || records[0].is_empty() => {
             return Err(bad("HFS+ authoring map records"));
         }
@@ -132,6 +135,7 @@ fn assemble(
     Ok((bytes, lease))
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn native_leaf_layout_capacity_and_prewrite_rejections() {
     use crate::fs_core::{Budget, Cancellation};
@@ -161,6 +165,7 @@ fn native_leaf_layout_capacity_and_prewrite_rejections() {
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn native_index_key_child_layout_and_invalid_targets() {
     use crate::fs_core::{Budget, Cancellation};
@@ -185,6 +190,7 @@ fn native_index_key_child_layout_and_invalid_targets() {
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn native_header_and_continuation_map_layout() {
     use crate::fs_core::{Budget, Cancellation};
@@ -242,7 +248,7 @@ fn catalog_key(
     Ok((bytes, lease))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn catalog_leaf(
     node_bytes: usize,
     forward: u32,
@@ -305,6 +311,7 @@ fn keyed_leaf(
     leaf(node_bytes, forward, backward, records, r)
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn native_catalog_keys_and_case_profile_collisions() {
     use crate::fs_core::{Budget, Cancellation};
@@ -570,16 +577,17 @@ fn keyed_tree(
     Ok((bytes, lease))
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn assembled_catalog_tree_passes_existing_volume_decoder_and_ownership_audit() {
+    use crate::platform::{io, sync::Arc};
     use crate::{
         fs_core::{Budget, Cancellation},
         fs_hfsplus::{HfsPlusReadLimits, HfsPlusVolume},
         fs_hfsplus_audit::{HfsPlusAuditLimits, audit_hfsplus},
     };
-    use std::{io, sync::Arc};
     struct Bytes(Vec<u8>);
-    impl virtdisk::ReadAt for Bytes {
+    impl crate::io::ReadAt for Bytes {
         fn len(&self) -> u64 {
             self.0.len() as u64
         }
@@ -669,15 +677,16 @@ fn assembled_catalog_tree_passes_existing_volume_decoder_and_ownership_audit() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn deep_catalog_indexes_reopen_with_exact_child_minima_and_sibling_topology() {
+    use crate::platform::{io, sync::Arc};
     use crate::{
         fs_core::{Budget, Cancellation},
         fs_file::{ExtentFile, ExtentKind, FileExtent},
     };
-    use std::{io, sync::Arc};
     struct Bytes(Vec<u8>);
-    impl virtdisk::ReadAt for Bytes {
+    impl crate::io::ReadAt for Bytes {
         fn len(&self) -> u64 {
             self.0.len() as u64
         }
@@ -746,17 +755,20 @@ fn deep_catalog_indexes_reopen_with_exact_child_minima_and_sibling_topology() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "std")]
 #[test]
 #[ignore = "explicit native HFS+ catalog assembly gate requires immutable inputs and fresh evidence"]
 fn native_catalog_assembly_fsck_and_complete_fork_models() {
     use crate::fs_core::{Budget, Cancellation};
+    use crate::platform::{fs, path::PathBuf, process::Command};
     use sha2::{Digest, Sha256};
-    use std::{fs, path::PathBuf, process::Command};
     let input = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_CATALOG_INPUT").expect("explicit native input required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_CATALOG_INPUT")
+            .expect("explicit native input required"),
     );
     let output = PathBuf::from(
-        std::env::var_os("PARTMGR_HFSPLUS_CATALOG_EVIDENCE").expect("fresh evidence required"),
+        crate::platform::env::var_os("PARTMGR_HFSPLUS_CATALOG_EVIDENCE")
+            .expect("fresh evidence required"),
     );
     assert!(!output.exists());
     fs::create_dir(&output).unwrap();
@@ -792,7 +804,7 @@ fn native_catalog_assembly_fsck_and_complete_fork_models() {
         let records_lease = r.memory.reserve((length as u64) * 2).unwrap();
         let mut records = Vec::new();
         let mut leaf = super::be32(&original, catalog + 24);
-        let mut visited = std::collections::BTreeSet::new();
+        let mut visited = crate::platform::collections::BTreeSet::new();
         while leaf != 0 {
             assert!(leaf < total && visited.insert(leaf));
             let at = catalog + leaf as usize * ns;
@@ -813,7 +825,7 @@ fn native_catalog_assembly_fsck_and_complete_fork_models() {
         assert!(extents + extents_length <= catalog);
         let mut overflow_records = Vec::new();
         let mut leaf = super::be32(&original, extents + 24);
-        let mut seen = std::collections::BTreeSet::new();
+        let mut seen = crate::platform::collections::BTreeSet::new();
         while leaf != 0 {
             assert!(leaf < extents_total && seen.insert(leaf));
             let at = extents + leaf as usize * extents_ns;
@@ -893,15 +905,16 @@ fn native_catalog_assembly_fsck_and_complete_fork_models() {
     fs::write(output.join("receipt.txt"), receipt).unwrap();
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn empty_and_indexed_extent_overflow_trees_have_native_geometry() {
+    use crate::platform::{io, sync::Arc};
     use crate::{
         fs_core::{Budget, Cancellation},
         fs_file::{ExtentFile, ExtentKind, FileExtent},
     };
-    use std::{io, sync::Arc};
     struct Bytes(Vec<u8>);
-    impl virtdisk::ReadAt for Bytes {
+    impl crate::io::ReadAt for Bytes {
         fn len(&self) -> u64 {
             self.0.len() as u64
         }

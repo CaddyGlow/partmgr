@@ -1,5 +1,8 @@
 //! Staged bounded native block-map after-image construction; no publication API.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
 
 pub(super) struct PagePatch {
     pub(super) at: u64,
@@ -95,7 +98,7 @@ pub(super) fn prepare_map(
     }
     let lease = r.memory.reserve(
         ((affected + 2) as u64)
-            .checked_mul(std::mem::size_of::<PagePatch>() as u64)
+            .checked_mul(crate::platform::mem::size_of::<PagePatch>() as u64)
             .and_then(|n| n.checked_add(256))
             .ok_or_else(|| budget("JFS retained map after-image charge"))?,
     )?;
@@ -235,7 +238,7 @@ pub(super) fn recovery_map(
         .0;
     let lease = r.memory.reserve(
         ((affected + 2) as u64)
-            .checked_mul(std::mem::size_of::<PagePatch>() as u64)
+            .checked_mul(crate::platform::mem::size_of::<PagePatch>() as u64)
             .and_then(|n| n.checked_add(256))
             .ok_or_else(|| budget("JFS recovery map retained charge"))?,
     )?;
@@ -377,6 +380,7 @@ fn validate_prefix(
     Ok(())
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn independently_reconstructed_cow_allocation_map_matches_codec_and_complete_ownership() {
     struct Bytes(Vec<u8>);
@@ -462,6 +466,7 @@ fn independently_reconstructed_cow_allocation_map_matches_codec_and_complete_own
     assert_eq!(r.memory.used(), 0);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn journal_authorized_partial_bitmap_index_cannot_supply_allocation_authority() {
     struct Bytes(Vec<u8>);

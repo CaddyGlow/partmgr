@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 //! Fixtures assemble native boot/FAT/slot bytes independently of production writers.
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, Resources},

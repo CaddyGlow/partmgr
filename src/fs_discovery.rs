@@ -1,25 +1,29 @@
 //! Copy metadata on demand while the owner keeps arbitrary exclusive storage on its thread.
+use crate::io::{self, ReadAt};
 use crate::{
     fs_core::{Error, ErrorKind, Resources, Result},
     storage::Storage,
 };
+use alloc::{sync::Arc, vec::Vec};
+#[cfg(feature = "std")]
 use std::{
     collections::HashMap,
-    io,
-    sync::{Arc, Mutex, mpsc},
+    sync::{Mutex, mpsc},
 };
-use virtdisk::ReadAt;
 
 pub(crate) type Pages<const N: usize> = Vec<(u64, Arc<[u8; N]>)>;
 
+#[cfg(feature = "std")]
 enum Request<const N: usize> {
     Page(u64, mpsc::SyncSender<Result<Arc<[u8; N]>>>),
     Done(Result<()>),
 }
+#[cfg(feature = "std")]
 struct Cache<const N: usize> {
     pages: Pages<N>,
     index: HashMap<u64, usize>,
 }
+#[cfg(feature = "std")]
 struct Source<const N: usize> {
     length: u64,
     pages: Mutex<Cache<N>>,
@@ -27,6 +31,7 @@ struct Source<const N: usize> {
     resources: Resources,
     charge: Arc<dyn Fn(u64) -> Result<()> + Send + Sync>,
 }
+#[cfg(feature = "std")]
 impl<const N: usize> ReadAt for Source<N> {
     fn len(&self) -> u64 {
         self.length
@@ -85,16 +90,17 @@ impl<const N: usize> ReadAt for Source<N> {
 /// metadata decoder may read this source; its result is discarded before sealing.
 /// A final decode of the returned immutable pages establishes retained bindings.
 /// `attempts` preserves the old bound of newly copied pages plus a successful decode.
+#[cfg(feature = "std")]
 pub(crate) fn discover<const N: usize>(
     target: &dyn Storage,
     length: u64,
     mut pages: Pages<N>,
-    limits: (usize, usize),
+    limits: (usize, usize, u64),
     resources: &Resources,
     charge: Arc<dyn Fn(u64) -> Result<()> + Send + Sync>,
-    decode: impl FnOnce(Arc<dyn ReadAt>) -> Result<()> + Send,
+    mut decode: impl FnMut(Arc<dyn ReadAt>) -> Result<()> + Send,
 ) -> Result<Pages<N>> {
-    let (maximum_pages, attempts) = limits;
+    let (maximum_pages, attempts, _restart_charge) = limits;
     if N == 0 || pages.len() > maximum_pages || attempts == 0 {
         return Err(Error::new(
             ErrorKind::BudgetExhausted,
@@ -249,7 +255,7 @@ pub(crate) fn discover<const N: usize>(
     Ok(pages)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     use crate::fs_core::{Budget, Cancellation};
@@ -296,7 +302,7 @@ mod tests {
             &owner,
             16,
             Vec::new(),
-            (4, 4),
+            (4, 4, 0),
             &resources(),
             Arc::new(|_| Ok(())),
             |source| {
@@ -330,7 +336,7 @@ mod tests {
             &owner,
             16,
             Vec::new(),
-            (4, 4),
+            (4, 4, 0),
             &resources(),
             Arc::new(|_| Ok(())),
             decode,
@@ -341,7 +347,7 @@ mod tests {
             &owner,
             16,
             Vec::new(),
-            (4, 1),
+            (4, 1, 0),
             &resources(),
             Arc::new(|_| Ok(())),
             decode,
@@ -350,6 +356,108 @@ mod tests {
         assert_eq!(error.kind, ErrorKind::BudgetExhausted);
         assert_eq!(calls.get(), 1);
     }
+    #[test]
+    fn inline_discovery_keeps_non_send_storage_and_charges_restarts() {
+        let calls = Rc::new(Cell::new(0));
+        let owner = Owner {
+            calls: calls.clone(),
+            fail: false,
+        };
+        let work = Arc::new(core::sync::atomic::AtomicU64::new(0));
+        let charged = work.clone();
+        let pages = discover_inline::<4>(
+            &owner,
+            16,
+            Vec::new(),
+            (4, 4, 100),
+            &resources(),
+            Arc::new(move |n| {
+                charged.fetch_add(n, core::sync::atomic::Ordering::Relaxed);
+                Ok(())
+            }),
+            |source| {
+                for at in [0, 4, 8] {
+                    let mut byte = [0];
+                    source
+                        .read_exact_at(at, &mut byte)
+                        .map_err(|e| Error::io("inline decode", e))?;
+                    assert_eq!(byte[0], at as u8);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(calls.get(), 3);
+        assert_eq!(pages.len(), 3);
+        assert_eq!(work.load(core::sync::atomic::Ordering::Relaxed), 321);
+    }
+
+    #[test]
+    fn inline_discovery_retains_backend_error_and_attempt_ceiling() {
+        let calls = Rc::new(Cell::new(0));
+        let owner = Owner {
+            calls: calls.clone(),
+            fail: true,
+        };
+        let decode = |source: Arc<dyn ReadAt>| {
+            source
+                .read_exact_at(0, &mut [0])
+                .map_err(|e| Error::io("inline decode", e))
+        };
+        let error = discover_inline::<4>(
+            &owner,
+            16,
+            Vec::new(),
+            (4, 4, 0),
+            &resources(),
+            Arc::new(|_| Ok(())),
+            decode,
+        )
+        .unwrap_err();
+        assert_eq!(error.source.unwrap().raw_os_error(), Some(5));
+        let error = discover_inline::<4>(
+            &owner,
+            16,
+            Vec::new(),
+            (4, 1, 0),
+            &resources(),
+            Arc::new(|_| Ok(())),
+            decode,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::BudgetExhausted);
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn inline_discovery_rejects_escaped_decoder_source_before_copy() {
+        let calls = Rc::new(Cell::new(0));
+        let owner = Owner {
+            calls: calls.clone(),
+            fail: false,
+        };
+        let escaped = Arc::new(Mutex::new(None));
+        let retained = escaped.clone();
+        let error = discover_inline::<4>(
+            &owner,
+            16,
+            Vec::new(),
+            (4, 4, 0),
+            &resources(),
+            Arc::new(|_| Ok(())),
+            move |source| {
+                *retained.lock().unwrap() = Some(source.clone());
+                source
+                    .read_exact_at(0, &mut [0])
+                    .map_err(|e| Error::io("escaped decoder", e))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidOperation);
+        assert_eq!(calls.get(), 0);
+        drop(escaped);
+    }
+
     #[test]
     fn decoder_panic_terminates_without_waiting_for_a_page() {
         let owner = Owner {
@@ -360,7 +468,7 @@ mod tests {
             &owner,
             16,
             Vec::new(),
-            (4, 4),
+            (4, 4, 0),
             &resources(),
             Arc::new(|_| Ok(())),
             |_| panic!("decoder failure"),
@@ -381,7 +489,7 @@ mod tests {
             &owner,
             16,
             Vec::new(),
-            (4, 4),
+            (4, 4, 0),
             &resources,
             Arc::new(|_| Ok(())),
             |source| {
@@ -430,7 +538,7 @@ mod tests {
             &owner,
             16,
             Vec::new(),
-            (4, 4),
+            (4, 4, 0),
             &resources,
             Arc::new(|_| Ok(())),
             |source| {
@@ -458,7 +566,7 @@ mod tests {
             &owner,
             16,
             Vec::new(),
-            (4, 4),
+            (4, 4, 0),
             &resources,
             Arc::new(|_| Ok(())),
             move |source| {
@@ -477,3 +585,209 @@ mod tests {
         assert_eq!(calls.get(), 1);
     }
 }
+
+/// Without a scheduler, restart the bounded decoder when its immutable cache
+/// reports a missing page. Storage remains exclusively on the caller's thread.
+#[cfg(any(not(feature = "std"), test))]
+pub(crate) fn discover_inline<const N: usize>(
+    target: &dyn Storage,
+    length: u64,
+    mut pages: Pages<N>,
+    limits: (usize, usize, u64),
+    resources: &Resources,
+    charge: Arc<dyn Fn(u64) -> Result<()> + Send + Sync>,
+    mut decode: impl FnMut(Arc<dyn ReadAt>) -> Result<()> + Send,
+) -> Result<Pages<N>> {
+    use crate::platform::{collections::HashMap, sync::Mutex};
+    struct InlineCache<const N: usize> {
+        pages: Pages<N>,
+        index: HashMap<u64, usize>,
+        missing: Option<u64>,
+    }
+    struct Cached<const N: usize> {
+        length: u64,
+        cache: Mutex<InlineCache<N>>,
+        resources: Resources,
+        charge: Arc<dyn Fn(u64) -> Result<()> + Send + Sync>,
+    }
+    impl<const N: usize> ReadAt for Cached<N> {
+        fn len(&self) -> u64 {
+            self.length
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            self.resources
+                .cancellation
+                .check()
+                .map_err(io::Error::other)?;
+            (self.charge)(out.len() as u64).map_err(io::Error::other)?;
+            if at
+                .checked_add(out.len() as u64)
+                .is_none_or(|end| end > self.length)
+            {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|_| io::Error::other("metadata discovery cache"))?;
+            // Check every dependency before publishing any bytes to the decoder.
+            let mut done = 0;
+            while done < out.len() {
+                let position = at + done as u64;
+                let number = position / N as u64;
+                if !cache.index.contains_key(&number) {
+                    cache.missing = Some(number);
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "metadata discovery missing page",
+                    ));
+                }
+                done += (N - (position % N as u64) as usize).min(out.len() - done);
+            }
+            let mut done = 0;
+            while done < out.len() {
+                self.resources
+                    .cancellation
+                    .check()
+                    .map_err(io::Error::other)?;
+                let position = at + done as u64;
+                let number = position / N as u64;
+                let slot = *cache.index.get(&number).ok_or_else(|| {
+                    io::Error::other("metadata discovery cached page disappeared")
+                })?;
+                let within = (position % N as u64) as usize;
+                let count = (N - within).min(out.len() - done);
+                out[done..done + count]
+                    .copy_from_slice(&cache.pages[slot].1[within..within + count]);
+                done += count;
+            }
+            Ok(())
+        }
+    }
+    let (maximum_pages, attempts, restart_charge) = limits;
+    if N == 0 || pages.len() > maximum_pages || attempts == 0 {
+        return Err(Error::new(
+            ErrorKind::BudgetExhausted,
+            "metadata discovery limits",
+        ));
+    }
+    if pages.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "metadata discovery seed ordering",
+        ));
+    }
+    pages
+        .try_reserve_exact(maximum_pages - pages.len())
+        .map_err(|_| {
+            Error::new(
+                ErrorKind::BudgetExhausted,
+                "metadata discovery index allocation",
+            )
+        })?;
+    let mut index = HashMap::new();
+    index.try_reserve(maximum_pages).map_err(|_| {
+        Error::new(
+            ErrorKind::BudgetExhausted,
+            "metadata discovery lookup allocation",
+        )
+    })?;
+    for (slot, page) in pages.iter().enumerate() {
+        index.insert(page.0, slot);
+    }
+    let source = Arc::new(Cached {
+        length,
+        cache: Mutex::new(InlineCache {
+            pages,
+            index,
+            missing: None,
+        }),
+        resources: resources.clone(),
+        charge: charge.clone(),
+    });
+    for attempt in 0..attempts {
+        resources.cancellation.check()?;
+        if attempt != 0 {
+            charge(restart_charge)?;
+        }
+        let result = decode(source.clone());
+        if Arc::strong_count(&source) != 1 {
+            return Err(Error::new(
+                ErrorKind::InvalidOperation,
+                "metadata discovery source escaped decoder",
+            ));
+        }
+        let missing = source
+            .cache
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Io, "metadata discovery cache"))?
+            .missing
+            .take();
+        resources.cancellation.check()?;
+        if target
+            .len()
+            .map_err(|e| Error::io("metadata discovery geometry", e))?
+            != length
+        {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "metadata discovery source length changed",
+            ));
+        }
+        if missing.is_none() {
+            result?;
+            let source = Arc::try_unwrap(source).map_err(|_| {
+                Error::new(
+                    ErrorKind::InvalidOperation,
+                    "metadata discovery source escaped decoder",
+                )
+            })?;
+            let mut cache = source
+                .cache
+                .lock()
+                .map_err(|_| Error::new(ErrorKind::Io, "metadata discovery cache"))?;
+            let mut pages = core::mem::take(&mut cache.pages);
+            pages.sort_unstable_by_key(|page| page.0);
+            return Ok(pages);
+        }
+        let number = missing.unwrap();
+        if source
+            .cache
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Io, "metadata discovery cache"))?
+            .pages
+            .len()
+            == maximum_pages
+            || attempt + 1 == attempts
+        {
+            return Err(Error::new(
+                ErrorKind::BudgetExhausted,
+                "metadata discovery page/attempt ceiling",
+            ));
+        }
+        let at = number
+            .checked_mul(N as u64)
+            .filter(|at| at.checked_add(N as u64).is_some_and(|end| end <= length))
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "metadata discovery page bounds"))?;
+        charge(N as u64)?;
+        let mut page = [0; N];
+        target
+            .read_exact_at(at, &mut page)
+            .map_err(|e| Error::io("metadata discovery copy", e))?;
+        resources.cancellation.check()?;
+        let mut cache = source
+            .cache
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Io, "metadata discovery cache"))?;
+        let slot = cache.pages.len();
+        cache.pages.push((number, Arc::new(page)));
+        cache.index.insert(number, slot);
+    }
+    Err(Error::new(
+        ErrorKind::BudgetExhausted,
+        "metadata discovery attempt ceiling",
+    ))
+}
+
+#[cfg(not(feature = "std"))]
+pub(crate) use discover_inline as discover;

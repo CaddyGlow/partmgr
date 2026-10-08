@@ -1,11 +1,14 @@
 //! Staged owned native journal session; mutable storage never becomes ReadAt.
 use super::*;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
+use crate::platform::prelude::*;
+use crate::platform::sync::atomic::{AtomicU64, Ordering};
 use crate::{
     fs_core::{Budget, Cancellation, ObjectId},
     fs_ext_audit::ExtAuditLimits,
     storage::Storage,
 };
-use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy)]
@@ -158,7 +161,7 @@ impl<S: Storage> Session<S> {
         let r = self.resources(cancellation);
         let reservation = r
             .memory
-            .reserve((std::mem::size_of::<File>() + 512) as u64)
+            .reserve((crate::platform::mem::size_of::<File>() + 512) as u64)
             .map_err(io::Error::other)?;
         let (decoder, proof) =
             super::super::ExtDecoder::open_native_clean(&self.storage, self.scope, &r)?;
@@ -293,7 +296,7 @@ impl<S: Storage> Session<S> {
             .memory
             .reserve(
                 blocks
-                    .checked_mul(std::mem::size_of::<ReplayBlock>())
+                    .checked_mul(crate::platform::mem::size_of::<ReplayBlock>())
                     .ok_or_else(|| budget("native ext range reservation overflow"))?
                     as u64,
             )
@@ -539,7 +542,7 @@ impl<S: Storage> Session<S> {
         let charge = self
             .limits
             .affected_blocks
-            .checked_mul(std::mem::size_of::<ReplayBlock>())
+            .checked_mul(crate::platform::mem::size_of::<ReplayBlock>())
             .ok_or_else(|| budget("native operation record accounting"))?;
         let reservation = r.memory.reserve(charge as u64).map_err(io::Error::other)?;
         let mut records: Vec<ReplayBlock> = Vec::new();
@@ -661,10 +664,10 @@ impl<S: Storage> Session<S> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
-    use std::cell::Cell;
+    use crate::platform::cell::Cell;
     struct Owned {
         bytes: Vec<u8>,
         writes: usize,
@@ -826,10 +829,12 @@ mod tests {
             })
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn same_owner_native_journal_classic_allocation_and_namespace_plans() {
         exercise_classic_operations(false);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn same_owner_native_journal_extended_classic_allocation_and_namespace_plans() {
         exercise_classic_operations(true);
@@ -1051,6 +1056,7 @@ mod tests {
         drop((file, old, session));
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn extended_classic_existing_tails_exact_replace_extend_truncate_and_refunds() {
         use crate::{fs_ext_edit::ExtEditLimits, fs_undo::UndoLimits};
@@ -1147,10 +1153,12 @@ mod tests {
         drop(owner);
         assert_eq!(r.memory.used(), 0);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn owned_native_operations_every_write_barrier_torn_restart_old_or_new() {
         exercise_operation_restart(false);
     }
+    #[cfg(feature = "std")]
     #[test]
     fn owned_extended_native_operations_every_write_barrier_torn_restart_old_or_new() {
         exercise_operation_restart(true);
@@ -1310,6 +1318,7 @@ mod tests {
             }
         }
     }
+    #[cfg(feature = "std")]
     #[test]
     fn owned_scope_generation_ranges_uncertainty_reinspection_limits_and_refunds() {
         let r = Resources {

@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, ObjectId, Resources},
     fs_ext::ExtVolume,
@@ -9,7 +10,6 @@ use partmgr::{
 };
 use sha2::{Digest, Sha256};
 use std::{
-    io,
     process::Command,
     sync::{
         Arc,

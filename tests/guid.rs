@@ -56,12 +56,12 @@ fn generated_ids_retry_collisions_and_propagate_entropy_errors() {
         if attempts == 2 {
             bytes[15] = 1;
         }
-        Ok::<_, std::io::Error>(())
+        Ok::<_, partmgr::io::Error>(())
     })
     .unwrap();
     assert_ne!(id, used);
     assert_eq!(attempts, 2);
-    assert!(Guid::generate_unique(&[], 1, |_| Err(std::io::Error::other("entropy"))).is_err());
+    assert!(Guid::generate_unique(&[], 1, |_| Err(partmgr::io::Error::other("entropy"))).is_err());
     assert!(Guid::validate_unique(&[Guid::NIL]).is_err());
     assert!(Guid::validate_unique(&[used, used]).is_err());
 }

@@ -1,11 +1,11 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_apfs::*, fs_apfs_audit::*, fs_apfs_builder::*, fs_apfs_edit::*, fs_core::*, storage::Storage,
 };
 use std::{
     collections::BTreeMap,
-    io,
     sync::{Arc, Mutex},
 };
 #[allow(dead_code)]
@@ -1666,7 +1666,7 @@ fn reclamation_requires_explicit_retirement_and_refuses_cap_cancel_foreign_and_s
 }
 
 fn native_crossing(dir: &std::path::Path, r: &Resources) {
-    use std::io::Read;
+    use partmgr::io::Read;
     use std::os::unix::fs::FileExt;
     std::fs::create_dir_all(dir).unwrap();
     let bytes = authored(r);

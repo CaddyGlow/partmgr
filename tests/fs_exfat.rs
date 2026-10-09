@@ -1,13 +1,11 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, Resources},
     fs_exfat::ExfatBoot,
 };
-use std::{
-    io,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::sync::atomic::{AtomicU64, Ordering};
 use virtdisk::ReadAt;
 
 struct Source {

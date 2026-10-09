@@ -1,7 +1,7 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::layout::{DiskLayout, Geometry, LbaRange};
-use std::io;
 use virtdisk::ReadAt;
 struct Memory(Vec<u8>);
 impl ReadAt for Memory {

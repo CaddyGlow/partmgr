@@ -1,4 +1,5 @@
 //! Bounded positional FAT/classic ext2/explicit immutable ext reads compared with direct mapped ReadAt calls.
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, Reservation, Resources},
     fs_ext::ExtVolume,
@@ -7,7 +8,6 @@ use partmgr::{
 };
 use sha2::{Digest, Sha256};
 use std::{
-    io,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},

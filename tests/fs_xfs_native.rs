@@ -1,6 +1,7 @@
 #![cfg(feature = "std")]
 
 //! Explicit native xfsprogs gate; never silently succeeds when tools/evidence are absent.
+use partmgr::io::{Read, Seek, SeekFrom, Write};
 use partmgr::{
     fs_core::*,
     fs_xfs::*,
@@ -10,7 +11,6 @@ use partmgr::{
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::{Command, Output},
     sync::Arc,
@@ -414,7 +414,7 @@ fn native_v5_leaf_inline_shortform_baseline() {
     let framed = base.join("native-framed.raw");
     let mut out = File::create(&framed).unwrap();
     out.write_all(&[0xa5; 8192]).unwrap();
-    io::copy(&mut File::open(&native).unwrap(), &mut out).unwrap();
+    std::io::copy(&mut File::open(&native).unwrap(), &mut out).unwrap();
     out.write_all(&[0x5a; 4096]).unwrap();
     out.sync_all().unwrap();
     drop(out);

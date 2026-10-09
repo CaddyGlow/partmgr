@@ -1,16 +1,14 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, Resources, StreamKind, TreeSource},
     fs_ntfs::{NtfsDirectoryLimits, NtfsReadLimits, NtfsVolume},
     fs_ntfs_tree::{NtfsTreePolicy, NtfsTreeSource},
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 struct Image {

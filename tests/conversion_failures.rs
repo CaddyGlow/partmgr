@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     codec::initialize_plan,
     conversion::{
@@ -13,7 +14,6 @@ use partmgr::{
     storage::{Barrier, CommitError, Storage, WritePlan, WriteRange},
 };
 use sha2::{Digest, Sha256};
-use std::io;
 use virtdisk::ReadAt;
 struct Disk {
     bytes: Vec<u8>,

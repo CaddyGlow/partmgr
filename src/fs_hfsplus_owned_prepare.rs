@@ -314,7 +314,7 @@ fn same_owner_complete_metadata_snapshot_no_payload_prefetch_and_refunds() {
         fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
             self.reads.lock().unwrap().push((at, out.len()));
             if self.fail_io {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             let at = at as usize;
             out.copy_from_slice(

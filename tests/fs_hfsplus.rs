@@ -2,13 +2,11 @@
 
 #[path = "common/reader_contract.rs"]
 mod reader_contract;
+use partmgr::io;
 use partmgr::{fs_core::*, fs_hfsplus::*, fs_hfsplus_audit::*, fs_hfsplus_tree::*};
-use std::{
-    io,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 #[path = "fixtures/hfsplus_clean.rs"]
@@ -83,7 +81,7 @@ fn public_fresh_builder_native_forks_metadata_short_writes_and_staging_failures(
         fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
             self.writes += 1;
             if self.fail {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             let n = bytes.len().min(997);
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
@@ -732,7 +730,7 @@ fn native_hfsprogs_tsk_catalog_forks_and_unchanged_validation() {
                 self.0.metadata().unwrap().len()
             }
             fn read_exact_at(&self, at: u64, b: &mut [u8]) -> io::Result<()> {
-                FileExt::read_exact_at(&self.0, b, at)
+                Ok(FileExt::read_exact_at(&self.0, b, at)?)
             }
         }
         let r = resources();
@@ -883,7 +881,7 @@ fn public_owned_range_commit_stale_plan_and_cold_recovery() {
         }
         fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
             if self.fail && (28 * 4096..28 * 4096 + 23).contains(&at) {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             let n = bytes.len().min(3);
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
@@ -1048,7 +1046,7 @@ fn public_resize_both_forks_and_cold_recovery() {
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
             self.writes += 1;
             if self.stop && at == 4096 {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             Ok(n)
         }
@@ -1228,7 +1226,7 @@ fn public_rename_files_directories_and_cold_recovery() {
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
             self.writes += 1;
             if self.stop && at == 4 * 4096 {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             Ok(n)
         }
@@ -1383,7 +1381,7 @@ fn public_move_files_directories_and_cold_recovery() {
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
             self.writes += 1;
             if self.stop && at == 4 * 4096 {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             Ok(n)
         }
@@ -1547,7 +1545,7 @@ fn public_delete_files_directories_and_cold_recovery() {
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
             self.writes += 1;
             if self.stop && at == 4 * 4096 {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             Ok(n)
         }
@@ -1706,7 +1704,7 @@ fn public_create_files_directories_and_cold_recovery() {
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
             self.writes += 1;
             if self.stop && at == 4 * 4096 {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             Ok(n)
         }
@@ -1884,7 +1882,7 @@ fn public_populated_create_both_forks_and_cold_recovery() {
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
             self.writes += 1;
             if self.stop && at == 1056 {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             Ok(n)
         }

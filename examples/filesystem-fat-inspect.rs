@@ -1,14 +1,12 @@
 //! Inspect FAT geometry and optionally stream an explicitly identified file chain.
 //! This does not perform namespace decoding or a whole-volume ownership audit.
+use partmgr::io::Write;
 use partmgr::{
     fs_core::{Budget, Cancellation, NativeName, Resources},
     fs_fat::FatVolume,
 };
 use sha2::{Digest, Sha256};
-use std::{
-    io::{self, Write},
-    sync::Arc,
-};
+use std::sync::Arc;
 use virtdisk::RawDisk;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -68,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .create_new(true)
                     .open(path)?,
             ),
-            None => Box::new(io::sink()),
+            None => Box::new(std::io::sink()),
         };
         let mut hash = Sha256::new();
         let mut buffer = [0u8; 64 * 1024];

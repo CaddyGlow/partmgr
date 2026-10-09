@@ -1,10 +1,8 @@
 #![cfg(feature = "std")]
 
+use partmgr::io::{self, Write};
 use partmgr::partition::{PartitionTable, Scheme};
-use std::{
-    io::{self, Write},
-    sync::Arc,
-};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 struct Memory(Vec<u8>);
 impl ReadAt for Memory {
@@ -234,8 +232,8 @@ fn sfdisk_generated_gpt_is_accepted_with_exact_partition_positions() {
 #[test]
 #[ignore = "requires independent util-linux sfdisk partition writer"]
 fn sfdisk_generated_4096_sector_gpt_preserves_positions_and_byte_views() {
+    use partmgr::io::{Seek, SeekFrom};
     use sha2::{Digest, Sha256};
-    use std::io::{Seek, SeekFrom};
     use std::process::{Command, Stdio};
     let file = tempfile::NamedTempFile::new().unwrap();
     file.as_file().set_len(64 * 1024 * 1024).unwrap();
@@ -285,8 +283,8 @@ fn sfdisk_generated_4096_sector_gpt_preserves_positions_and_byte_views() {
 #[test]
 #[ignore = "requires independent util-linux sfdisk partition writer"]
 fn sfdisk_generated_basic_mbr_preserves_slots_positions_and_byte_views() {
+    use partmgr::io::{Seek, SeekFrom};
     use sha2::{Digest, Sha256};
-    use std::io::{Seek, SeekFrom};
     use std::process::{Command, Stdio};
     let file = tempfile::NamedTempFile::new().unwrap();
     file.as_file().set_len(64 * 1024 * 1024).unwrap();

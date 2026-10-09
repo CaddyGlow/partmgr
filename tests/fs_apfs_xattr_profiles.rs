@@ -1,8 +1,9 @@
 #![cfg(feature = "std")]
 
 //! Independent candidate graphs distinguish unsupported profiles from allocation corruption.
+use partmgr::io;
 use partmgr::{fs_apfs::*, fs_core::*};
-use std::{io, sync::Arc};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 #[allow(dead_code)]
 #[path = "fixtures/apfs_clean.rs"]
@@ -187,10 +188,8 @@ const PROFILE_SOURCES: &[(&str, &[u8])] = &[
 ];
 
 fn digest(bytes: &[u8]) -> String {
-    use std::{
-        io::Write,
-        process::{Command, Stdio},
-    };
+    use partmgr::io::Write;
+    use std::process::{Command, Stdio};
     let mut command = Command::new("sha256sum")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

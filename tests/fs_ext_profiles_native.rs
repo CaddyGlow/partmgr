@@ -1,13 +1,14 @@
 #![cfg(feature = "std")]
 
 //! Independently authored e2fsprogs extent/journal fixtures; never production builder seeds.
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, FileRead, Resources},
     fs_ext::ExtVolume,
     fs_ext_audit::{self, ExtAuditLimits},
 };
 use sha2::{Digest, Sha256};
-use std::{fs, io, path::PathBuf, process::Command, sync::Arc};
+use std::{fs, path::PathBuf, process::Command, sync::Arc};
 use virtdisk::ReadAt;
 struct Image(Vec<u8>);
 impl ReadAt for Image {

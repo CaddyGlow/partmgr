@@ -1,11 +1,11 @@
 #![cfg(feature = "std")]
 
 //! Explicit mtd-utils and independent extraction gate; missing prerequisites are fatal.
+use partmgr::io::{Read, Write};
 use partmgr::{fs_core::*, fs_flash::*, fs_jffs2::*, fs_jffs2_audit::*, fs_jffs2_tree::*};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
-    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,

@@ -217,7 +217,7 @@ fn seed_reaches_both_endian_reconstruction_audit_native_tree_and_deferred_reads(
         assert_eq!(page.entries.len(), 2);
         drop(page);
         drop(tree);
-        assert_eq!(read_all(&file, 16, &r).unwrap().bytes, b"abXY\0\0");
+        assert_eq!(read_all(&file, 16, &r).unwrap().get(), b"abXY\0\0");
         drop(file);
         assert_eq!(r.memory.used(), 0);
     }
@@ -250,7 +250,7 @@ fn compressed_seeds_reach_lazy_decode_and_reject_checksummed_bad_expansion() {
         drop(report);
         let file = volume.open_file(2, &r).unwrap();
         drop(volume);
-        assert_eq!(read_all(&file, 256, &r).unwrap().bytes, vec![b'A'; 256]);
+        assert_eq!(read_all(&file, 256, &r).unwrap().get(), &vec![b'A'; 256]);
         drop(file);
         assert_eq!(r.memory.used(), 0);
         assert!(

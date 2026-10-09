@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, Resources},
     fs_exfat_audit::ExfatAuditLimits,
@@ -11,10 +12,7 @@ use partmgr::{
     storage::Storage,
 };
 use sha2::{Digest, Sha256};
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 #[derive(Default)]
 struct Clock {
     events: usize,
@@ -738,13 +736,13 @@ fn native_exfatprogs_tsk_editing() {
             Ok(self.0.metadata()?.len())
         }
         fn read_exact_at(&self, at: u64, b: &mut [u8]) -> io::Result<()> {
-            self.0.read_exact_at(b, at)
+            Ok(self.0.read_exact_at(b, at)?)
         }
         fn write_at(&mut self, at: u64, b: &[u8]) -> io::Result<usize> {
-            self.0.write_at(b, at)
+            Ok(self.0.write_at(b, at)?)
         }
         fn flush(&mut self) -> io::Result<()> {
-            self.0.sync_all()
+            Ok(self.0.sync_all()?)
         }
     }
     let r = Resources {

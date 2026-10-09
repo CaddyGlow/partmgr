@@ -2,6 +2,7 @@
 
 #[path = "fixtures/ext2_clean.rs"]
 mod independent;
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, Resources},
     fs_ext_audit::ExtAuditLimits,
@@ -9,7 +10,6 @@ use partmgr::{
     fs_undo::UndoLimits,
     storage::Storage,
 };
-use std::io;
 const BASE: usize = 4096;
 struct Memory {
     bytes: Vec<u8>,

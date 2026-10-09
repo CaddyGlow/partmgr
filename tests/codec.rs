@@ -1,7 +1,7 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{codec::edit_plan, layout::DiskLayout};
-use std::io;
 use virtdisk::ReadAt;
 struct Bytes(Vec<u8>);
 impl ReadAt for Bytes {

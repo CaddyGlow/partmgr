@@ -93,23 +93,23 @@ impl virtdisk::ReadAt for Image {
     fn len(&self) -> u64 {
         self.0.len() as u64
     }
-    fn read_exact_at(&self, o: u64, b: &mut [u8]) -> std::io::Result<()> {
+    fn read_exact_at(&self, o: u64, b: &mut [u8]) -> partmgr::io::Result<()> {
         b.copy_from_slice(&self.0[o as usize..o as usize + b.len()]);
         Ok(())
     }
 }
 impl partmgr::storage::Storage for Image {
-    fn len(&self) -> std::io::Result<u64> {
+    fn len(&self) -> partmgr::io::Result<u64> {
         Ok(self.0.len() as u64)
     }
-    fn read_exact_at(&self, o: u64, b: &mut [u8]) -> std::io::Result<()> {
+    fn read_exact_at(&self, o: u64, b: &mut [u8]) -> partmgr::io::Result<()> {
         virtdisk::ReadAt::read_exact_at(self, o, b)
     }
-    fn write_at(&mut self, o: u64, b: &[u8]) -> std::io::Result<usize> {
+    fn write_at(&mut self, o: u64, b: &[u8]) -> partmgr::io::Result<usize> {
         self.0[o as usize..o as usize + b.len()].copy_from_slice(b);
         Ok(b.len())
     }
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> partmgr::io::Result<()> {
         Ok(())
     }
 }

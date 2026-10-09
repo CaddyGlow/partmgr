@@ -1,6 +1,7 @@
 #![cfg(feature = "std")]
 
 //! Fixtures assemble native boot/FAT/slot bytes independently of production writers.
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, Resources},
     fs_fat_audit::FatAuditLimits,
@@ -11,10 +12,7 @@ use partmgr::{
     fs_undo::{self, UndoBinding, UndoLimits, UndoState},
     storage::Storage,
 };
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 const BASE: usize = 4096;
 const LENGTH: usize = 65536;
 // Same explicit short-write/failed-flush model as range tests, independently scoped here.

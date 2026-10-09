@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::*,
     fs_flash::*,
@@ -7,12 +8,9 @@ use partmgr::{
     fs_jffs2_audit::{Jffs2AuditLimits, audit},
     fs_jffs2_tree::*,
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 struct Source {

@@ -335,7 +335,7 @@ fn cold_restore_interrupted_fragmented_range_and_retry_without_writes() {
         }
         fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
             if self.fail.is_some_and(|cut| at >= cut && at < cut + 23) {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             let n = bytes.len().min(3);
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);

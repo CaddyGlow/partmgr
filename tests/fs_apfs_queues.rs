@@ -1,7 +1,8 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{fs_apfs::*, fs_apfs_audit::*, fs_core::*};
-use std::{io, sync::Arc};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 #[allow(dead_code)]
 #[path = "fixtures/apfs_clean.rs"]

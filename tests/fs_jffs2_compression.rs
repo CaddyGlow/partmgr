@@ -1,17 +1,15 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::*,
     fs_flash::*,
     fs_jffs2::*,
     fs_jffs2_audit::{Jffs2AuditLimits, audit},
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use virtdisk::ReadAt;
 #[allow(dead_code)]

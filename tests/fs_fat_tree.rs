@@ -1,7 +1,8 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{fs_core::*, fs_fat::FatVolume, fs_fat_tree::FatTreeSource};
-use std::{io, sync::Arc};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 struct Bytes(Vec<u8>);
 impl ReadAt for Bytes {

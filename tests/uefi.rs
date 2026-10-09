@@ -35,14 +35,14 @@ struct Adapter {
     fail: bool,
 }
 impl EspAdapter for Adapter {
-    fn prepare_fat(&mut self, _: LbaRange) -> std::io::Result<()> {
+    fn prepare_fat(&mut self, _: LbaRange) -> partmgr::io::Result<()> {
         self.stages.push("fat");
         Ok(())
     }
-    fn install_boot_files(&mut self, _: LbaRange) -> std::io::Result<()> {
+    fn install_boot_files(&mut self, _: LbaRange) -> partmgr::io::Result<()> {
         self.stages.push("boot");
         if self.fail {
-            Err(std::io::Error::other("boot"))
+            Err(partmgr::io::Error::other("boot"))
         } else {
             Ok(())
         }

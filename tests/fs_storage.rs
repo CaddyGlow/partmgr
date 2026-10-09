@@ -1,13 +1,11 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_storage::{BoundedSession, SectorGeometry, UncertainMutation},
     storage::{FileStorage, Storage},
 };
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 struct State {
@@ -149,13 +147,13 @@ fn raw_file_session_reads_after_write_and_retains_backend_lock() {
 #[test]
 fn immutable_region_retains_context_budget_and_nonzero_translation() {
     use partmgr::fs_storage::ImmutableRegion;
-    use std::io::Write;
+    use partmgr::io::Write;
     use virtdisk::{ParserLimits, RawDisk, ReadAt, ReadBudget, ReadContext, contextual_reader};
     let mut file = tempfile::NamedTempFile::new().unwrap();
     file.write_all(&(0u8..32).collect::<Vec<_>>()).unwrap();
     let budget = ReadBudget::new(ParserLimits::default()).unwrap();
     let context = ReadContext {
-        container: Some(file.path().into()),
+        container: Some(file.path().display().to_string()),
         record: Some(42),
         ..Default::default()
     };

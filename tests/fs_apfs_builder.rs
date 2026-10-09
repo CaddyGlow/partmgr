@@ -1,10 +1,11 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_apfs::*, fs_apfs_audit::*, fs_apfs_builder::*, fs_apfs_tree::ApfsTreeSource, fs_core::*,
     storage::Storage,
 };
-use std::{io, sync::Arc};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 #[path = "fixtures/apfs_build_tree.rs"]
 mod common_fixture;
@@ -53,10 +54,12 @@ impl Storage for NativeTarget {
         Ok(self.file.metadata()?.len())
     }
     fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
-        std::os::unix::fs::FileExt::read_exact_at(&self.file, out, at)
+        Ok(std::os::unix::fs::FileExt::read_exact_at(
+            &self.file, out, at,
+        )?)
     }
     fn write_at(&mut self, at: u64, b: &[u8]) -> io::Result<usize> {
-        std::os::unix::fs::FileExt::write_at(&self.file, b, at)
+        Ok(std::os::unix::fs::FileExt::write_at(&self.file, b, at)?)
     }
     fn flush(&mut self) -> io::Result<()> {
         self.file.sync_all()?;
@@ -72,7 +75,7 @@ impl ReadAt for NativeRead {
         self.0.metadata().map_or(0, |m| m.len())
     }
     fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
-        std::os::unix::fs::FileExt::read_exact_at(&self.0, out, at)
+        Ok(std::os::unix::fs::FileExt::read_exact_at(&self.0, out, at)?)
     }
 }
 impl Storage for Target {

@@ -1,12 +1,12 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     editor::Editor,
     guid::Guid,
     layout::{DiskLayout, Geometry, GptLayout, LbaRange},
     payload::FilesystemResize,
 };
-use std::io;
 fn editor() -> Editor {
     let mut layout = GptLayout::initialize(
         Geometry::new(512 * 256, 512).unwrap(),

@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_copy::*,
     fs_core::*,
@@ -7,7 +8,7 @@ use partmgr::{
     fs_fat_builder::{FatBuildOptions, FatTreeMetadataPolicy},
     storage::Storage,
 };
-use std::{io, sync::Arc};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 #[derive(Clone, Copy)]
 enum Mode {

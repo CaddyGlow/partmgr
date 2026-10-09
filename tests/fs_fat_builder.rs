@@ -1,17 +1,15 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, FileRead, Resources},
     fs_fat::{FatFamily, FatVolume},
     fs_fat_builder::{FatBuildFile, FatBuildOptions, FatBuildPlan},
     storage::Storage,
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 struct Source {

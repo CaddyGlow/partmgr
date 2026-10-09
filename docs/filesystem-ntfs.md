@@ -37,3 +37,13 @@ nix-shell -p ntfs3g sleuthkit --run 'PARTMGR_NTFS_EVIDENCE=/data/cache/partmgr-n
 ```
 
 The gate formats a 64 MiB image with 4 KiB clusters, copies a 13-byte resident file and a 131089-byte nonresident file, compares whole and selected positional reads against host bytes and independent Sleuth Kit `icat`, and checks exact native names. It verifies the image SHA-256 before and after read-only validation. Receipt files retain commands, tool/source/test-binary hashes, versions, platform information, separate raw stdout/stderr, per-file hashes and status. The successful local receipt is `/data/cache/partmgr-ntfs-native-vdisk02-20261008/receipt.txt`. It establishes the selected clean native fixture only; it does not establish complete NTFS capture, repair, Windows servicing, or firmware behavior.
+
+The read gate accepts volume flags `0` and `0x0080`. The latter is a persistent
+policy disabling short filename creation and the tunneling cache, according to
+Maxim Suhanov's [original NTFS reverse-engineering findings](https://dfir.ru/2019/01/19/ntfs-today/).
+It does not change positional data mapping. All other bits still fail the read
+gate, including dirty combined with this policy (`0x0081`). Audit retains the
+original flags and its conservative nonzero-volume-flags finding; accepting
+reads does not grant allocation or repair authority. This distinction was
+required by the clean Windows-created BitLocker data fixtures, whose inner NTFS
+volume reports `0x0080` after native consistency checks.

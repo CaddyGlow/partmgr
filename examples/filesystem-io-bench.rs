@@ -1,8 +1,8 @@
 //! Compare indexed direct file ranges with equivalent logical backend reads.
 //! Usage: cargo run --release --example filesystem-io-bench -- IMAGE [OPERATIONS]
 use partmgr::fs_file::{ExtentFile, ExtentKind, FileExtent};
+use partmgr::io;
 use std::{
-    io,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},

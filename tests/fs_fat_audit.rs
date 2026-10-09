@@ -1,10 +1,11 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, Resources},
     fs_fat_audit::{FatAuditFinding, FatAuditLimits, audit_fat},
 };
-use std::{io, sync::Arc};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 struct Image(Vec<u8>);
 impl ReadAt for Image {

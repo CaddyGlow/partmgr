@@ -1,12 +1,10 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::*, fs_flash::*, fs_jffs2::*, fs_jffs2_audit::*, fs_jffs2_edit::*, storage::Storage,
 };
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 #[allow(dead_code)]
 #[path = "fixtures/jffs2_clean.rs"]
 mod fixture;

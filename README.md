@@ -20,6 +20,18 @@ The [refactoring benchmarks](docs/benchmarks.md) compare GPT edit batching,
 FAT planning/emission, APFS metadata access, NTFS MFT loading/parsing and USN
 record decoding in both library configurations.
 
+## BitLocker
+
+The optional `bitlocker` feature adds experimental read-only volume inspection,
+recovery-password and clear-key unlocking, supplied-key access, and XTS-AES
+decrypted readers. It supports the portable build and feeds the existing
+filesystem APIs. The separate `bitlocker-write` feature adds owned ciphertext
+transactions and external undo recovery. Envelope discovery is available without
+either feature; decrypted views retain distinct provenance identities.
+See [BitLocker support](docs/bitlocker.md) for the exact profile,
+usage, native evidence, and remaining qualification gates. TPM/swtpm unlocking
+is not implemented.
+
 ## Building without std
 
 Disable the default `std` feature to build the entire library with `core` and
@@ -41,10 +53,10 @@ The final application supplies an allocator, panic handling and its storage
 backend. Targets must support pointer and 64-bit atomics. Implement
 `partmgr::io::ReadAt` for immutable positional reads and `storage::Storage` for
 exclusive writes and durable flushes. The portable I/O module retains typed
-errors, reader provenance, bounded views and metadata budgets. With `std` enabled,
-it reexports the existing standard I/O and virtdisk types, preserving host APIs.
-Without `std`, virtdisk and host image/file adapters are excluded; published
-crates.io dependencies still suffice.
+errors, reader provenance, bounded views and metadata budgets by reexporting
+virtdisk 0.3.0's shared API in both configurations. Host image/file adapters
+require `std`. Host backends convert standard I/O errors into the shared portable
+error type; positional-reader identities and budgets use the same upstream types.
 
 Portable caches use non-poisoning spin locks. Callers must prevent interrupt
 handlers or backend callbacks from reentering the same cached reader while it

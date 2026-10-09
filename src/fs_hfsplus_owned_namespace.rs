@@ -704,7 +704,7 @@ fn rename_consuming_commit_and_cold_semantic_recovery() {
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
             self.writes += 1;
             if self.fail && at == 4 * 4096 {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             Ok(n)
         }
@@ -996,7 +996,7 @@ fn move_consuming_commit_and_cold_semantic_recovery() {
             self.bytes[at as usize..at as usize + n].copy_from_slice(&bytes[..n]);
             self.writes += 1;
             if self.fail && at == 4 * 4096 {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             Ok(n)
         }

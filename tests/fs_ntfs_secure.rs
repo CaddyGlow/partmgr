@@ -1,7 +1,8 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{fs_core::*, fs_ntfs::*, fs_ntfs_security::*};
-use std::{io, sync::Arc};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 #[path = "fixtures/ntfs_clean.rs"]
 mod fixture;

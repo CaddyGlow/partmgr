@@ -1,3 +1,4 @@
+use partmgr::io;
 use partmgr::{
     fs_core::{
         Budget, Cancellation, ExtentKind, FileRead, LogicalExtent, ObjectId, Resources, StreamKind,
@@ -14,12 +15,9 @@ use partmgr::{
     storage::Storage,
 };
 use sha2::{Digest, Sha256};
-use std::{
-    io,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 
 struct Backend(Arc<Mutex<Vec<u8>>>, Arc<AtomicUsize>);

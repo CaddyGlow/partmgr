@@ -2,12 +2,13 @@
 
 #[path = "fixtures/ext2_clean.rs"]
 mod independent;
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, NativeName, Resources},
     fs_ext::ExtVolume,
     fs_ext_audit::{self, ExtAuditLimits},
 };
-use std::{io, sync::Arc};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 struct Image(Vec<u8>);
 impl ReadAt for Image {

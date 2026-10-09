@@ -3,17 +3,15 @@
 #[path = "fixtures/ntfs_clean.rs"]
 mod ntfs_clean;
 use ntfs_clean::*;
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, Resources},
     fs_ntfs::NtfsReadLimits,
     fs_ntfs_audit::{NtfsAuditFinding, NtfsAuditLimits, audit_ntfs},
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 struct Image {
@@ -652,4 +650,26 @@ fn native_directory_reference_cycles_are_diagnosed() {
             .any(|f| matches!(f, NtfsAuditFinding::DirectoryAlias { record: 5 }))
     );
     assert!(report.free_ranges().is_empty());
+}
+
+#[test]
+fn short_name_policy_remains_visible_in_audit_without_becoming_dirty() {
+    let mut bytes = ntfs_audit_seed();
+    let flags_at =
+        2048 + 3 * 1024 + 56 + resident(0x30, &name_value("$Volume", 5), 2).len() + 24 + 10;
+    w(&mut bytes, flags_at, 0x0080);
+    let report = audit_ntfs(Arc::new(Image::new(bytes)), limits(), audit_limits(), &r()).unwrap();
+    assert_eq!(report.volume_flags(), 0x0080);
+    assert!(
+        report
+            .findings()
+            .iter()
+            .any(|finding| matches!(finding, NtfsAuditFinding::VolumeFlags { flags: 0x0080 }))
+    );
+    assert!(
+        !report
+            .findings()
+            .iter()
+            .any(|finding| matches!(finding, NtfsAuditFinding::Dirty))
+    );
 }

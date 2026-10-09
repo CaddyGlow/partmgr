@@ -1,7 +1,7 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::storage::{Barrier, CommitError, Storage, WritePlan, WriteRange};
-use std::io;
 
 struct Memory {
     bytes: Vec<u8>,

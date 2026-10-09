@@ -1,12 +1,10 @@
 #![cfg(feature = "std")]
 
 use partmgr::fs_file::{ExtentFile, ExtentKind, FileExtent};
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+use partmgr::io;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 use virtdisk::ReadAt;
 

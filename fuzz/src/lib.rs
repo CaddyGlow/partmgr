@@ -1,4 +1,5 @@
 mod apfs;
+mod bitlocker;
 mod ext_profile;
 mod fixtures;
 mod flash;
@@ -14,8 +15,9 @@ mod ntfs_index_fixture;
 #[path = "../../tests/fixtures/xfs_clean.rs"]
 mod xfs_fixture;
 use partmgr::PartitionTable;
-use std::{io, sync::Arc};
-use virtdisk::ReadAt;
+use partmgr::io;
+use partmgr::io::ReadAt;
+use std::sync::Arc;
 struct Bytes(Vec<u8>);
 impl ReadAt for Bytes {
     fn len(&self) -> u64 {
@@ -77,6 +79,8 @@ pub fn flash(data: &[u8]) {
 
 pub fn run(target: &str, data: &[u8]) -> Result<(), &'static str> {
     match target {
+        "bitlocker" => bitlocker(data),
+        "bitlocker-reader" => bitlocker_reader(data),
         "partitions" => partitions(data),
         "guid" => guid(data),
         "layouts" => layouts(data),
@@ -98,6 +102,8 @@ pub fn run(target: &str, data: &[u8]) -> Result<(), &'static str> {
     Ok(())
 }
 pub const TARGETS: &[&str] = &[
+    "bitlocker",
+    "bitlocker-reader",
     "partitions",
     "guid",
     "layouts",
@@ -116,6 +122,9 @@ pub const TARGETS: &[&str] = &[
     "undo",
 ];
 pub fn seeds(target: &str) -> Vec<Vec<u8>> {
+    if matches!(target, "bitlocker" | "bitlocker-reader") {
+        return bitlocker::seeds();
+    }
     if target == "apfs" {
         return apfs::seeds();
     }
@@ -1591,4 +1600,13 @@ mod smoke {
             }
         }
     }
+}
+
+/// Bounded BitLocker envelope and metadata inspection without credential work.
+pub fn bitlocker(data: &[u8]) {
+    bitlocker::inspection(data);
+}
+/// Fixed-key bounded decrypted reader and logical mapping fuzzing.
+pub fn bitlocker_reader(data: &[u8]) {
+    bitlocker::reader(data);
 }

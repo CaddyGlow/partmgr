@@ -1,14 +1,12 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, Resources},
     fs_undo::{self, UndoBinding, UndoLimits, UndoPlan, UndoState},
     storage::{Storage, WriteRange},
 };
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 struct Clock {

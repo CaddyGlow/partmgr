@@ -108,7 +108,7 @@ fn modern_seeds_reach_public_clean_audit_payload_and_refund() {
         drop(report);
         let file = volume.open_file(12, 64, &r).unwrap();
         drop(volume);
-        assert_eq!(read_all(&file, 2048, &r).unwrap().bytes, payload);
+        assert_eq!(read_all(&file, 2048, &r).unwrap().get(), &payload);
         r.cancellation.cancel();
         assert!(file.read_at(file.len(), &mut [], &r).is_err());
         drop(file);

@@ -1,11 +1,12 @@
 //! Deterministic new-output nested EFI-shaped FAT fixture; payload is not boot code.
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ObjectId, Resources},
     fs_fat::FatFamily,
     fs_fat_builder::{FatBuildOptions, FatBuildPlan, FatBuildTreeEntry, FatTreeMetadataPolicy},
     storage::FileStorage,
 };
-use std::{fs::OpenOptions, io, sync::Arc};
+use std::{fs::OpenOptions, sync::Arc};
 use virtdisk::{RawDisk, ReadAt};
 struct Empty;
 impl ReadAt for Empty {

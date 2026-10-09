@@ -387,13 +387,17 @@ fn native_private_owned_range_commit_complete_payload_and_exact_image() {
             Ok(self.0.metadata()?.len())
         }
         fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
-            FileExt::read_exact_at(&self.0, out, at)
+            Ok(FileExt::read_exact_at(&self.0, out, at)?)
         }
         fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
-            FileExt::write_at(&self.0, &bytes[..bytes.len().min(7)], at)
+            Ok(FileExt::write_at(
+                &self.0,
+                &bytes[..bytes.len().min(7)],
+                at,
+            )?)
         }
         fn flush(&mut self) -> io::Result<()> {
-            self.0.sync_all()
+            Ok(self.0.sync_all()?)
         }
     }
     let output = PathBuf::from(
@@ -582,7 +586,7 @@ fn native_private_owned_range_recovery_complete_payload_and_exact_image() {
             if at != 1030 && at != self.len()? - 1018 {
                 self.0.write_at(at, &bytes[..1])?;
                 self.0.flush()?;
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             self.0.write_at(at, bytes)
         }
@@ -595,13 +599,17 @@ fn native_private_owned_range_recovery_complete_payload_and_exact_image() {
             Ok(self.0.metadata()?.len())
         }
         fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
-            FileExt::read_exact_at(&self.0, out, at)
+            Ok(FileExt::read_exact_at(&self.0, out, at)?)
         }
         fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
-            FileExt::write_at(&self.0, &bytes[..bytes.len().min(7)], at)
+            Ok(FileExt::write_at(
+                &self.0,
+                &bytes[..bytes.len().min(7)],
+                at,
+            )?)
         }
         fn flush(&mut self) -> io::Result<()> {
-            self.0.sync_all()
+            Ok(self.0.sync_all()?)
         }
     }
     let output = PathBuf::from(

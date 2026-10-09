@@ -1,7 +1,7 @@
 #![cfg(feature = "std")]
 
 use partmgr::extended::ExtendedLayout;
-use std::io;
+use partmgr::io;
 use virtdisk::ReadAt;
 struct Memory(Vec<u8>);
 impl ReadAt for Memory {

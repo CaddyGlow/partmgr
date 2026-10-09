@@ -1,12 +1,10 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{fs_core::*, fs_ntfs::*, fs_ntfs_usn::RecordLimits, fs_ntfs_usn_extract::*};
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 #[path = "fixtures/ntfs_clean.rs"]

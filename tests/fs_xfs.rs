@@ -2,18 +2,16 @@
 
 #[path = "common/reader_contract.rs"]
 mod reader_contract;
+use partmgr::io;
 use partmgr::{
     fs_core::*,
     fs_xfs::*,
     fs_xfs_audit::{XfsAuditFinding, XfsAuditLimits, audit},
     fs_xfs_tree::*,
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 struct Source {

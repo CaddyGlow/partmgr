@@ -2,12 +2,13 @@
 
 #[path = "fixtures/ext2_clean.rs"]
 mod clean_fixture;
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, Resources},
     fs_ext::ExtVolume,
     fs_ext_audit::{ExtAuditFinding as Finding, ExtAuditLimits, audit},
 };
-use std::{io, process::Command, sync::Arc};
+use std::{process::Command, sync::Arc};
 use virtdisk::ReadAt;
 struct Image(Vec<u8>);
 impl ReadAt for Image {
@@ -239,7 +240,7 @@ fn json(text: &str) -> String {
     out
 }
 fn retain(path: &std::path::Path, bytes: &[u8]) {
-    use std::io::Write;
+    use partmgr::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)

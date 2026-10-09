@@ -13,13 +13,17 @@ impl Storage for FileStore {
         Ok(self.0.metadata()?.len())
     }
     fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
-        FileExt::read_exact_at(&self.0, out, at)
+        Ok(FileExt::read_exact_at(&self.0, out, at)?)
     }
     fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
-        FileExt::write_at(&self.0, &bytes[..bytes.len().min(997)], at)
+        Ok(FileExt::write_at(
+            &self.0,
+            &bytes[..bytes.len().min(997)],
+            at,
+        )?)
     }
     fn flush(&mut self) -> io::Result<()> {
-        self.0.sync_all()
+        Ok(self.0.sync_all()?)
     }
 }
 struct Stop {
@@ -38,7 +42,7 @@ impl Storage for Stop {
         if self.enabled && at == self.bitmap {
             self.store.write_at(at, &bytes[..bytes.len().div_ceil(2)])?;
             self.store.flush()?;
-            return Err(io::Error::from_raw_os_error(5));
+            return Err(std::io::Error::from_raw_os_error(5).into());
         }
         self.store.write_at(at, bytes)
     }

@@ -12,7 +12,7 @@ impl ReadAt for Image {
     fn len(&self) -> u64 {
         self.0.len() as u64
     }
-    fn read_exact_at(&self, o: u64, out: &mut [u8]) -> std::io::Result<()> {
+    fn read_exact_at(&self, o: u64, out: &mut [u8]) -> partmgr::io::Result<()> {
         out.copy_from_slice(&self.0[o as usize..o as usize + out.len()]);
         Ok(())
     }
@@ -89,17 +89,17 @@ fn repair_commits_and_revalidates_independently() {
 }
 
 impl Storage for Image {
-    fn len(&self) -> std::io::Result<u64> {
+    fn len(&self) -> partmgr::io::Result<u64> {
         Ok(self.0.len() as u64)
     }
-    fn read_exact_at(&self, o: u64, b: &mut [u8]) -> std::io::Result<()> {
+    fn read_exact_at(&self, o: u64, b: &mut [u8]) -> partmgr::io::Result<()> {
         ReadAt::read_exact_at(self, o, b)
     }
-    fn write_at(&mut self, o: u64, b: &[u8]) -> std::io::Result<usize> {
+    fn write_at(&mut self, o: u64, b: &[u8]) -> partmgr::io::Result<usize> {
         self.0[o as usize..o as usize + b.len()].copy_from_slice(b);
         Ok(b.len())
     }
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> partmgr::io::Result<()> {
         Ok(())
     }
 }
@@ -182,7 +182,7 @@ fn protective_mbr_damage_is_repaired_at_same_geometry() {
     assert!(partmgr::layout::DiskLayout::inspect(&i, 512).is_ok());
 }
 impl partmgr::storage::ResizableStorage for Image {
-    fn resize(&mut self, n: u64) -> std::io::Result<()> {
+    fn resize(&mut self, n: u64) -> partmgr::io::Result<()> {
         self.0.resize(n as usize, 0);
         Ok(())
     }

@@ -2,13 +2,11 @@
 
 #[path = "common/reader_contract.rs"]
 mod reader_contract;
+use partmgr::io;
 use partmgr::{fs_core::*, fs_hfs::*, fs_hfs_audit::*, fs_hfs_tree::*};
-use std::{
-    io,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 #[path = "fixtures/hfs_clean.rs"]

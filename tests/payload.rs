@@ -1,10 +1,10 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     payload::{CopyOperation, CopyOutcome},
     storage::Storage,
 };
-use std::io;
 #[derive(Clone)]
 struct Mem(Vec<u8>);
 impl Storage for Mem {

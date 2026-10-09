@@ -1,12 +1,10 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{fs_apfs::*, fs_apfs_audit::*, fs_apfs_edit::*, fs_core::*, storage::Storage};
-use std::{
-    io,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 #[allow(dead_code)]
 #[path = "fixtures/apfs_clean.rs"]

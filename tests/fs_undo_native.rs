@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, Resources},
     fs_fat::FatVolume,
@@ -10,7 +11,7 @@ use partmgr::{
     storage::{FileStorage, Storage, WriteRange},
 };
 use sha2::{Digest, Sha256};
-use std::{ffi::OsStr, io, path::Path, process::Command, sync::Arc};
+use std::{ffi::OsStr, path::Path, process::Command, sync::Arc};
 use virtdisk::{DiskView, RawDisk};
 
 struct Torn<S> {

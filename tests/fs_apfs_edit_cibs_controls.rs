@@ -1,11 +1,11 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_apfs::*, fs_apfs_audit::ApfsAuditLimits, fs_apfs_edit::*, fs_core::*, storage::Storage,
 };
 use std::{
     collections::BTreeMap,
-    io,
     sync::{Arc, Mutex},
 };
 #[allow(dead_code)]

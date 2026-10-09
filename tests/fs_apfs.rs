@@ -1,12 +1,10 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{fs_apfs::*, fs_apfs_audit::*, fs_core::*};
-use std::{
-    io,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 struct Bytes(Vec<u8>);
@@ -451,7 +449,7 @@ fn native_formatter_checker_payload_and_fork_receipt() {
         }
         let mut child = command.spawn().unwrap();
         if let Some(input) = input {
-            use std::io::Write;
+            use partmgr::io::Write;
             child
                 .stdin
                 .take()
@@ -779,7 +777,7 @@ fn native_formatter_checker_payload_and_fork_receipt() {
     );
     let mut extended = vec![0; 4 * 1024 * 1024];
     {
-        use std::io::Read;
+        use partmgr::io::Read;
         fs::File::open(&multi)
             .unwrap()
             .read_exact(&mut extended)
@@ -790,7 +788,7 @@ fn native_formatter_checker_payload_and_fork_receipt() {
     let nx = extended[4 * 4096..5 * 4096].to_vec();
     extended[..4096].copy_from_slice(&nx);
     {
-        use std::io::Write;
+        use partmgr::io::Write;
         fs::OpenOptions::new()
             .write(true)
             .open(&multi)

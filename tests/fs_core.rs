@@ -253,7 +253,7 @@ fn io_wrapping_retains_nested_framework_category_and_original_cause() {
     ] {
         let outer = Error::io(
             "decoder boundary",
-            std::io::Error::other(Error::new(kind, "original framework cause")),
+            partmgr::io::Error::other(Error::new(kind, "original framework cause")),
         );
         assert_eq!(outer.kind, kind);
         assert_eq!(outer.context, "decoder boundary");
@@ -269,7 +269,10 @@ fn io_wrapping_retains_nested_framework_category_and_original_cause() {
             "original framework cause"
         );
     }
-    let outer = Error::io("backend", std::io::Error::other("original backend cause"));
+    let outer = Error::io(
+        "backend",
+        partmgr::io::Error::other("original backend cause"),
+    );
     assert_eq!(outer.kind, ErrorKind::Io);
     assert_eq!(outer.source.unwrap().to_string(), "original backend cause");
 }

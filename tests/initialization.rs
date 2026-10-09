@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     codec::{edit_plan, initialize_plan},
     guid::Guid,
@@ -7,7 +8,6 @@ use partmgr::{
     recovery::{RecoveryReport, RecoverySource},
     storage::{CommitError, Storage},
 };
-use std::io;
 use virtdisk::ReadAt;
 struct Disk {
     bytes: Vec<u8>,

@@ -305,7 +305,7 @@ impl FileRead for File {
         if self.controls.fail.load(Ordering::Acquire) {
             return Err(Error::io(
                 "modeled independent payload failure",
-                std::io::Error::other("fixture read cause"),
+                partmgr::io::Error::other("fixture read cause"),
             ));
         }
         self.controls.reads.fetch_add(1, Ordering::Relaxed);

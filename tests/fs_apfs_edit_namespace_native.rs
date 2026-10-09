@@ -2,13 +2,13 @@
 
 //! Enabled native COW gate never skips missing tools. Initial source is freshly framework-authored.
 #![cfg(unix)]
+use partmgr::io;
 use partmgr::{
     fs_apfs::*, fs_apfs_audit::*, fs_apfs_builder::*, fs_apfs_edit::*, fs_core::*, storage::Storage,
 };
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
-    io,
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
     process::Command,
@@ -22,13 +22,13 @@ impl Storage for Store {
         Ok(self.0.metadata()?.len())
     }
     fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
-        self.0.read_exact_at(out, at)
+        Ok(self.0.read_exact_at(out, at)?)
     }
     fn write_at(&mut self, at: u64, input: &[u8]) -> io::Result<usize> {
-        self.0.write_at(input, at)
+        Ok(self.0.write_at(input, at)?)
     }
     fn flush(&mut self) -> io::Result<()> {
-        self.0.sync_all()
+        Ok(self.0.sync_all()?)
     }
 }
 struct FilteredTree {

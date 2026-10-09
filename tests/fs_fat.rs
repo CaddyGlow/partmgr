@@ -2,13 +2,13 @@
 
 #[path = "common/reader_contract.rs"]
 mod reader_contract;
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, Resources},
     fs_fat::{FatFamily, FatVolume},
 };
 use std::{
     collections::BTreeMap,
-    io,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},

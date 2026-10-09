@@ -204,3 +204,11 @@ directory access, so an editor opening that skips the stale-identity/cancellatio
 checks cannot satisfy it. The strengthened regression, formatting and strict
 fuzz Clippy pass on the current tree; the earlier instrumented receipt retains
 its original frozen source scope.
+
+BitLocker targets `bitlocker` and `bitlocker-reader` accept at most 1 MiB.
+Inspection bounds metadata bytes, entry count, nesting, and cumulative reads;
+the separate reader target uses fixed diagnostic FVEKs to exercise relocated
+boot sectors, reserved metadata, unaligned reads, EOF and overflow. Neither
+target runs password derivation or contacts a TPM. Generated seeds include
+structurally valid full-volume XTS-128/512-byte and XTS-256/4096-byte layouts;
+these are synthetic mapping inputs, not Windows interoperability evidence.

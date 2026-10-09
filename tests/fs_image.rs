@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{
         Availability, Budget, Cancellation, ErrorKind, Family, Operation, Resources, StreamKind,
@@ -10,12 +11,9 @@ use partmgr::{
     fs_ntfs::{NtfsDirectoryLimits, NtfsReadLimits},
     fs_ntfs_tree::NtfsTreePolicy,
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 #[path = "fixtures/ntfs_clean.rs"]

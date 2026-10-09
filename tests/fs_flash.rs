@@ -1,14 +1,12 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, Resources},
     fs_flash::{FlashGeometry, FlashImage, FlashLayout, FlashLimits, FlashProgramming},
     storage::Storage,
 };
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 struct State {
     bytes: Vec<u8>,
     durable: Vec<u8>,

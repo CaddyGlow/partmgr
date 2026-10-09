@@ -2,13 +2,11 @@
 
 #[path = "common/reader_contract.rs"]
 mod reader_contract;
+use partmgr::io;
 use partmgr::{fs_core::*, fs_jfs::*, fs_jfs_audit::*, fs_jfs_tree::*};
-use std::{
-    io,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 #[path = "fixtures/jfs_clean.rs"]
@@ -349,7 +347,7 @@ fn native_formatter_checker_and_debugger_receipt() {
         }
         let mut child = command.spawn().unwrap();
         if let Some(input) = input {
-            use std::io::Write;
+            use partmgr::io::Write;
             child
                 .stdin
                 .take()

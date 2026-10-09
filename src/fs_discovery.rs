@@ -157,7 +157,7 @@ pub(crate) fn discover<const N: usize>(
                         });
                 let _ = requests.send(Request::Done(result));
             })
-            .map_err(|error| Error::io("metadata discovery worker", error))?;
+            .map_err(|error| Error::io("metadata discovery worker", error.into()))?;
         let mut copied = initial;
         let mut owner_failure: Option<Error> = None;
         let result = loop {
@@ -271,7 +271,7 @@ mod tests {
         fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
             self.calls.set(self.calls.get() + 1);
             if self.fail {
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             for (i, byte) in out.iter_mut().enumerate() {
                 *byte = (at + i as u64) as u8;
@@ -291,6 +291,58 @@ mod tests {
             cancellation: Cancellation::default(),
         }
     }
+    #[test]
+    fn inline_and_scoped_decoders_copy_identical_pages_with_mode_work_accounting() {
+        let owner = Owner {
+            calls: Rc::new(Cell::new(0)),
+            fail: false,
+        };
+        let decode = |source: Arc<dyn ReadAt>| {
+            for at in [0, 4, 8] {
+                let mut byte = [0];
+                source
+                    .read_exact_at(at, &mut byte)
+                    .map_err(|error| Error::io("parity decoder", error))?;
+                assert_eq!(byte[0], at as u8);
+            }
+            Ok(())
+        };
+        let scoped_work = Arc::new(core::sync::atomic::AtomicU64::new(0));
+        let scoped_charge = scoped_work.clone();
+        let scoped = discover::<4>(
+            &owner,
+            16,
+            Vec::new(),
+            (4, 4, 100),
+            &resources(),
+            Arc::new(move |amount| {
+                scoped_charge.fetch_add(amount, core::sync::atomic::Ordering::Relaxed);
+                Ok(())
+            }),
+            decode,
+        )
+        .unwrap();
+        let inline_work = Arc::new(core::sync::atomic::AtomicU64::new(0));
+        let inline_charge = inline_work.clone();
+        let inline = discover_inline::<4>(
+            &owner,
+            16,
+            Vec::new(),
+            (4, 4, 100),
+            &resources(),
+            Arc::new(move |amount| {
+                inline_charge.fetch_add(amount, core::sync::atomic::Ordering::Relaxed);
+                Ok(())
+            }),
+            decode,
+        )
+        .unwrap();
+        assert_eq!(inline, scoped);
+        assert_eq!(owner.calls.get(), 6);
+        assert_eq!(inline_work.load(core::sync::atomic::Ordering::Relaxed), 321);
+        assert!(scoped_work.load(core::sync::atomic::Ordering::Relaxed) < 100);
+    }
+
     #[test]
     fn non_send_owner_copies_each_requested_page_once() {
         let calls = Rc::new(Cell::new(0));

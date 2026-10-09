@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_copy::CopyLimits,
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, Resources, StreamKind, TreeSource},
@@ -9,12 +10,9 @@ use partmgr::{
     fs_image::{AllocationPolicy, ReadImage, ReadOptions},
     storage::Storage,
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 #[allow(dead_code)]

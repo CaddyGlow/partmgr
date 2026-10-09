@@ -9,7 +9,8 @@ use partmgr::{
     fs_ext_tree::ExtTreeSource,
 };
 
-use std::{io, process::Command, sync::Arc};
+use partmgr::io;
+use std::{process::Command, sync::Arc};
 use virtdisk::ReadAt;
 struct Image(Vec<u8>);
 impl ReadAt for Image {

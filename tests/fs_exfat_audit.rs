@@ -1,11 +1,12 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, Resources},
     fs_exfat_audit::*,
     fs_exfat_volume::ExfatReadLimits,
 };
-use std::{io, sync::Arc};
+use std::sync::Arc;
 use virtdisk::ReadAt;
 const SECTOR: usize = 512;
 const HEAP: usize = 56 * SECTOR;

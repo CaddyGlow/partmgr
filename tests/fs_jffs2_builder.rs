@@ -1,15 +1,13 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::*, fs_flash::*, fs_jffs2::*, fs_jffs2_audit::*, fs_jffs2_builder::*, fs_jffs2_tree::*,
     storage::Storage,
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use virtdisk::ReadAt;
 fn id(n: u8) -> ObjectId {

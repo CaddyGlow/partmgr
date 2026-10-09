@@ -196,7 +196,7 @@ fn private_resize_commit_reopens_clean_and_preserves_old_physical_bytes() {
         fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
             if self.1 && at == 4096 {
                 self.0.write_at(at, &bytes[..bytes.len().div_ceil(2)])?;
-                return Err(io::Error::from_raw_os_error(5));
+                return Err(std::io::Error::from_raw_os_error(5).into());
             }
             self.0.write_at(at, bytes)
         }

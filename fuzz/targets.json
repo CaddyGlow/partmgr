@@ -1,4 +1,6 @@
 {
+  "bitlocker": 1048576,
+  "bitlocker-reader": 1048576,
   "partitions": 1048576,
   "guid": 4096,
   "layouts": 1048576,

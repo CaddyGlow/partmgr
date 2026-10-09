@@ -443,7 +443,11 @@ impl NtfsVolume {
             return Err(unsupported("NTFS version is not 3.1"));
         }
         volume.volume_flags = u16le(value, 10);
-        if !audit && volume.volume_flags != 0 {
+        // Persistent short-name/tunneling policy does not alter read mapping.
+        // Source: Suhanov's NTFS reverse engineering, linked in filesystem-ntfs.md.
+        // Preserve all flags for audit; every other bit still blocks this reader.
+        const SHORT_NAMES_DISABLED: u16 = 0x0080;
+        if !audit && volume.volume_flags & !SHORT_NAMES_DISABLED != 0 {
             return Err(unsupported(
                 "NTFS volume dirty or unsupported volume flags; replay/repair unavailable",
             ));

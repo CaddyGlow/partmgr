@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_copy::{CopyLimits, CopyNamePolicy},
     fs_core::*,
@@ -9,12 +10,9 @@ use partmgr::{
     fs_exfat_volume::{ExfatReadLimits, ExfatVolume},
     storage::Storage,
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use virtdisk::ReadAt;
 #[derive(Clone, Copy)]

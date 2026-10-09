@@ -1,12 +1,12 @@
+use partmgr::io;
+use partmgr::io::ReadAt;
 use partmgr::{
     fs_apfs::{ApfsContainer, ApfsReadLimits, ApfsVolume},
     fs_apfs_audit::{ApfsAuditLimits, audit_apfs},
     fs_apfs_tree::ApfsTreeSource,
     fs_core::{Budget, Cancellation, ObjectKind, Resources, TreeSource},
 };
-use std::io;
 use std::sync::Arc;
-use virtdisk::ReadAt;
 struct SparseBytes(Vec<u8>);
 // Mutable-session decoding must use Storage directly, never an immutable ReadAt
 // alias. Preparation and identity lookup must not write or flush malformed input.

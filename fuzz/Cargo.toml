@@ -9,8 +9,7 @@ publish = false
 
 [dependencies]
 honggfuzz = "=0.5.62"
-partmgr = { path = ".." }
-virtdisk = "0.2.0"
+partmgr = { path = "..", features = ["bitlocker"] }
 sha2 = "0.10.9"
 
 [lints.rust]

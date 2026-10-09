@@ -1,12 +1,12 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_apfs::*, fs_apfs_audit::ApfsAuditLimits, fs_apfs_builder::*, fs_apfs_edit::*, fs_core::*,
     storage::Storage,
 };
 use std::{
     collections::BTreeMap,
-    io,
     sync::{Arc, Mutex},
 };
 #[allow(dead_code)]
@@ -666,8 +666,9 @@ fn sparse_model() -> Vec<u8> {
         .collect()
 }
 fn native_validate(dir: &std::path::Path, image: &Sparse, xid: u64, expected: &[u8], bulk: bool) {
+    use partmgr::io::Read;
     use sha2::{Digest, Sha256};
-    use std::{io::Read, os::unix::fs::FileExt};
+    use std::os::unix::fs::FileExt;
     std::fs::create_dir_all(dir).unwrap();
     let path = dir.join("image.apfs");
     let file = std::fs::File::create(&path).unwrap();

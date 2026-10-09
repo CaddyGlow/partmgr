@@ -1145,7 +1145,7 @@ fn native_streamed_large_volume_and_deferred_forks() {
                 peak = peak.max(r.memory.used());
                 calls += 1;
                 file.write_all_at(bytes, at)
-                    .map_err(|e| Error::io("HFS+ staged native sink", e))
+                    .map_err(|e| Error::io("HFS+ staged native sink", e.into()))
             },
         )
         .unwrap();
@@ -1495,7 +1495,7 @@ fn native_common_tree_nested_capture_complete_forks() {
             if self.file.metadata()?.len() != self.length {
                 return Err(io::Error::other("source length changed"));
             }
-            self.file.read_exact_at(bytes, at)
+            Ok(self.file.read_exact_at(bytes, at)?)
         }
     }
     let output = PathBuf::from(
@@ -1593,7 +1593,7 @@ fn native_common_tree_nested_capture_complete_forks() {
                 &r,
                 &mut |at, bytes| {
                     file.write_all_at(bytes, at)
-                        .map_err(|e| Error::io("HFS+ captured staging sink", e))
+                        .map_err(|e| Error::io("HFS+ captured staging sink", e.into()))
                 },
             )
             .unwrap();

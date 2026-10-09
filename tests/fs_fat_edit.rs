@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, NativeName, Resources},
     fs_fat_audit::FatAuditLimits,
@@ -9,10 +10,7 @@ use partmgr::{
     fs_undo::{self, UndoBinding, UndoLimits, UndoState},
     storage::Storage,
 };
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 const BASE: usize = 4096;
 const LENGTH: usize = 65536;
 #[derive(Default)]

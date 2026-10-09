@@ -10,9 +10,21 @@
 
 extern crate alloc;
 
+/// Optional read-only BitLocker inspection and software unlocking.
+#[cfg(feature = "bitlocker")]
+pub mod bitlocker;
+#[cfg(feature = "bitlocker")]
+mod bitlocker_crypto;
+#[cfg(feature = "bitlocker")]
+mod bitlocker_disk;
+#[cfg(feature = "bitlocker-write")]
+pub mod bitlocker_write;
+
 /// Portable positional I/O, with native standard-library compatibility by default.
 pub mod io;
 mod platform;
+/// Discover encryption envelopes before selecting an inner filesystem.
+pub mod volume_probe;
 
 /// Deterministic table serialization and ordered commit planning.
 pub mod codec;

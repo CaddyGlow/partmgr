@@ -1,6 +1,7 @@
 #![cfg(feature = "std")]
 
 use partmgr::fs_jffs2_builder::Jffs2BuildCompression;
+use partmgr::io;
 use partmgr::{
     fs_core::{
         Budget, Cancellation, Error, ErrorKind, FileRead, LogicalExtent, NativeName, ObjectId,
@@ -15,7 +16,7 @@ use partmgr::{
 };
 use sha2::{Digest, Sha256};
 use std::{
-    fs, io,
+    fs,
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
@@ -39,7 +40,7 @@ impl FileRead for NativeRangeSource {
         if self
             .file
             .metadata()
-            .map_err(|e| Error::io("native range source metadata", e))?
+            .map_err(|e| Error::io("native range source metadata", e.into()))?
             .len()
             != self.length
         {
@@ -51,7 +52,7 @@ impl FileRead for NativeRangeSource {
         let count = out.len().min(37);
         self.file
             .read_at(&mut out[..count], p)
-            .map_err(|e| Error::io("native range source read", e))
+            .map_err(|e| Error::io("native range source read", e.into()))
     }
     fn visit_extents(
         &self,

@@ -388,7 +388,7 @@ impl Storage for FileStorage {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         file.seek(SeekFrom::Start(offset))?;
-        file.read_exact(out)
+        Ok(file.read_exact(out)?)
     }
     fn write_at(&mut self, offset: u64, bytes: &[u8]) -> io::Result<usize> {
         use crate::platform::io::{Seek, SeekFrom, Write};
@@ -404,10 +404,10 @@ impl Storage for FileStorage {
             ));
         }
         file.seek(SeekFrom::Start(offset))?;
-        file.write(bytes)
+        Ok(file.write(bytes)?)
     }
     fn flush(&mut self) -> io::Result<()> {
-        self.locked()?.sync_all()
+        Ok(self.locked()?.sync_all()?)
     }
 }
 #[cfg(feature = "std")]
@@ -415,7 +415,7 @@ impl ResizableStorage for FileStorage {
     fn resize(&mut self, bytes: u64) -> io::Result<()> {
         let file = self.locked()?;
         file.set_len(bytes)?;
-        file.sync_all()
+        Ok(file.sync_all()?)
     }
 }
 

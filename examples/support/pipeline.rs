@@ -1,9 +1,7 @@
 //! Copy orchestration diagnostics and explicit no-clobber publication.
 use partmgr::fs_pipeline::{Completion, FailureState, Layer, Outcome, PipelineReport, Recovery};
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
+use partmgr::io;
+use std::path::{Path, PathBuf};
 
 pub struct CopyPipeline {
     pub report: PipelineReport,
@@ -102,6 +100,7 @@ pub fn publish(
     let barrier = std::fs::File::open(parent)
         .and_then(|file| file.sync_all())
         .map_err(|cause| {
+            let cause: io::Error = cause.into();
             io::Error::new(
                 cause.kind(),
                 PublicationDirectoryFailure {

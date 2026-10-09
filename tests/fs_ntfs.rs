@@ -1,15 +1,13 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, ExtentKind, FileRead, NativeName, Resources},
     fs_ntfs::{NtfsReadLimits, NtfsVolume},
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 struct Image {
@@ -1334,5 +1332,34 @@ fn native_mft_attribute_list_bootstrap_matches_independent_dump() {
         .unwrap();
         assert_eq!(error.kind, kind, "native malformed extension case {case}");
         assert_eq!(r.memory.used(), 0);
+    }
+}
+
+#[test]
+fn disabled_short_names_allow_reads_without_allowing_any_other_volume_flag() {
+    let flags_at = 2048 + 3 * 1024 + 56 + 24 + 10;
+    let mut bytes = fixture();
+    w(&mut bytes, flags_at, 0x0080);
+    let resources = r();
+    let volume = NtfsVolume::open(Arc::new(Image::new(bytes)), limits(), &resources).unwrap();
+    let file = volume.open_file(24, &resources).unwrap();
+    let mut data = [0; 16];
+    assert_eq!(file.read_at(0, &mut data, &resources).unwrap(), 5);
+    assert_eq!(&data[..5], b"hello");
+    for bit in 0..16 {
+        let flag = 1u16 << bit;
+        if flag == 0x0080 {
+            continue;
+        }
+        let mut bytes = fixture();
+        w(&mut bytes, flags_at, 0x0080 | flag);
+        assert_eq!(
+            NtfsVolume::open(Arc::new(Image::new(bytes)), limits(), &resources)
+                .err()
+                .unwrap()
+                .kind,
+            ErrorKind::Unsupported,
+            "flag {flag:#06x}"
+        );
     }
 }

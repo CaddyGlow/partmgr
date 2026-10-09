@@ -1,6 +1,7 @@
 #![cfg(feature = "std")]
 
 //! Explicit external-tool gates: ignored in portable CI, mandatory in tool CI.
+use partmgr::io::{Seek, SeekFrom, Write};
 use partmgr::{
     codec::initialize_plan,
     conversion::{BootCodePolicy, ConversionPolicy, TypeMapping, conversion_plan},
@@ -8,10 +9,7 @@ use partmgr::{
     layout::{DiskLayout, Geometry, GptLayout, LbaRange},
     storage::FileStorage,
 };
-use std::{
-    io::{Seek, SeekFrom, Write},
-    process::Command,
-};
+use std::process::Command;
 fn payload_digest(path: &std::path::Path, offset: u64, length: u64) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     let source = virtdisk::RawDisk::open(path).unwrap();

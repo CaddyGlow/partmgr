@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{
         Budget, Cancellation, ErrorKind, MetadataField, NativeName, Resources, StreamKind,
@@ -8,12 +9,9 @@ use partmgr::{
     fs_exfat_tree::{ExfatTreeLimits, ExfatTreeSource},
     fs_exfat_volume::{ExfatReadLimits, ExfatVolume},
 };
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use virtdisk::ReadAt;
 const SECTOR: usize = 512;

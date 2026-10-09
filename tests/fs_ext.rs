@@ -1,11 +1,12 @@
 #![cfg(feature = "std")]
 
+use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, NativeName, Resources},
     fs_ext::ExtVolume,
 };
 use sha2::{Digest, Sha256};
-use std::{io, process::Command, sync::Arc};
+use std::{process::Command, sync::Arc};
 use virtdisk::ReadAt;
 struct Image(Vec<u8>);
 impl ReadAt for Image {

@@ -4,6 +4,12 @@ The DATA/ADS and attribute-list reader is integrated in `partmgr::fs_ntfs`.
 Integrated checks qualify this source separately from the isolated native receipt.
 This is not full NTFS support. USN framing remains a separate evidence source.
 
+An additional explicit [LZNT1 read profile](filesystem-ntfs-compression.md) uses
+published `ms-compress` through `open_stream_with_compression` and
+`data_streams_with_compression`. Ordinary entry points retain compression
+exclusions. Ownership auditing, capture and native write qualification remain
+separate.
+
 `NtfsVolume::stream_identity(number, resources)` obtains the allocated base-record
 identity for the explicit profile. `data_streams(owner, limits, resources)` returns
 retained bounded exactUTF16 stream descriptors; `open_stream(owner, name, limits,
@@ -35,10 +41,17 @@ security semantics are invented. Native extension resident reserved byte23 was
 observed as0xd6 in independent ntfs-3g output: the explicit profile preserves it as
 opaque, while the existing strict base-record profile remains unchanged.
 
-Remaining requirements are explicit: MFT itself depending on attribute-list
-bootstrap, recursive/split ATTRIBUTE_LIST values, complete native name collation,
+The explicit stream profile bootstraps bounded split `$MFT` allocation.
+`audit_ntfs_resolved` adds whole-volume extension participation and physical
+ownership accounting through the same native map assembler; `directory_resolved`
+accepts resolved index attributes and initialized nonresident bitmaps. See the
+[resolved audit design and evidence boundary](filesystem-ntfs-resolved-audit-design.md)
+and [maintenance inventory](filesystem-maintenance-status.md).
+
+Remaining requirements include broader bootstrap profiles,
+recursive/split ATTRIBUTE_LIST values, complete native name collation,
 compressed/encrypted content and metadata profiles, expanded tree/copy streams,
-resolved extension whole-volume ownership audit, all system streams, full security
+complete ownership qualification across all feature combinations, all system streams, full security
 integration, VSS/persistent snapshots and recoverable native NTFS editing. The old
 reader/tree/audit gates are retained; successful stream reads do not authorize them
 to claim complete capture or clean allocation ownership.

@@ -1,0 +1,2204 @@
+{
+  "version": 1,
+  "profile": "closed-windows-native-ntfs-qualification-v1",
+  "started_utc": "2026-10-13T12:48:20.195314+00:00",
+  "creation_receipt_sha256": "798ac841117f405c4293338074042c94d6df9729fa6fc8440b98cd0d9fb2ac6c",
+  "binary_sha256": "f56b71786d48a4e4267d60145554951c7033f4f762bb8b97aad9f4e3a4eabe15",
+  "commands": [
+    {
+      "name": "tsk-version",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/fls",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout_file": "tsk-version.stdout",
+      "stdout_sha256": "2b47f72ebeac63a5d41ae188abcacbe9e11aa7c386d9a111b6168a1bb2112a6c",
+      "stderr_file": "tsk-version.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "ntfs-version",
+      "command": [
+        "/nix/store/c0sw626h95b2dv1wj5l5fswsc6k6w4x9-ntfs3g-2026.7.7/bin/ntfsinfo",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout_file": "ntfs-version.stdout",
+      "stdout_sha256": "0c5f33d38cd29a2dfe70217acf9822c567acbd007d45eb6eec15d5825d03d6ad",
+      "stderr_file": "ntfs-version.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "ntfs-volume",
+      "command": [
+        "/nix/store/c0sw626h95b2dv1wj5l5fswsc6k6w4x9-ntfs3g-2026.7.7/bin/ntfsinfo",
+        "-m",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd"
+      ],
+      "exit_code": 1,
+      "stdout_file": "ntfs-volume.stdout",
+      "stdout_sha256": "44dc20c9f212d20db1ca2d83b666fd2b3a8ee4cbf7bf3fd89426840d2a791cc1",
+      "stderr_file": "ntfs-volume.stderr",
+      "stderr_sha256": "55cf03d0d77b64830958fb01ea016f2d4efdab98b3acd36fa6202e993d989b0e"
+    },
+    {
+      "name": "tsk-fls",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/fls",
+        "-r",
+        "-p",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd"
+      ],
+      "exit_code": 0,
+      "stdout_file": "tsk-fls.stdout",
+      "stdout_sha256": "3ffb1fa913794a13e5a5e40219d45789c25871875b36740aa2a9f58d46666878",
+      "stderr_file": "tsk-fls.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "inventory-volume",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "inventory-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-inventory-volume",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456"
+      ],
+      "exit_code": 0,
+      "stdout_file": "inventory-volume.stdout",
+      "stdout_sha256": "3f2e5f5e6d5c7ea658e348e54b04a0260ccb53600930e38471e9dc14a2c1b15b",
+      "stderr_file": "inventory-volume.stderr",
+      "stderr_sha256": "612343eb19421087a181dc9c4c2ffc073e819efbe8504b1aa58500598c0dc278"
+    },
+    {
+      "name": "inventory-disk-region",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "inventory-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-disk.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-inventory-disk-region",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456",
+        "--offset",
+        "65536",
+        "--length",
+        "66977792"
+      ],
+      "exit_code": 0,
+      "stdout_file": "inventory-disk-region.stdout",
+      "stdout_sha256": "66614f6955ee3cab68f7333bda9ed32cff9f29487a984610b79a57ca2c75435a",
+      "stderr_file": "inventory-disk-region.stderr",
+      "stderr_sha256": "612343eb19421087a181dc9c4c2ffc073e819efbe8504b1aa58500598c0dc278"
+    },
+    {
+      "name": "qemu-version",
+      "command": [
+        "qemu-img",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout_file": "qemu-version.stdout",
+      "stdout_sha256": "cdcd1282dae4582862470ccb90a27d3a5d724d6da93d26607b586ef69d0cbb95",
+      "stderr_file": "qemu-version.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "qemu-convert",
+      "command": [
+        "qemu-img",
+        "convert",
+        "-f",
+        "raw",
+        "-O",
+        "qcow2",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-disk.dd",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/disk.qcow2"
+      ],
+      "exit_code": 0,
+      "stdout_file": "qemu-convert.stdout",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_file": "qemu-convert.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "inventory-qcow2",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "inventory-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/disk.qcow2",
+        "--format",
+        "qcow2",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-inventory-qcow2",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456",
+        "--offset",
+        "65536",
+        "--length",
+        "66977792"
+      ],
+      "exit_code": 0,
+      "stdout_file": "inventory-qcow2.stdout",
+      "stdout_sha256": "4ab7fde4db1875d22afa44265875bfd74f2210c8302857d6b9a6629eb9e87ff6",
+      "stderr_file": "inventory-qcow2.stderr",
+      "stderr_sha256": "612343eb19421087a181dc9c4c2ffc073e819efbe8504b1aa58500598c0dc278"
+    },
+    {
+      "name": "negative-bad-fixup",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "inventory-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/bad-fixup-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-negative-bad-fixup",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456"
+      ],
+      "exit_code": 0,
+      "stdout_file": "negative-bad-fixup.stdout",
+      "stdout_sha256": "37f89fc9fbb0882998f45f471480282acc48ae2d5fed014d880b05c23cc54a50",
+      "stderr_file": "negative-bad-fixup.stderr",
+      "stderr_sha256": "612343eb19421087a181dc9c4c2ffc073e819efbe8504b1aa58500598c0dc278"
+    },
+    {
+      "name": "negative-mirror-conflict",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "inventory-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/mirror-conflict-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-negative-mirror-conflict",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456"
+      ],
+      "exit_code": 0,
+      "stdout_file": "negative-mirror-conflict.stdout",
+      "stdout_sha256": "8eb09bcf857391b903efca6aebe4c7750da5989d45080cbd3ef9a3a75bcaafd8",
+      "stderr_file": "negative-mirror-conflict.stderr",
+      "stderr_sha256": "612343eb19421087a181dc9c4c2ffc073e819efbe8504b1aa58500598c0dc278"
+    },
+    {
+      "name": "negative-truncated",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "inventory-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/truncated-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-negative-truncated",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456"
+      ],
+      "exit_code": 2,
+      "stdout_file": "negative-truncated.stdout",
+      "stdout_sha256": "e11a7508f985d55f1e450d0b87d80f73649f8affe5ce52c5a348ccac38496d8f",
+      "stderr_file": "negative-truncated.stderr",
+      "stderr_sha256": "5f938cdad73045771abd83830c2a7f36177a0441dc3d126544bf26542a097bb8"
+    },
+    {
+      "name": "extract-0",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "extract-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-extract-0",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456",
+        "--record",
+        "38",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/live-output-0"
+      ],
+      "exit_code": 0,
+      "stdout_file": "extract-0.stdout",
+      "stdout_sha256": "65dde67c73830ad111e014640231602890a6537f1ee2c1ed1b1e0628316f83d6",
+      "stderr_file": "extract-0.stderr",
+      "stderr_sha256": "b14e3297690e3d7d185db3982faaf897492e3900ec0d56ec495f91838a37e688"
+    },
+    {
+      "name": "icat-0",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "38-128-3"
+      ],
+      "exit_code": 0,
+      "stdout_file": "icat-0.stdout",
+      "stdout_sha256": "b030dd7f20a60afd578542f4184685ebdc692d8fedb75c19d71810ef49fbce28",
+      "stderr_file": "icat-0.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "extract-1",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "extract-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-extract-1",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456",
+        "--record",
+        "39",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/live-output-1"
+      ],
+      "exit_code": 0,
+      "stdout_file": "extract-1.stdout",
+      "stdout_sha256": "9dbe790b09493d65511b718477197c6cfa82b9e8110d99a75ed756892ff8555c",
+      "stderr_file": "extract-1.stderr",
+      "stderr_sha256": "07607dade15d3680a5c1e3d870704f952397db5e3012f07c98489d40a5d60bba"
+    },
+    {
+      "name": "icat-1",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "39-128-1"
+      ],
+      "exit_code": 0,
+      "stdout_file": "icat-1.stdout",
+      "stdout_sha256": "4f4e954b8245dd1a8e7caac18e80015fbd134946a44b5ef92a99247bd3c509bf",
+      "stderr_file": "icat-1.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "extract-2",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "extract-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-extract-2",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456",
+        "--record",
+        "40",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/live-output-2",
+        "--allow-lznt1"
+      ],
+      "exit_code": 0,
+      "stdout_file": "extract-2.stdout",
+      "stdout_sha256": "6529b222c4cd28133f9b09d417a6f40eb5f91c79e1c120f3b160093da8d7e547",
+      "stderr_file": "extract-2.stderr",
+      "stderr_sha256": "225a8a1c00c94f2252f63690acb5f24ac9fc93ca02b85b5c5f022f0146c9d5db"
+    },
+    {
+      "name": "icat-2",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "40-128-3"
+      ],
+      "exit_code": 0,
+      "stdout_file": "icat-2.stdout",
+      "stdout_sha256": "4f505dc9cd3e95f011f2b93687ab4198637499b72e6a6995193c38f2152f369b",
+      "stderr_file": "icat-2.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "extract-3",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "extract-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-extract-3",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456",
+        "--record",
+        "41",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/live-output-3"
+      ],
+      "exit_code": 0,
+      "stdout_file": "extract-3.stdout",
+      "stdout_sha256": "1ba365252d2361a090d014835b408c78f2403d8c886898f5ca28350de4451f5c",
+      "stderr_file": "extract-3.stderr",
+      "stderr_sha256": "07607dade15d3680a5c1e3d870704f952397db5e3012f07c98489d40a5d60bba"
+    },
+    {
+      "name": "icat-3",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "41-128-3"
+      ],
+      "exit_code": 0,
+      "stdout_file": "icat-3.stdout",
+      "stdout_sha256": "a84110ba442965934478d1d9fc497b67e630f2c47d2d942e3bb37ba390a2b74e",
+      "stderr_file": "icat-3.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "extract-4",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "extract-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-extract-4",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456",
+        "--record",
+        "42",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/live-output-4"
+      ],
+      "exit_code": 0,
+      "stdout_file": "extract-4.stdout",
+      "stdout_sha256": "8fe1de34e0d632b9270fb87cb6f50c07d7377dd5696fa9680debb98b398e761b",
+      "stderr_file": "extract-4.stderr",
+      "stderr_sha256": "07607dade15d3680a5c1e3d870704f952397db5e3012f07c98489d40a5d60bba"
+    },
+    {
+      "name": "icat-4",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "42-128-1"
+      ],
+      "exit_code": 0,
+      "stdout_file": "icat-4.stdout",
+      "stdout_sha256": "9eb443827a4a315dd20fb89c14fd9005c0b2572242535e8eb280fde691d58cbe",
+      "stderr_file": "icat-4.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "extract-5",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "extract-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-extract-5",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456",
+        "--record",
+        "38",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/live-output-5",
+        "--stream-name-utf16",
+        "66,6f,72,65,6e,73,69,63,2d,61,64,73"
+      ],
+      "exit_code": 0,
+      "stdout_file": "extract-5.stdout",
+      "stdout_sha256": "10e24a8f401d18f72d0a00b3c5a6be3a1c9cb56203c8fe627b84e306bf1320d7",
+      "stderr_file": "extract-5.stderr",
+      "stderr_sha256": "07607dade15d3680a5c1e3d870704f952397db5e3012f07c98489d40a5d60bba"
+    },
+    {
+      "name": "icat-5",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "38-128-4"
+      ],
+      "exit_code": 0,
+      "stdout_file": "icat-5.stdout",
+      "stdout_sha256": "2dfb693a178b33c39f8a5e8e65e9778bd553c9d65810355aa6f4ee4387d48b7b",
+      "stderr_file": "icat-5.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "timeline",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "timeline-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-timeline",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456"
+      ],
+      "exit_code": 0,
+      "stdout_file": "timeline.stdout",
+      "stdout_sha256": "dd97962bd8fabf5934f2d0e6e24bdcb39a75c9ef9d3560e94fd193dcaf31367f",
+      "stderr_file": "timeline.stderr",
+      "stderr_sha256": "612343eb19421087a181dc9c4c2ffc073e819efbe8504b1aa58500598c0dc278"
+    },
+    {
+      "name": "istat-38",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/istat",
+        "-z",
+        "UTC",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "38"
+      ],
+      "exit_code": 0,
+      "stdout_file": "istat-38.stdout",
+      "stdout_sha256": "ba3c9a7011717e6c7910d4a55486926deef43154ffc2585d890cc21ab8725726",
+      "stderr_file": "istat-38.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "istat-39",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/istat",
+        "-z",
+        "UTC",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "39"
+      ],
+      "exit_code": 0,
+      "stdout_file": "istat-39.stdout",
+      "stdout_sha256": "510c952b2ccba2f5d2d1fab39a2f03ba76f120aeb1373d783154749e88bdf29a",
+      "stderr_file": "istat-39.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "istat-40",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/istat",
+        "-z",
+        "UTC",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "40"
+      ],
+      "exit_code": 0,
+      "stdout_file": "istat-40.stdout",
+      "stdout_sha256": "ad7e3a7aa4ec51cf6ba5bf1e21c4a3e8acaf2adc6722e1343311a6d133041be5",
+      "stderr_file": "istat-40.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "istat-41",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/istat",
+        "-z",
+        "UTC",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "41"
+      ],
+      "exit_code": 0,
+      "stdout_file": "istat-41.stdout",
+      "stdout_sha256": "c4b6e28cc9bd2a8a188fd54f0c7c6fa086a3360e6041042f2a01cd7181186c97",
+      "stderr_file": "istat-41.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "istat-42",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/istat",
+        "-z",
+        "UTC",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "42"
+      ],
+      "exit_code": 0,
+      "stdout_file": "istat-42.stdout",
+      "stdout_sha256": "366b0b7035e07a86b954c0ccba17e82fc14aba26db1ae64f85660c3010d121db",
+      "stderr_file": "istat-42.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "recover-deleted",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "recover-ntfs",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-recover-deleted",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456",
+        "--record",
+        "45",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/deleted-output"
+      ],
+      "exit_code": 0,
+      "stdout_file": "recover-deleted.stdout",
+      "stdout_sha256": "606ccced61ee14f18b40ecd5ab3ae5135aaa1ce63e3b43485ed809162b3a3dd9",
+      "stderr_file": "recover-deleted.stderr",
+      "stderr_sha256": "5053c3df08873d62e589c40bab1f7a1681c6c2cc15b3faf4d31682a6e8b9e2b4"
+    },
+    {
+      "name": "icat-deleted",
+      "command": [
+        "/nix/store/4nb6hz08a0bw424zdr9kg6lqjfswkp6w-sleuthkit-4.14.0/bin/icat",
+        "-r",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "45-128-3"
+      ],
+      "exit_code": 0,
+      "stdout_file": "icat-deleted.stdout",
+      "stdout_sha256": "9f1dcbc35c350d6027f98be0f5c8b43b42ca52b7604459c0c42be3aa88913d47",
+      "stderr_file": "icat-deleted.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "usn",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "inspect-usn",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-usn",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456"
+      ],
+      "exit_code": 0,
+      "stdout_file": "usn.stdout",
+      "stdout_sha256": "fdc8a892004d57b10385dbd09df61a337b3fd266cbeac7e3d4fa135129fff77c",
+      "stderr_file": "usn.stderr",
+      "stderr_sha256": "41206a9bdfd13f60dd5230abfa9f775a49c1fce72eff7ab57a814bf38ca1b91a"
+    },
+    {
+      "name": "logfile",
+      "command": [
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-qualification-c-final/partmgr-forensics",
+        "inspect-logfile",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-dirty-rollover-20261013-c-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "windows-native-logfile",
+        "--stability-provider",
+        "closed-detached-private-artifact",
+        "--records",
+        "65536",
+        "--read-bytes",
+        "1073741824",
+        "--output-bytes",
+        "67108864",
+        "--memory-bytes",
+        "268435456"
+      ],
+      "exit_code": 0,
+      "stdout_file": "logfile.stdout",
+      "stdout_sha256": "5a852227b1772efd7127b1e8aed323333867bf16005fdf76990afb200e7dd7e7",
+      "stderr_file": "logfile.stderr",
+      "stderr_sha256": "a1b18f2cf0c1a757f2e20628ba8fd0ba495e64898786ab29b3dee2666885cf1b"
+    }
+  ],
+  "checks": {
+    "windows_fixture_creation": {
+      "passed": true,
+      "os": "Microsoft Windows NT 10.0.26200.0",
+      "script_sha256": "cea5d74672efc7e7e5b0fc97ed0414b068f64627035bcb1692f97217603ef620",
+      "consistency": "private filesystem; all test handles closed and native volume dismounted before VHD detach; no live-media capture claim",
+      "stability": "closed detached private fixed-VHD and copied raw artifacts; keep artifacts immutable during deferred analysis"
+    },
+    "native_hash_fixture.vhd": {
+      "passed": true
+    },
+    "native_hash_disk.dd": {
+      "passed": true
+    },
+    "native_hash_volume.dd": {
+      "passed": true
+    },
+    "native_hash_usn-native.csv": {
+      "passed": true
+    },
+    "native_hash_runner.ps1": {
+      "passed": true
+    },
+    "independent_namespace_completed": {
+      "passed": true
+    },
+    "inventory_volume": {
+      "passed": true,
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-mft-slots/logical-stream",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 262144
+        },
+        "unvisited": {
+          "offset": 262144,
+          "length": 0
+        },
+        "observations": 256,
+        "coverage_events": 256,
+        "complete": true,
+        "last_delivered": 262144,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "inventory_disk-region": {
+      "passed": true,
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-mft-slots/logical-stream",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 262144
+        },
+        "unvisited": {
+          "offset": 262144,
+          "length": 0
+        },
+        "observations": 256,
+        "coverage_events": 256,
+        "complete": true,
+        "last_delivered": 262144,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "derived_container_created": {
+      "passed": true,
+      "qemu_version": "qemu-img version 10.2.4\nCopyright (c) 2003-2025 Fabrice Bellard and the QEMU Project developers"
+    },
+    "inventory_qcow2": {
+      "passed": true,
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-mft-slots/logical-stream",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 262144
+        },
+        "unvisited": {
+          "offset": 262144,
+          "length": 0
+        },
+        "observations": 256,
+        "coverage_events": 256,
+        "complete": true,
+        "last_delivered": 262144,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      },
+      "container_sha256_before": "13ef7917e18631a1c608ca3100f6f997aefd722f2e534b94d34aac2eb649dbbc",
+      "container_sha256_after": "13ef7917e18631a1c608ca3100f6f997aefd722f2e534b94d34aac2eb649dbbc"
+    },
+    "backend_independent_inventory": {
+      "passed": true,
+      "backends": [
+        "volume",
+        "disk-region",
+        "qcow2"
+      ],
+      "compared_fields": [
+        "slot",
+        "raw_hex",
+        "allocated_bitmap_bit",
+        "sequence",
+        "file_in_use",
+        "base_reference",
+        "validation"
+      ],
+      "source_identities_preserved_separately": true
+    },
+    "native_bad_fixup_raw_preservation": {
+      "passed": true,
+      "derivation": "copy native volume; xor1 at selected FILE second USA trailer",
+      "selected_record": 38,
+      "source_offset": 22363134,
+      "derived_sha256": "7ed67a256d125e3603e849daf4ef3912da72ec581f4c67b622221e516a3ca2ab",
+      "raw_validation_error": "InvalidData: NTFS audit mirror torn record",
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-mft-slots/logical-stream",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 262144
+        },
+        "unvisited": {
+          "offset": 262144,
+          "length": 0
+        },
+        "observations": 256,
+        "coverage_events": 256,
+        "complete": true,
+        "last_delivered": 262144,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "native_mirror_disagreement": {
+      "passed": true,
+      "derivation": "copy native volume; xor1 in mirror record0 unused bytes, leaving USA valid",
+      "source_offset": 9192,
+      "derived_sha256": "9177b4d176b9953061a3465ba34795e656f932d1ac1eeb9625a014b4139c2e34",
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-mft-slots/logical-stream",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 262144
+        },
+        "unvisited": {
+          "offset": 262144,
+          "length": 0
+        },
+        "observations": 256,
+        "coverage_events": 256,
+        "complete": true,
+        "last_delivered": 262144,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "native_truncation_before_first_observation": {
+      "passed": true,
+      "derivation": "first4096 bytes of closed native volume; declared geometry retained",
+      "derived_sha256": "19f67d51e1f94fd5c25f2a3c253087dbd3b9b1ae2f392d1f2ab945fcfd8bdd3c",
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-mft-slots/bootstrap",
+        "source_id": 1,
+        "coordinate_space": "volume_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 4096
+        },
+        "unvisited": {
+          "offset": 0,
+          "length": 4096
+        },
+        "observations": 0,
+        "coverage_events": 0,
+        "complete": false,
+        "last_delivered": null,
+        "stop_reason": "invalid_bootstrap",
+        "resource_ceiling": null,
+        "causes": [
+          "InvalidData: NTFS declared volume range",
+          "InvalidData: NTFS declared volume range"
+        ]
+      }
+    },
+    "native_record_reuse": {
+      "passed": true,
+      "native_victim": {
+        "kind": "deleted-before-record-reuse-search",
+        "relative_name": "reuse-victim.bin",
+        "native_id_hex": "0000000000000000000100000000002b",
+        "record": 43,
+        "sequence": 1,
+        "length": 8192,
+        "sha256": "b7857819da8fc9358221176b245baac0c3290ccb7bb15ed79bf213e05077bfd7"
+      },
+      "native_current": {
+        "kind": "record-reuse-search",
+        "relative_name": "reuse\\r0000.bin",
+        "native_id_hex": "0000000000000000000200000000002b",
+        "record": 43,
+        "sequence": 2,
+        "length": 512,
+        "sha256": "be4ac43ca5092ee517e5b6a26ffb35cd4619a21a44efff5e8ed514bc778fa287"
+      }
+    },
+    "native_dirty_volume_readonly_inventory": {
+      "passed": true,
+      "native_dirty_query": "Volume - E: is Dirty",
+      "raw_volume_flags": [
+        385
+      ]
+    },
+    "native_deleted_record": {
+      "passed": true,
+      "record": 45,
+      "raw_evidence_preserved": true
+    },
+    "live_stream_live.bin": {
+      "passed": true,
+      "native_sha256": "b030dd7f20a60afd578542f4184685ebdc692d8fedb75c19d71810ef49fbce28",
+      "framework_sha256": "b030dd7f20a60afd578542f4184685ebdc692d8fedb75c19d71810ef49fbce28",
+      "tsk_sha256": "b030dd7f20a60afd578542f4184685ebdc692d8fedb75c19d71810ef49fbce28",
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-live-stream/logical-bytes",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 131072
+        },
+        "unvisited": {
+          "offset": 131072,
+          "length": 0
+        },
+        "observations": 1,
+        "coverage_events": 2,
+        "complete": true,
+        "last_delivered": 131072,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "live_stream_resident.txt": {
+      "passed": true,
+      "native_sha256": "4f4e954b8245dd1a8e7caac18e80015fbd134946a44b5ef92a99247bd3c509bf",
+      "framework_sha256": "4f4e954b8245dd1a8e7caac18e80015fbd134946a44b5ef92a99247bd3c509bf",
+      "tsk_sha256": "4f4e954b8245dd1a8e7caac18e80015fbd134946a44b5ef92a99247bd3c509bf",
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-live-stream/logical-bytes",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 32
+        },
+        "unvisited": {
+          "offset": 32,
+          "length": 0
+        },
+        "observations": 1,
+        "coverage_events": 1,
+        "complete": true,
+        "last_delivered": 32,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "live_stream_compressed.bin": {
+      "passed": true,
+      "native_sha256": "4f505dc9cd3e95f011f2b93687ab4198637499b72e6a6995193c38f2152f369b",
+      "framework_sha256": "4f505dc9cd3e95f011f2b93687ab4198637499b72e6a6995193c38f2152f369b",
+      "tsk_sha256": "4f505dc9cd3e95f011f2b93687ab4198637499b72e6a6995193c38f2152f369b",
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-live-stream/logical-bytes",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 262144
+        },
+        "unvisited": {
+          "offset": 262144,
+          "length": 0
+        },
+        "observations": 4,
+        "coverage_events": 4,
+        "complete": true,
+        "last_delivered": 262144,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "live_stream_sparse.bin": {
+      "passed": true,
+      "native_sha256": "a84110ba442965934478d1d9fc497b67e630f2c47d2d942e3bb37ba390a2b74e",
+      "framework_sha256": "a84110ba442965934478d1d9fc497b67e630f2c47d2d942e3bb37ba390a2b74e",
+      "tsk_sha256": "a84110ba442965934478d1d9fc497b67e630f2c47d2d942e3bb37ba390a2b74e",
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-live-stream/logical-bytes",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 32768
+        },
+        "unvisited": {
+          "offset": 32768,
+          "length": 0
+        },
+        "observations": 1,
+        "coverage_events": 1,
+        "complete": true,
+        "last_delivered": 32768,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "live_stream_renamed.txt": {
+      "passed": true,
+      "native_sha256": "9eb443827a4a315dd20fb89c14fd9005c0b2572242535e8eb280fde691d58cbe",
+      "framework_sha256": "9eb443827a4a315dd20fb89c14fd9005c0b2572242535e8eb280fde691d58cbe",
+      "tsk_sha256": "9eb443827a4a315dd20fb89c14fd9005c0b2572242535e8eb280fde691d58cbe",
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-live-stream/logical-bytes",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 21
+        },
+        "unvisited": {
+          "offset": 21,
+          "length": 0
+        },
+        "observations": 1,
+        "coverage_events": 1,
+        "complete": true,
+        "last_delivered": 21,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "live_stream_live.bin:forensic-ads": {
+      "passed": true,
+      "native_sha256": "2dfb693a178b33c39f8a5e8e65e9778bd553c9d65810355aa6f4ee4387d48b7b",
+      "framework_sha256": "2dfb693a178b33c39f8a5e8e65e9778bd553c9d65810355aa6f4ee4387d48b7b",
+      "tsk_sha256": "2dfb693a178b33c39f8a5e8e65e9778bd553c9d65810355aa6f4ee4387d48b7b",
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-live-stream/logical-bytes",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 22
+        },
+        "unvisited": {
+          "offset": 22,
+          "length": 0
+        },
+        "observations": 1,
+        "coverage_events": 1,
+        "complete": true,
+        "last_delivered": 22,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "timeline_traversal": {
+      "passed": true,
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-mft-slots/logical-stream",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 262144
+        },
+        "unvisited": {
+          "offset": 262144,
+          "length": 0
+        },
+        "observations": 256,
+        "coverage_events": 256,
+        "complete": true,
+        "last_delivered": 262144,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "both_timestamp_sets_live.bin": {
+      "passed": true,
+      "precision_100ns": 1,
+      "native_tsk_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861452563880
+        ],
+        "ntfs_standard_modified": [
+          17918861452714612
+        ],
+        "ntfs_standard_changed": [
+          17918861452714612
+        ],
+        "ntfs_standard_accessed": [
+          17918861535458680
+        ],
+        "ntfs_name_created": [
+          17918861452563880
+        ],
+        "ntfs_name_modified": [
+          17918861452563880
+        ],
+        "ntfs_name_changed": [
+          17918861452563880
+        ],
+        "ntfs_name_accessed": [
+          17918861452563880
+        ]
+      },
+      "framework_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861452563880
+        ],
+        "ntfs_standard_modified": [
+          17918861452714612
+        ],
+        "ntfs_standard_changed": [
+          17918861452714612
+        ],
+        "ntfs_standard_accessed": [
+          17918861535458680
+        ],
+        "ntfs_name_created": [
+          17918861452563880
+        ],
+        "ntfs_name_modified": [
+          17918861452563880
+        ],
+        "ntfs_name_changed": [
+          17918861452563880
+        ],
+        "ntfs_name_accessed": [
+          17918861452563880
+        ]
+      }
+    },
+    "both_timestamp_sets_resident.txt": {
+      "passed": true,
+      "precision_100ns": 1,
+      "native_tsk_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861452671570
+        ],
+        "ntfs_standard_modified": [
+          17918861452671570
+        ],
+        "ntfs_standard_changed": [
+          17918861452671570
+        ],
+        "ntfs_standard_accessed": [
+          17918861535646456
+        ],
+        "ntfs_name_created": [
+          17918861452671570
+        ],
+        "ntfs_name_modified": [
+          17918861452671570
+        ],
+        "ntfs_name_changed": [
+          17918861452671570
+        ],
+        "ntfs_name_accessed": [
+          17918861452671570
+        ]
+      },
+      "framework_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861452671570
+        ],
+        "ntfs_standard_modified": [
+          17918861452671570
+        ],
+        "ntfs_standard_changed": [
+          17918861452671570
+        ],
+        "ntfs_standard_accessed": [
+          17918861535646456
+        ],
+        "ntfs_name_created": [
+          17918861452671570
+        ],
+        "ntfs_name_modified": [
+          17918861452671570
+        ],
+        "ntfs_name_changed": [
+          17918861452671570
+        ],
+        "ntfs_name_accessed": [
+          17918861452671570
+        ]
+      }
+    },
+    "both_timestamp_sets_compressed.bin": {
+      "passed": true,
+      "precision_100ns": 1,
+      "native_tsk_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861454590392
+        ],
+        "ntfs_standard_modified": [
+          17918861454590392
+        ],
+        "ntfs_standard_changed": [
+          17918861454590392
+        ],
+        "ntfs_standard_accessed": [
+          17918861535806410
+        ],
+        "ntfs_name_created": [
+          17918861454590392
+        ],
+        "ntfs_name_modified": [
+          17918861454590392
+        ],
+        "ntfs_name_changed": [
+          17918861454590392
+        ],
+        "ntfs_name_accessed": [
+          17918861454590392
+        ]
+      },
+      "framework_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861454590392
+        ],
+        "ntfs_standard_modified": [
+          17918861454590392
+        ],
+        "ntfs_standard_changed": [
+          17918861454590392
+        ],
+        "ntfs_standard_accessed": [
+          17918861535806410
+        ],
+        "ntfs_name_created": [
+          17918861454590392
+        ],
+        "ntfs_name_modified": [
+          17918861454590392
+        ],
+        "ntfs_name_changed": [
+          17918861454590392
+        ],
+        "ntfs_name_accessed": [
+          17918861454590392
+        ]
+      }
+    },
+    "both_timestamp_sets_sparse.bin": {
+      "passed": true,
+      "precision_100ns": 1,
+      "native_tsk_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861455305845
+        ],
+        "ntfs_standard_modified": [
+          17918861455564635
+        ],
+        "ntfs_standard_changed": [
+          17918861455564635
+        ],
+        "ntfs_standard_accessed": [
+          17918861535947556
+        ],
+        "ntfs_name_created": [
+          17918861455305845
+        ],
+        "ntfs_name_modified": [
+          17918861455305845
+        ],
+        "ntfs_name_changed": [
+          17918861455305845
+        ],
+        "ntfs_name_accessed": [
+          17918861455305845
+        ]
+      },
+      "framework_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861455305845
+        ],
+        "ntfs_standard_modified": [
+          17918861455564635
+        ],
+        "ntfs_standard_changed": [
+          17918861455564635
+        ],
+        "ntfs_standard_accessed": [
+          17918861535947556
+        ],
+        "ntfs_name_created": [
+          17918861455305845
+        ],
+        "ntfs_name_modified": [
+          17918861455305845
+        ],
+        "ntfs_name_changed": [
+          17918861455305845
+        ],
+        "ntfs_name_accessed": [
+          17918861455305845
+        ]
+      }
+    },
+    "both_timestamp_sets_renamed.txt": {
+      "passed": true,
+      "precision_100ns": 1,
+      "native_tsk_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861455564635
+        ],
+        "ntfs_standard_modified": [
+          17918861455607727
+        ],
+        "ntfs_standard_changed": [
+          17918861455662482
+        ],
+        "ntfs_standard_accessed": [
+          17918861536113463
+        ],
+        "ntfs_name_created": [
+          17918861455564635
+        ],
+        "ntfs_name_modified": [
+          17918861455607727
+        ],
+        "ntfs_name_changed": [
+          17918861455607727
+        ],
+        "ntfs_name_accessed": [
+          17918861455607727
+        ]
+      },
+      "framework_unix_ticks": {
+        "ntfs_standard_created": [
+          17918861455564635
+        ],
+        "ntfs_standard_modified": [
+          17918861455607727
+        ],
+        "ntfs_standard_changed": [
+          17918861455662482
+        ],
+        "ntfs_standard_accessed": [
+          17918861536113463
+        ],
+        "ntfs_name_created": [
+          17918861455564635
+        ],
+        "ntfs_name_modified": [
+          17918861455607727
+        ],
+        "ntfs_name_changed": [
+          17918861455607727
+        ],
+        "ntfs_name_accessed": [
+          17918861455607727
+        ]
+      }
+    },
+    "deleted_current_bytes_and_qualifications": {
+      "passed": true,
+      "original_native_sha256": "abf41343a79ca1ae63b6abb969f51f51166eaf748135c942ff99a64033275d6a",
+      "current_framework_sha256": "9f1dcbc35c350d6027f98be0f5c8b43b42ca52b7604459c0c42be3aa88913d47",
+      "current_tsk_sha256": "9f1dcbc35c350d6027f98be0f5c8b43b42ca52b7604459c0c42be3aa88913d47",
+      "original_content_matches": false,
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "candidate-extraction-v1",
+        "source_id": null,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 8192
+        },
+        "unvisited": {
+          "offset": 8192,
+          "length": 0
+        },
+        "observations": 1,
+        "coverage_events": 1,
+        "complete": true,
+        "last_delivered": 8192,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "usn_traversal": {
+      "passed": true,
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-usn/$J-logical-stream",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 8908552
+        },
+        "unvisited": {
+          "offset": 8908552,
+          "length": 0
+        },
+        "observations": 16583,
+        "coverage_events": 16580,
+        "complete": true,
+        "last_delivered": 8908552,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "native_rollover_sparse_prefix": {
+      "passed": true,
+      "native_first_usn": 7602176,
+      "sparse_prefixes": [
+        {
+          "offset": 0,
+          "length": 7602176
+        }
+      ],
+      "native_writes": 50000
+    },
+    "native_max_retention_metadata": {
+      "passed": true,
+      "native_fields": {
+        "journal_id": 134363597451259302,
+        "lowest_valid_usn": 0,
+        "maximum_size": 1048576,
+        "allocation_delta": 262144
+      },
+      "framework_fields": [
+        {
+          "version": 1,
+          "type": "usn_max",
+          "raw_hex": "00001000000000000000040000000000a66dd3e0fa5add010000000000000000",
+          "validated": true,
+          "maximum_size": 1048576,
+          "allocation_delta": 262144,
+          "journal_id": "134363597451259302",
+          "lowest_valid_usn": 0
+        }
+      ]
+    },
+    "native_usn_known_operations": {
+      "passed": true,
+      "native_record_count": 14667,
+      "framework_record_count": 14671,
+      "native_records_not_matching": [],
+      "additional_close_time_usns": [
+        8908200,
+        8908288,
+        8908376,
+        8908464
+      ],
+      "native_readjournal_may_upconvert_v2_to_v3": true,
+      "compared_fields": [
+        "USN",
+        "native UTF16 name",
+        "reason bits",
+        "native file ID",
+        "native parent ID"
+      ],
+      "timestamp_timezone_not_inferred": true
+    },
+    "logfile_separate_no_replay": {
+      "passed": true,
+      "terminal": {
+        "version": 1,
+        "type": "terminal",
+        "profile": "ntfs-logfile/restart-copies",
+        "source_id": 1,
+        "coordinate_space": "logical_stream_bytes",
+        "domain": {
+          "offset": 0,
+          "length": 8192
+        },
+        "unvisited": {
+          "offset": 8192,
+          "length": 0
+        },
+        "observations": 1,
+        "coverage_events": 2,
+        "complete": true,
+        "last_delivered": 8192,
+        "stop_reason": "completed",
+        "resource_ceiling": null,
+        "causes": []
+      }
+    },
+    "immutable_fixture.vhd": {
+      "passed": true
+    },
+    "immutable_disk.dd": {
+      "passed": true
+    },
+    "immutable_volume.dd": {
+      "passed": true
+    },
+    "immutable_usn-native.csv": {
+      "passed": true
+    },
+    "immutable_runner.ps1": {
+      "passed": true
+    }
+  },
+  "native_artifact_hashes": {
+    "fixture.vhd": {
+      "domain": "original_fixed_vhd_container_bytes",
+      "native_sha256": "0324d30801f9d05277c756303b30a186d881019d3744623b75389205a0be841c",
+      "before_sha256": "0324d30801f9d05277c756303b30a186d881019d3744623b75389205a0be841c",
+      "bytes": 67109376,
+      "after_sha256": "0324d30801f9d05277c756303b30a186d881019d3744623b75389205a0be841c"
+    },
+    "disk.dd": {
+      "domain": "logical_disk_bytes",
+      "native_sha256": "c4935522285afdeaa685232f94050112d5737a547a39e403f373f69b26ff8409",
+      "before_sha256": "c4935522285afdeaa685232f94050112d5737a547a39e403f373f69b26ff8409",
+      "bytes": 67108864,
+      "after_sha256": "c4935522285afdeaa685232f94050112d5737a547a39e403f373f69b26ff8409"
+    },
+    "volume.dd": {
+      "domain": "selected_ntfs_volume_bytes",
+      "native_sha256": "4538cd9a2b5701787924e3a66d7d00a2743fc0cc7f10e3dc28db6020a9508a33",
+      "before_sha256": "4538cd9a2b5701787924e3a66d7d00a2743fc0cc7f10e3dc28db6020a9508a33",
+      "bytes": 66977792,
+      "after_sha256": "4538cd9a2b5701787924e3a66d7d00a2743fc0cc7f10e3dc28db6020a9508a33"
+    },
+    "usn-native.csv": {
+      "domain": "native_fsutil_oracle_export_bytes",
+      "native_sha256": "8cf978f59f5baeb2f3aebf8facb196737ccbbc76e81fa697ca564c9165f1eac7",
+      "before_sha256": "8cf978f59f5baeb2f3aebf8facb196737ccbbc76e81fa697ca564c9165f1eac7",
+      "bytes": 2860604,
+      "after_sha256": "8cf978f59f5baeb2f3aebf8facb196737ccbbc76e81fa697ca564c9165f1eac7"
+    },
+    "runner.ps1": {
+      "domain": "fixture_creation_script_bytes",
+      "native_sha256": "cea5d74672efc7e7e5b0fc97ed0414b068f64627035bcb1692f97217603ef620",
+      "before_sha256": "cea5d74672efc7e7e5b0fc97ed0414b068f64627035bcb1692f97217603ef620",
+      "bytes": 11622,
+      "after_sha256": "cea5d74672efc7e7e5b0fc97ed0414b068f64627035bcb1692f97217603ef620"
+    }
+  },
+  "passed": true,
+  "qualifier_sha256": "46d1567851d5d11ccd1b5a8c9b91d654dfc062c6f0d16390f478b2ec8b45fd54",
+  "library_source_sha256": {
+    "src/bitlocker.rs": "a0a38f058f0dcc754f04b082eec5319ee45d8cee2ced7572e7d9fb3410bb3f4d",
+    "src/bitlocker_crypto.rs": "d608014bff824fa0e59e84e9aecc787b1e360d85a21358804d4d839889f9c327",
+    "src/bitlocker_disk.rs": "8611d5b83403261e26461624d4d0f7ea90eda227127df003b0fe49f19103f4aa",
+    "src/bitlocker_swtpm.rs": "bbd2d826827f02a88de98f23eec3a80ca1bf7e97675346e98f22fb2a9a4a0f2d",
+    "src/bitlocker_tpm.rs": "59471a2b4de1f4061e402ebca0855c0da439aa1d8303c6eb7db577f5ebf01b4e",
+    "src/bitlocker_tpm_host.rs": "28f62baa768982227dcc90d33757278ab58cc5e290180dcfbeb9b3b4555eb331",
+    "src/bitlocker_write.rs": "fa403776efbfec52ed61371b14101deb072837e57e7cbbc1eaf3af31e18383fe",
+    "src/codec.rs": "e4204e228b13a6c7be71e30cf377283e86cfb1d14e415f690324a917be5bb977",
+    "src/conversion.rs": "f943db7abfe7f745761a9ddcd19e04eacb56e82597d60bd7192006c0a4a37e32",
+    "src/editor.rs": "132ce5c3ef9cc80f955e12c123eea878d747a2bb2a66699c9de3c4cf8b48fd66",
+    "src/error.rs": "ca5cc2377f086155e1327e8890e1ecfa04acb080f959e60d3b9365484f39087d",
+    "src/extended.rs": "b652f16e97911ecd6a9fbacb136b61adad9d3e0c2123f614aba873c5a8c7188a",
+    "src/forensics.rs": "da757f4dd5729aa21468caf3e2fcade80d828ab2cac2ba41e5415eec6cca5e1a",
+    "src/forensics_export.rs": "644327eaa69e32432522c44ca8e46dd8dd7126ea870c6529155057e67305d104",
+    "src/forensics_extract.rs": "005082c615b60a2956a8efaf14c3b3c60154ce8e8024f54b140f9b69613210a7",
+    "src/forensics_fat.rs": "d287d300d6e0e020232dfb1d6ee19ea41fecae5c2d752b41d00744f95a3959eb",
+    "src/forensics_fat_copies.rs": "3e478d7ca30c277a051f82eb9f705c397309c18fb218666fe496679dddacc6ab",
+    "src/forensics_fat_extract.rs": "a298fc7963c82c887dfc90e9b02411699d762b45511ed6cbc17a7b6ebc143065",
+    "src/forensics_host.rs": "7cd0a1748b4c69ef456effe39442a6ded13c828d57e31d47bfee462e807d8291",
+    "src/forensics_journal.rs": "1e2be7d48276e0e80a15eb676411dabda0ca59556da1fb4bd71e29f7b4474617",
+    "src/forensics_json.rs": "0891f486124ea5af60999820e8d617f0655b8bc5c497d93f09097a47a3d4a8cd",
+    "src/forensics_ntfs.rs": "76400037cbcdc431287df6b3653fca473bd8d80427a177bfb137c056ad9bae7c",
+    "src/forensics_ntfs_extract.rs": "2e013dd1c1968551dd7b082bb73fdb1d0acf8c50a94a3663672b25f1bc6e4953",
+    "src/forensics_sort.rs": "50d87b8eb69a465f34d657d6eba883145e4d1b2a747849bdc329c517b085c876",
+    "src/forensics_time.rs": "1437842c78317e1c18f587e755816195bd7bd335012130d18792dcef537be139",
+    "src/forensics_timeline.rs": "6f9fcbf28ebccf1ea8256e1a95b6411ad6d81f2e98afded6066b07214fa53905",
+    "src/forensics_timeline_spool.rs": "9a361af6fd75122b368bb924a3142a713ffe309e65960417ac2dd331be92a304",
+    "src/fs_apfs.rs": "634b0a3c7d221b7e849748c1df160600525292f71824d2a38c3b527a48ab48b0",
+    "src/fs_apfs_audit.rs": "7d06a1b97cd76726384e8a2d4cfb12322130b785afe58402891c8808a5e9e70d",
+    "src/fs_apfs_builder.rs": "c91fdbcc95647e8cb1a43299bc37ed5ccf809a7b8cf232a76eb75d336384cfaf",
+    "src/fs_apfs_builder_disk.rs": "7f9ff0aa5aef3d96a5854a30fafe71038ba5f9083b2f4bb8469551289dcdf8ed",
+    "src/fs_apfs_builder_layout.rs": "b80fd494fe7e1ddf92e2788aa06c9058f877d7c9a045118e1b145f1a58a34863",
+    "src/fs_apfs_disk.rs": "cf7325514c9558fe7d0125691db057fa732b23e95725aad98cd6b87d7210ffed",
+    "src/fs_apfs_edit.rs": "9f12d905c9584fc27a09cacc929e2016a718de1a2ef122ba219565fdc874d5ff",
+    "src/fs_apfs_edit_cow.rs": "408598fe457ba231a137894ad67680b2202dac8b426b96b6cac9f11a0d9cc66b",
+    "src/fs_apfs_edit_disk.rs": "7bc126f63a80e73045d668c83e59afa7e9bdaf8a9154c464213b3211f7cfbbf6",
+    "src/fs_apfs_edit_namespace.rs": "3f00c0a3363a54722fe5e3e5e98e73f93aa1a9a12c35a7b8f2e5654244521e7b",
+    "src/fs_apfs_edit_reclaim.rs": "7fc6fb0a49f13800290d78e676593b105601dbf0145b585380a814fe0fbb4071",
+    "src/fs_apfs_edit_retention.rs": "2a461b4527937f7cb741f9625ba6f9dd73ae397af335aae707a825a52f814049",
+    "src/fs_apfs_edit_tree.rs": "0bfae8e6bafd782e6e6b8d5a0383f1ed1231c4095a0e076bb9bb729a07093566",
+    "src/fs_apfs_index.rs": "9f35d54205732604597a532a8a0c03167253fe3698e6a7b1fd811a984e4df81d",
+    "src/fs_apfs_retention.rs": "5e99529b3d71587635361a4df6195601c2510aab0d08e5029af8363e3e00bb66",
+    "src/fs_apfs_tree.rs": "ec340a79f3cb0c7e9cb94a2f42abefe23d32850961e54268581f0150d18db899",
+    "src/fs_build_io.rs": "53ac137dc52061fe3367a8aa4ce3244c681892f88812b58ad9cb17bd879b4bcc",
+    "src/fs_copy.rs": "d09e3ee763feff463e2f9e17075e2ddc0ad44b06a04015fffe7d39664bf3fe13",
+    "src/fs_core.rs": "13578863c442643b043d991b05c71937b816c5f7d19b45239fedc09484dd2d4a",
+    "src/fs_discovery.rs": "dab8ae728b1c07a117a383968fc04f98c173d0c6bf9189484ee3aae6d111571c",
+    "src/fs_exfat.rs": "c6b6f6636ac4181c4ae3a3d4c3235d1d56f3fdb51122444bbb381b323a926589",
+    "src/fs_exfat_audit.rs": "04caa4e7949b50334949a64561a763e8daa97e6bbf707a74bb871b9082115ecb",
+    "src/fs_exfat_builder.rs": "67e47610f8a8e22023eb76d4687f8e78c1ab4082614a26d69888823e1637c3cb",
+    "src/fs_exfat_copy.rs": "fc9459df243c12b675eec2a9f6d8eb22ef4df41a5174c193c974838e4c1965c0",
+    "src/fs_exfat_edit.rs": "f0a92484303096258d087082037a34746c449ee89740746013369303d4dae42a",
+    "src/fs_exfat_edit_namespace.rs": "261e72b43840aac2d7056c2eca80fe71378a0f54e84724aa0ecc9bc5418e44f7",
+    "src/fs_exfat_tree.rs": "9f54b6545d74146ea93f17475c6c8bfbd90c7367652e4cd4bdf31eb955f7427e",
+    "src/fs_exfat_volume.rs": "2741e9ae4a13927cccc22ef50518e2826dc05327d1ab36cc461a39edbf86bc6c",
+    "src/fs_ext.rs": "0714c522cbe0a9650d5f731e0da246206c1b6999052b49cb2725f429af0d90fc",
+    "src/fs_ext_acl.rs": "ba52c148b5a12f517b9a64448ddc8ee29b685cde70f29367721b3a269e7393d6",
+    "src/fs_ext_acl_birth.rs": "b8480bb78ba2497f19ca384ad977911e6eac9649a7e2bf8d729f03d7f1d60f1e",
+    "src/fs_ext_acl_container.rs": "676423dfb2fa6e18fd9fa4743313341eef42627f1fe7b32d34cd046202ee0056",
+    "src/fs_ext_acl_container_codec.rs": "ab76a5a96f9020347658c39a56574c16f834dbef5efa53637a428b3021b072cf",
+    "src/fs_ext_acl_plan.rs": "1851206c331bb698af85e18a3b5c457997046d4b0a95d263f55791c8324ff3d1",
+    "src/fs_ext_acl_recovery.rs": "fbf640eab5f80f3ceb25e6d4ef15c1c65583acc6e8e9a239c8a634faf53162f0",
+    "src/fs_ext_acl_semantics.rs": "6a20bbb7dacb453b978ecb5ddd8da282a8de8e915b38547ed8d2193a4fcc7dae",
+    "src/fs_ext_acl_session.rs": "ff24d7d5cb8590a5db92c9ed474b978ccfe4baa619c8b35d59bfb3d5187e6651",
+    "src/fs_ext_acl_write.rs": "f96207f092bede602bd6052afbc4a30ad962dab4dd2684dc8de00b566c057918",
+    "src/fs_ext_audit.rs": "3f71a78267a5a1b223ec7fe42e1b8febcd30c454663757f02f89263b4891fe3b",
+    "src/fs_ext_builder.rs": "a0b816262c7fe11bcc4c27c8d1e027ee71d4a1dbccf1fe1a20a2e87110895410",
+    "src/fs_ext_checksum.rs": "bfadf520259c1736e411e5e672016aa80e25519a571017371176301e39c6093f",
+    "src/fs_ext_copy.rs": "cddc9a255dec67d9eb53c026e21d9b4b30d893c0d93298d649fe6ced1b820a33",
+    "src/fs_ext_directory.rs": "1db0791243c0543d3a87be4e7cb6c7235f64627ec2974cd48d42dba8616b7cf2",
+    "src/fs_ext_edit.rs": "92402b53490f686cf6f87bb74c6ed828dad02266b27bfb6dd397768c87ab9c9f",
+    "src/fs_ext_edit_allocation.rs": "4d0d78527f73cb31740cd57b119c6e76a281ff48146f4fa55e8a63c14852b20e",
+    "src/fs_ext_edit_allocation_overwrite_tests.rs": "faaeb08fbcffbfd7bad485843fffa34872f1cea6e842091810b3875b4ff38ae0",
+    "src/fs_ext_edit_allocation_sparse_tests.rs": "34046ace76028c09227aadde97b7c210a18d949c2f8a7f1bd083498b95befda4",
+    "src/fs_ext_edit_allocation_symlink_tests.rs": "552f790c40ac276a2c9e80a00096c6ee5b4289a9d48ffc0664d7710877633c0e",
+    "src/fs_ext_edit_geometry.rs": "e9b58aafdf778f3acc2afd8f76995f95698d6754bdb25c81f54d6ea588d4c7a7",
+    "src/fs_ext_edit_namespace.rs": "bdab42baa59e018bef0d740b96f6b1d397c023f1afeb2e91d5e346c5f2f5fdbd",
+    "src/fs_ext_edit_ordered_tests.rs": "3227bc0048aa0c89ad5a1295e860547346d1573cf6696560a70d22e1b64b8463",
+    "src/fs_ext_edit_transaction.rs": "2f98fd5882bf1e79fa761821ba0da98f4c5d78ddfbffe2ebd1cdf2e00bfac01a",
+    "src/fs_ext_extent.rs": "af87a3056c6559df51f2aaabf1d8b60d7954d2a6a22ab5fb5c45ea3a0f59d612",
+    "src/fs_ext_hash.rs": "4c91f74e36aa9fb733cfbcaaccf4d2b3240ecc067275c16866a0413fc481b8eb",
+    "src/fs_ext_integrity.rs": "d0b2879714d05cdedc40ec0fe648764f276f37bb3f72307dfda16dea843a561c",
+    "src/fs_ext_jbd.rs": "99042a3cd08c87c84619beb385cefda096153c14ccb6975c7d547c0099aff34f",
+    "src/fs_ext_jbd_acl.rs": "a0b3c2f6517855aa3114a37478aac49d582f81ed8a6990e6f184d338df0497d0",
+    "src/fs_ext_jbd_bootstrap.rs": "e7a3c94ffd6cdcb991bcb6e63022cd2110280607d2c30ba894c074f816ab3ba1",
+    "src/fs_ext_jbd_foreign.rs": "eebf372077c24c818d23695f493f962c3be004ad34e93dcf58dbadbff66f694d",
+    "src/fs_ext_jbd_foreign_native.rs": "e828fed69dc7913b3233008937e79cd4db277c3ca7aad8822acbc9c5fa8393da",
+    "src/fs_ext_jbd_foreign_native_cuts.rs": "728bf7eb725d015089dff50a563340573e322d189b4df45e1a1364800d583d0e",
+    "src/fs_ext_jbd_foreign_recover.rs": "f55176edd30330e263f3aaaf0c05fde689dcce2e99555f9af92e67bac7ad8636",
+    "src/fs_ext_jbd_foreign_recover_tests.rs": "e2bfe98602905817e5883c44699c2a9365f1667a6856539d147704f047f4c2c8",
+    "src/fs_ext_jbd_header_last_tests.rs": "3e40a06f077098317cf609924e01d6455fa829d176b68cb21098091062c8d9ef",
+    "src/fs_ext_jbd_legacy.rs": "25b79b0a9f8505946f3daacd7bf755bb4665bcf76f5830204c4dcb0292b62057",
+    "src/fs_ext_jbd_modern_extent.rs": "e5d349a4d3961599ed2fb749a970c52f8e5968d3d558c2157cbcfe45431b56db",
+    "src/fs_ext_jbd_modern_htree.rs": "0390a44f5a386e1f8a40b5b834fa0267d863b243ab4e16c42f62d10bbc642958",
+    "src/fs_ext_jbd_modern_indirect.rs": "d1709a3af81ac21f837ca9afb2c02baca9bcfff7508405fbd7df676b9b3143a1",
+    "src/fs_ext_jbd_modern_indirect_tests.rs": "6b91df823c01334076672a4c1464cb46fce5d22c2546ab2c7751a7afadcfa7a6",
+    "src/fs_ext_jbd_modern_inode.rs": "d4b2488325482377107ce4fb821e56af395d6fe41434a9dcef653601ffb0a446",
+    "src/fs_ext_jbd_modern_namespace.rs": "8a458887be007fbf9aa4f411cf95f3b3b6fbdd4b57063e7ec5eceb38e7e94e5e",
+    "src/fs_ext_jbd_modern_namespace_tests.rs": "57992bfd3d7e26008ce6c87d9b59d3239d8d1da694530208d3b3801e53d268da",
+    "src/fs_ext_jbd_modern_plan.rs": "2abca329df04cbb1a47a89263c0b324b9dfee8a8bfcb0d65b81b49f47a172397",
+    "src/fs_ext_jbd_modern_preallocate.rs": "69ec838ac6fee097e6b51217a96c83144bf8f800b4284851cefedca5861a58eb",
+    "src/fs_ext_jbd_modern_preallocate_tests.rs": "57ddb085ae4a7d5addbbcf26bb9b1f6c095dede8e95ee6b67dccbd68dae2d7ee",
+    "src/fs_ext_jbd_modern_tests.rs": "ee2da681fc4d761d550d9979a48823e0e6104a19264c467a50e9fba8101da4fa",
+    "src/fs_ext_jbd_native.rs": "41f7c81530135db31deb6e1d8f48ba27d05fb61cb003f5463bd6270d804a5158",
+    "src/fs_ext_jbd_native_indirect.rs": "121874e94508d110491c471b6ec55366f1558e44d11f84f8673309e0b3b4abfe",
+    "src/fs_ext_jbd_native_inode.rs": "c687cd2eacf83177f61b21c1268fff62bb997f0d07784b780f93d14c56a89f50",
+    "src/fs_ext_jbd_native_legacy.rs": "0479d74ad8722aa4d6a907ae23d8bc9be39d612a4ae126a213a2d53bb06c8c9b",
+    "src/fs_ext_jbd_native_namespace.rs": "26cde0edc467c4e5d26dbbbc3101ea5617a754091dae319365ffa6005a5b92fd",
+    "src/fs_ext_jbd_ordered_tests.rs": "9964e1bf55e11e92767dcf630accc35aadc979b66e57714580f1b10d2e117173",
+    "src/fs_ext_jbd_overlay.rs": "87c8cab16e84af3985a9bf1e0603f83444db42126ef0e5bd776af11ec03beed8",
+    "src/fs_ext_jbd_owned_native_cuts.rs": "4a4dd7ff7d62491cd2572b293dba2fc66d29d1993bb81cef0e2860e0f414ba8d",
+    "src/fs_ext_jbd_recovery.rs": "fe21bb52df0b2b8e95a04c4b624c4d154a5fc79da0ac8a75a69981178fbed532",
+    "src/fs_ext_jbd_session.rs": "55c1fe4f321d83ee5ccb869bcc741e82ff2b839c01e9798fb142c7dff863a373",
+    "src/fs_ext_jbd_transaction.rs": "ff748cd6cbed1efb85b385e9f3b74d9388fa8400f64a5018429c563e8449f250",
+    "src/fs_ext_jbd_xattr.rs": "b1804a5e590d5eb3221b3978302c472832541b7c60bf9235f6cf652fe9101da8",
+    "src/fs_ext_jbd_xattr_native_cases.rs": "4761954a6a0dbffd2fdc67d6139914c9ebc15191b7f36fec7bb256deb3fea136",
+    "src/fs_ext_jbd_xattr_native_cuts.rs": "8b1b7b897b43ff8f5e5751b32b5b049269087bc052274747069c49d9cebd2e89",
+    "src/fs_ext_journal.rs": "8d1b507e07fa045e805a2dd122180603ae266eace55b2fdd96bc8268f18fd23c",
+    "src/fs_ext_metadata.rs": "2dcf5df947414acaedcedb7107ffbd4cacb086a1ab732fc752ab911b309dc764",
+    "src/fs_ext_modern.rs": "7dfbbdada666f6a76b6c3b28acdc55cf73899eb206ab60730aa7aa9a379cfdd3",
+    "src/fs_ext_owned.rs": "5daf4eefdbe95027d46c77ded9e41e4076c4d928ba9102f9861765369efe1523",
+    "src/fs_ext_resize.rs": "1ffafd3b2b86c75d735ade23fbe37f8eda9a24334dbb3986743d1bc06640e3ce",
+    "src/fs_ext_tree.rs": "d6bb7b286b33f5a252cc2164c281c835c37964052ced5c05d37cece967634da8",
+    "src/fs_ext_xattr.rs": "f29ea112653e9308fff496cede786c48468fa0a43d8b8bd9ba8c5cbce57d6733",
+    "src/fs_ext_xattr_plan.rs": "23e0519722e581736a6c04fa9d132345087fdf1cdfd627c9c98a39d3bcfc537d",
+    "src/fs_ext_xattr_recovery.rs": "e38181f9b2f464ecb61331da5e4b460fcb2d0d5690391c449cd7c10764aee4bb",
+    "src/fs_ext_xattr_session.rs": "4c2979533972f83fa6423ffec05f53cc581ff10c17824ee37050c94b7bf0f1a3",
+    "src/fs_ext_xattr_write.rs": "47d04d9aa6d3896e6821d41acc1ebfdccd0a4c6335503bc52a18880e7d974b42",
+    "src/fs_fat.rs": "425bbf1d90be0bab2c3960db4a948e7cb5a03f5f3472a374a81ef2e24fafa60f",
+    "src/fs_fat_audit.rs": "e96e855c3c102083edd3a462b9265147f97cbb9b6e113f06447aa1945844664d",
+    "src/fs_fat_builder.rs": "4c1df7f6abee4c4f3e95f5ead44dea168a7cb2d414789b12b8fc78a7bbaee8db",
+    "src/fs_fat_edit.rs": "f3b168f7850f7f7c4fc56ffb85803e2dfcb79368b0eb0d5cacf9e56f0b32f3e5",
+    "src/fs_fat_edit_namespace.rs": "dbe6dd2a9458951477d21dd51c77f7cbf6a22c0f33d1d7a385af1ac93cf8ff70",
+    "src/fs_fat_edit_resize.rs": "72800858ba1ab87897d1bb93f728a9e3613cd03dca682f50cd0909250781a893",
+    "src/fs_fat_tree.rs": "9cfbaccb1a5a03463a0141ee5bb7b5e2581f717da48fa72f7f60839be79eb041",
+    "src/fs_file.rs": "78e18ebe94afbba551b497a164c494503e20df3884b45c602b2da3ff1ae7e305",
+    "src/fs_flash.rs": "b29a7abbfad60eb4c74cca6026ad33732b52908bb8f7d94cc6b19ac8abe96827",
+    "src/fs_hfs.rs": "cf83c60b616cfa87c8bf237b0bea85dc9a0d856162f493f70b30fab25c4d2aeb",
+    "src/fs_hfs_audit.rs": "312e133362728cbf11f9ff81c98cb4d74df937891238f8f32fc164819253c581",
+    "src/fs_hfs_tree.rs": "69df939f6fe7205873fb6a034b701f3a8c4629d8793b0d59bc8a1ac86fcfa06d",
+    "src/fs_hfsplus.rs": "7bcfe4074a2e80db8ecf833a436b5a9066350242971583f5dab5682ac5f5b184",
+    "src/fs_hfsplus_allocation_builder.rs": "1a2ab053f649a04669ecd542ab19c348b71615c20c675b6ff77aaa4cc56753f1",
+    "src/fs_hfsplus_audit.rs": "8f8cd8f4fce345e64e416ef48b47fd8d00a372f550e0e8c34b283d83565e0c8a",
+    "src/fs_hfsplus_builder.rs": "d17511a0a7e0fc81c58f76ac01eb63d3b5fb05015c3b8bace27b876bbce5fc1e",
+    "src/fs_hfsplus_builder_inventory.rs": "d8444e3484976b6f88161f65a1e12a438681b8c122c11450ebebca58fbd7b461",
+    "src/fs_hfsplus_builder_layout.rs": "e27d5712b9f85c666b22b562bc0a3a91164ed99d74f576becfa774d7a535da99",
+    "src/fs_hfsplus_edit.rs": "92a522d54f49e75c3be308756f2b5273406108790da7ec5403fb71d9a83a08c4",
+    "src/fs_hfsplus_fork_builder.rs": "de307fe04ecedc7742ef065e1f6012fba0a26e3f658d44b4e63c3fb62bd916b8",
+    "src/fs_hfsplus_metadata_builder.rs": "d4d7324a78d667a6d5bbb293fb218bf444d343413523968270694be930503d92",
+    "src/fs_hfsplus_node.rs": "b90a8aba287a912d0f4d7e712dd2371c16630130e2236c4a636102e43b439c3a",
+    "src/fs_hfsplus_owned_create.rs": "60bea0caa96278922240caa7cd86397b9f32091f9b497bf90adccededcfea21e",
+    "src/fs_hfsplus_owned_cuts.rs": "8dcb0e9322be55636e78d5095be18e7784dc6ed48e9a137a5efc13d2740bc951",
+    "src/fs_hfsplus_owned_namespace.rs": "d3fd39fc6bc9b0b742bc7a5c16dee502df18d05df99409f5af337b89eeef5297",
+    "src/fs_hfsplus_owned_namespace_cuts.rs": "388a42392b5d0f63eec58ec8645f1125c34c4d4f3fa1a900a1755ffde2faf9cc",
+    "src/fs_hfsplus_owned_namespace_native.rs": "a4803b7eed21b185f51bb37b8c8d4bc0d342237103cae7ca4751a61c7b12ac9f",
+    "src/fs_hfsplus_owned_namespace_native_cuts.rs": "0e4dff5649e54d2c98e8038a5a64a099b3810402aa5e3d18b26bcb68814f585b",
+    "src/fs_hfsplus_owned_prepare.rs": "4318e0f48f6c0694d1de1928f7115f4c65aaa9e5287c923ddbd3e03442be2c8b",
+    "src/fs_hfsplus_owned_recovery.rs": "309acbe5b1fb605b42f2b7de32533166141fb027e1aef59045d2837f9f90512f",
+    "src/fs_hfsplus_owned_resize.rs": "e7079d3bfe105b5b77ca48f09c81c22c9a87b0b32043790f8507a1463c42db81",
+    "src/fs_hfsplus_owned_resize_commit.rs": "7067beee803246a41a0d52839087100f91fc8e52e2c0ab8268a326b82606a66a",
+    "src/fs_hfsplus_owned_resize_cuts.rs": "71180e17c1120d828d224febe6412ddfd7dd52517fb916d957f585fbd35d2063",
+    "src/fs_hfsplus_owned_resize_forks_native.rs": "0da373d76661016f07521a6076a22eb6898f1ba12906864827bca720ec96d0db",
+    "src/fs_hfsplus_owned_resize_metadata.rs": "c0fb26a75012ab9628f2841227856334af668faf379c1db64339ba979e9bfc1b",
+    "src/fs_hfsplus_owned_resize_native.rs": "851142c456f1eb7e479c396384f96d5d5816704dd32421fe0e5ae4e7751b7091",
+    "src/fs_hfsplus_owned_resize_native_cuts.rs": "b9762362ad8ea608fdf9410f5113ec5d586eb89647ac3ed8dac918a49cc48c44",
+    "src/fs_hfsplus_owned_resize_recovery.rs": "764bbcdf188c161f10b3b05852f5c83133169e2d41a01a4d4c6e3623821b43a2",
+    "src/fs_hfsplus_owned_transaction.rs": "d88de87ee79ea765cd3ecf5633fd0dfcbb66a9387525fff42ccd9c623f5bc32e",
+    "src/fs_hfsplus_tree.rs": "46b839859b236ded491ea614c2784c8b53f3b351a8bfaeab5eb80909f12f78d8",
+    "src/fs_image.rs": "ee6df7111a6269f3fcbb8749b2dc3491e6d067c6a6d332ebb2f0f0811361f115",
+    "src/fs_jffs2.rs": "ccc1e5db8967bf0911aef6ba368f34885470480213f50e8cc3f94350995eb655",
+    "src/fs_jffs2_audit.rs": "c30d6ccbdeec7f568a3d8079c8800af97127c43fc4e848101751f75cc220c462",
+    "src/fs_jffs2_builder.rs": "825bb627ae6f16f45b363ba3ba3b7aa737c2cdd7cb09a935fd9d56a09f9b4f77",
+    "src/fs_jffs2_builder_compression.rs": "27fb8c1089d55e46bfd21ab9f5e5c1070ad153cc1e46a9ded0f493004ab8064a",
+    "src/fs_jffs2_compression.rs": "9549652afc73655bd58f9fad553c3a40280d3da97acf495f7db11915b62961c0",
+    "src/fs_jffs2_edit.rs": "b07434e74d1d71b71eaedbba1a97b723b3f95d5459300dc2bcc9aa1009c353c4",
+    "src/fs_jffs2_edit_compression.rs": "b4ba481e8fc5e8c2051091839e9eb858c38848311a73962016c7864a4a9a947c",
+    "src/fs_jffs2_edit_compression_tests.rs": "869c542ba0fa700f03fe83f5b0c18519f18a29a22b5dec272980e728f94b05f4",
+    "src/fs_jffs2_edit_file.rs": "485a668fbc482766d7d1b60ae3534caa3dc3ea657b470a5d17eda985d822df55",
+    "src/fs_jffs2_edit_gc.rs": "ff67b5d89b062bf650a4d724ac4150cbfc9cef4ce92286f701e2736815410dcf",
+    "src/fs_jffs2_edit_journal.rs": "11525c79492a42643bcbeaee5bdbb9d25ed3a8ec1cc895a829a48e346cd8d9e0",
+    "src/fs_jffs2_edit_namespace.rs": "6d7de88aaf8adcfffc6833e87f89b50196d6198a75ea1dd9f7b9e5842313b480",
+    "src/fs_jffs2_tree.rs": "e0a96bbfb918df437965fec723dba98a354a5aa423858494b0024ffca96408af",
+    "src/fs_jfs.rs": "87df734cd59b1022d844eac706fe36e32967774932f4c5ff91af7e524ac08239",
+    "src/fs_jfs_audit.rs": "38eca796df7829eee03f271ddccc104c74801784a7c25c60b4b0a14f8731c374",
+    "src/fs_jfs_edit.rs": "5e296d6da7230afe8f6fe51a029a7d0d5ede2c83a1e8688dc4e47fc06dec5f6f",
+    "src/fs_jfs_edit_allocation.rs": "3c0a1ba574f51119caee047747a7bf9450c53b35440e9572f211f3ab03cff5d3",
+    "src/fs_jfs_edit_journal.rs": "ac77fda7e879348a1d2272d76b7feb264af766db444cfecd8a7ff663e0f1046f",
+    "src/fs_jfs_edit_namespace.rs": "6a6c5c73cd29fdff7acc8605981f813d9bd7c33547275f7aeeef053ee38c281e",
+    "src/fs_jfs_edit_rename.rs": "c7c39bb3dcb1a9030b67561515c00f908c1acd2dd780c80a96e9851ea3fef97e",
+    "src/fs_jfs_edit_rollover.rs": "2ead6279c7cae389d96f79be55f1b39272bb2341afd580778393ec5854cfe7a5",
+    "src/fs_jfs_tree.rs": "1f9fff31c5b81aeec32ea393a08df9610db8154c08c51004f204736c8f215a64",
+    "src/fs_maintenance.rs": "129dc10bcc2cdc25994feeb980097778dd11bc3ea020494b22a70557c93f3362",
+    "src/fs_maintenance_audit.rs": "0e5c2cf8d7e4b104eedd93919cbd0a8e3f1f970129533ffc0451284e02c9d5a6",
+    "src/fs_maintenance_format.rs": "1c127ba5cd6d5c77ab3886001ac30ea2a15e15b189082930be0a1ef1ec43b4a9",
+    "src/fs_maintenance_format_tests.rs": "a3e7ba6895ad100ade69290570de984d63c1bfafd3b161c08ceb6afac3ba5838",
+    "src/fs_ntfs.rs": "7686da4cf73cd372937e260128b58f654acabdb50d97ebb209b7248ccc97b2cb",
+    "src/fs_ntfs_audit.rs": "60b4f839cb9e4973ad24da70336ffcfa0efabc934b5e2fc8813bbb63a6b5c1c1",
+    "src/fs_ntfs_bootstrap.rs": "3fd7d7cb41038d786451de9aba68d2c88cbb2d2d69a08879349ee42fde3cbb69",
+    "src/fs_ntfs_compressed.rs": "2a8f2363a09234c1b957972de4c7dcd219103f738a125ff4cf48620022dd30e7",
+    "src/fs_ntfs_logfile/active_seed.rs": "49850cd6004f2926b0695885d4e2368553e110168093ad27b3f2f84db73f585d",
+    "src/fs_ntfs_logfile/checkpoint.rs": "196ad8493dbf79a486e97acdc4350100252d5d9a686c7594069c3561d57c8de9",
+    "src/fs_ntfs_logfile/checkpoint_dumps.rs": "bb6eaffadfe59831382e10eaa91bf994f6777d6c9bb40cea486d947ae7768b3b",
+    "src/fs_ntfs_logfile/client_record.rs": "e263e0c9fd3fb43589c817954a605a4c7f5221ed370b65258a3e817fb21bb822",
+    "src/fs_ntfs_logfile/native_analysis_context/target_query/target_runs.rs": "af5b6a4ce132118c6f5e626c6f41c0b9035f7323a20007f23db5bda2a490f98e",
+    "src/fs_ntfs_logfile/native_analysis_context/target_query.rs": "13aca25383c468404c167021fcc78f49cbe2e644c883719988bd65bb57050ac9",
+    "src/fs_ntfs_logfile/native_analysis_context.rs": "3bdf6aa3a298b648da9a38c7a7c96b2cde548b629b0c59c790b27a15529bee16",
+    "src/fs_ntfs_logfile/pages.rs": "e6aee74400bb60bcdb75aab5294f90381d2f864ac42b833701ca1d63819ac535",
+    "src/fs_ntfs_logfile/record.rs": "13a373bc3619bf98d4accaed5f6bf839adceca4afba91b5a2ef4d53c28d672cc",
+    "src/fs_ntfs_logfile/record_links.rs": "43f39f4b2fd79cc48b782a7cc8fde04b590daabb2b9dc1204e2cd6fecd9ef985",
+    "src/fs_ntfs_logfile/restart_selection.rs": "47c26925c03967ba6e920fa5c355650eebac3132b3714f4851691410b3ce94de",
+    "src/fs_ntfs_logfile/restart_table.rs": "3772ba2d221d8a50ba75e1c9d44effb6420118be74526708682dcbd84bd8c509",
+    "src/fs_ntfs_logfile/table_entries.rs": "30f799c5592ccb5c9dd154ab3b2f89c61056c8a99f801e4dab93610a64ace765",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/open_analysis.rs": "dc6585fc8142ff6fbfc4df5dd92f59848aa663f235d432ea0ebe2398dbcb61ee",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs/redo_analysis/native_file.rs": "83ad3c50f7df728b06c987e7dbfbe7b008bf10ee1c2af84635a8a989e4369d05",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs/redo_analysis/undo_analysis/mirror_finalization.rs": "f5d279edca140ce2663b7edadfa7c747086d11ac63e2cbef77a193d388b751d2",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs/redo_analysis/undo_analysis.rs": "de05b3b36f694d92b43f0601e7d3ade6ac314cd35d9956e8779dbb11827e3d96",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs/redo_analysis.rs": "aa4816c9725741550b12cad77ba5b455a86dd9b81b6567a83e13041779e35f3c",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs.rs": "0e1183efff68569a4002527386278d3cee931692f16577df9d628b6041d305dc",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents.rs": "270e3bef635fa8b335058db4f74cec2dba12f9a09136b4e8140d49b925fde428",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis.rs": "d45334e9521530b887d1d51bfeebf7a4070f1c87c13438479396e02cedc7c73d",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis.rs": "baa19dbb3466348f777f43b778d396db3b20c982bf1a9d9d9aabca710405f3e6",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis.rs": "effe91763341538dfe4a8fa51aebdc32f5d67fe0e1cd82d5efdc2cc32aa09dfb",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor.rs": "49d6f9d9e5b6974bac8878db66b718d49778ea2f097ac67a64b92dc285ba3706",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay.rs": "e973a09920383092309e4ac1e296411d608c3ad8ac2a9635a1fd34a35d8e2708",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/partial.rs": "2b06668b38390e06ec683ea536af76aeffd56cbf33bfde0a0f6736599c612845",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary.rs": "3a9edf14f71005b1d3b8b97a62eff54a6dd4cadcb650ff229d55d3ba399b2424",
+    "src/fs_ntfs_logfile/tail_discovery.rs": "aaa32e70e868f53c46283854caf9a54f11d59a04036992e9608bf845de4113fb",
+    "src/fs_ntfs_logfile.rs": "9895c32358968c74e323b8a33085e3998ab634a0b20fe5bb0b4c1afca811be9d",
+    "src/fs_ntfs_metadata.rs": "acaf5953279511eef94ae68e66de060c3cfae00fd5b117118a4d5a45ef718617",
+    "src/fs_ntfs_native_log_target.rs": "86b31f9e7bd0faa7f7006d18339374d1576fbcc4a31bfe540a03a88a4a6c434f",
+    "src/fs_ntfs_secure.rs": "8dfbe931544fb6bcfa4d6482856515cc2b8868c745303bcd5ae6d9a13c405353",
+    "src/fs_ntfs_security.rs": "d2519cf1b235046bfeac3df69c389d2b6509338ccaeac0d7ef2f98fc0a408c4b",
+    "src/fs_ntfs_stream.rs": "08f1b6dd8614c279787ebb1d0436123ce0d9add834683586023df3924a1bc4ef",
+    "src/fs_ntfs_tree.rs": "953f20fb4c8b331a4add92cb41e9a6480aa4f586087a29d12a96b276a6ea02e6",
+    "src/fs_ntfs_usn.rs": "eb4d08504490f77732bfc6d21376472dbe7f8a979e7b01b2dc69f442f2803f34",
+    "src/fs_ntfs_usn_extract.rs": "49983b8aaea68574319fbf64fe065c75c6ee5dab0ebe8a6b2527a7294f4553e3",
+    "src/fs_pagination.rs": "189babdc0aed8fc360cd6062e881b32e3e07782461d49db70d36b3569494447f",
+    "src/fs_pipeline.rs": "0cbc682b40d8f17cd193120431b4832e94f11ea07eeda5d4629e93561fcc7834",
+    "src/fs_storage.rs": "e2ecc81957c3a1cabfbed4f3df8032369217d893881efa6999e347906de8f1e2",
+    "src/fs_undo.rs": "070f52dfda33cc45af910df46f3e7352db1bf107bddc5c8757e2302b1b38515f",
+    "src/fs_xfs.rs": "52bc4836aa4eecb2a861794d9f6f7a5f228b0e1defa437d88591b1cdf2fd2bc2",
+    "src/fs_xfs_audit.rs": "c68cdbace2f0494fa0970fb30cde7d7a41764ca6aa0b5051ac27f46fdb0cbae3",
+    "src/fs_xfs_tree.rs": "5af10308e5b73e5e01dd07721052c8d5327082f2077c51ec7a1fc988f2c023b9",
+    "src/gpt.rs": "cf2609e494374ec0078f9ab12b5860a21cbe02e7faa5892fd625c316fd3de861",
+    "src/guid.rs": "bf5a4765ee04efaa17ca83ff4ba99a8047ecbdc50cc49cc011779d4e60ddb2b3",
+    "src/io.rs": "ce4194333430d580e310f957bfa0eed5c5d0f1115d5e3e687340feadb3f27883",
+    "src/layout.rs": "f470daa1d4b372fbbfd764e22b907b758bd1e2ffaf5c918edeae46f08cb42987",
+    "src/lib.rs": "e0d70f66471101c8548bfb6ef07d02ec1acd974717af1bca88ecffa187a6c04c",
+    "src/partition.rs": "e7d272a2e6c713abd507e6a286e50607ea0e292165b04f90472d6c384f450492",
+    "src/payload.rs": "6140746bbe97a4b3f5a04f9da1b80dc67063bc15cff85432f75d8ef28bc04774",
+    "src/platform.rs": "d3ea50a867c289f66292f2c137b041f52b27ecf5fb869646a7f069b9050e4c74",
+    "src/recovery.rs": "7dcc4286c36913680d30ec52732106537406f798559e2e16eb7f3d37b3a80a48",
+    "src/storage.rs": "7238e55f0dbe3db990b37e37b1bcd72582949e2ac02998d57f1c66b9b511eb25",
+    "src/uefi.rs": "9f1b8bb690e1bb5931caa060298198c3efd8bfefb142373feec7701682a73de1",
+    "src/volume_probe.rs": "8325b0c37b98ad3dcef06197de1d09d390df444c54110121a76cb523fcda1976",
+    "Cargo.toml": "649acef8ef84a86eefcb4ddb27d16e589a3b688f1801bc4ea6394038743b3ccd",
+    "Cargo.lock": "9695f7168b9a6d0391a5bd4de9addb540c6d0ff7b027152614f6c30c447cbdc5",
+    "examples/filesystem-forensics.rs": "c8a0dda920bda92a11c0cde5cdb78b3922f5f25099ea1996a9f97ec70673254f"
+  },
+  "library_source_sha256_end": {
+    "src/bitlocker.rs": "a0a38f058f0dcc754f04b082eec5319ee45d8cee2ced7572e7d9fb3410bb3f4d",
+    "src/bitlocker_crypto.rs": "d608014bff824fa0e59e84e9aecc787b1e360d85a21358804d4d839889f9c327",
+    "src/bitlocker_disk.rs": "8611d5b83403261e26461624d4d0f7ea90eda227127df003b0fe49f19103f4aa",
+    "src/bitlocker_swtpm.rs": "bbd2d826827f02a88de98f23eec3a80ca1bf7e97675346e98f22fb2a9a4a0f2d",
+    "src/bitlocker_tpm.rs": "59471a2b4de1f4061e402ebca0855c0da439aa1d8303c6eb7db577f5ebf01b4e",
+    "src/bitlocker_tpm_host.rs": "28f62baa768982227dcc90d33757278ab58cc5e290180dcfbeb9b3b4555eb331",
+    "src/bitlocker_write.rs": "fa403776efbfec52ed61371b14101deb072837e57e7cbbc1eaf3af31e18383fe",
+    "src/codec.rs": "e4204e228b13a6c7be71e30cf377283e86cfb1d14e415f690324a917be5bb977",
+    "src/conversion.rs": "f943db7abfe7f745761a9ddcd19e04eacb56e82597d60bd7192006c0a4a37e32",
+    "src/editor.rs": "132ce5c3ef9cc80f955e12c123eea878d747a2bb2a66699c9de3c4cf8b48fd66",
+    "src/error.rs": "ca5cc2377f086155e1327e8890e1ecfa04acb080f959e60d3b9365484f39087d",
+    "src/extended.rs": "b652f16e97911ecd6a9fbacb136b61adad9d3e0c2123f614aba873c5a8c7188a",
+    "src/forensics.rs": "da757f4dd5729aa21468caf3e2fcade80d828ab2cac2ba41e5415eec6cca5e1a",
+    "src/forensics_export.rs": "644327eaa69e32432522c44ca8e46dd8dd7126ea870c6529155057e67305d104",
+    "src/forensics_extract.rs": "005082c615b60a2956a8efaf14c3b3c60154ce8e8024f54b140f9b69613210a7",
+    "src/forensics_fat.rs": "d287d300d6e0e020232dfb1d6ee19ea41fecae5c2d752b41d00744f95a3959eb",
+    "src/forensics_fat_copies.rs": "3e478d7ca30c277a051f82eb9f705c397309c18fb218666fe496679dddacc6ab",
+    "src/forensics_fat_extract.rs": "a298fc7963c82c887dfc90e9b02411699d762b45511ed6cbc17a7b6ebc143065",
+    "src/forensics_host.rs": "7cd0a1748b4c69ef456effe39442a6ded13c828d57e31d47bfee462e807d8291",
+    "src/forensics_journal.rs": "1e2be7d48276e0e80a15eb676411dabda0ca59556da1fb4bd71e29f7b4474617",
+    "src/forensics_json.rs": "0891f486124ea5af60999820e8d617f0655b8bc5c497d93f09097a47a3d4a8cd",
+    "src/forensics_ntfs.rs": "76400037cbcdc431287df6b3653fca473bd8d80427a177bfb137c056ad9bae7c",
+    "src/forensics_ntfs_extract.rs": "2e013dd1c1968551dd7b082bb73fdb1d0acf8c50a94a3663672b25f1bc6e4953",
+    "src/forensics_sort.rs": "50d87b8eb69a465f34d657d6eba883145e4d1b2a747849bdc329c517b085c876",
+    "src/forensics_time.rs": "1437842c78317e1c18f587e755816195bd7bd335012130d18792dcef537be139",
+    "src/forensics_timeline.rs": "6f9fcbf28ebccf1ea8256e1a95b6411ad6d81f2e98afded6066b07214fa53905",
+    "src/forensics_timeline_spool.rs": "9a361af6fd75122b368bb924a3142a713ffe309e65960417ac2dd331be92a304",
+    "src/fs_apfs.rs": "634b0a3c7d221b7e849748c1df160600525292f71824d2a38c3b527a48ab48b0",
+    "src/fs_apfs_audit.rs": "7d06a1b97cd76726384e8a2d4cfb12322130b785afe58402891c8808a5e9e70d",
+    "src/fs_apfs_builder.rs": "c91fdbcc95647e8cb1a43299bc37ed5ccf809a7b8cf232a76eb75d336384cfaf",
+    "src/fs_apfs_builder_disk.rs": "7f9ff0aa5aef3d96a5854a30fafe71038ba5f9083b2f4bb8469551289dcdf8ed",
+    "src/fs_apfs_builder_layout.rs": "b80fd494fe7e1ddf92e2788aa06c9058f877d7c9a045118e1b145f1a58a34863",
+    "src/fs_apfs_disk.rs": "cf7325514c9558fe7d0125691db057fa732b23e95725aad98cd6b87d7210ffed",
+    "src/fs_apfs_edit.rs": "9f12d905c9584fc27a09cacc929e2016a718de1a2ef122ba219565fdc874d5ff",
+    "src/fs_apfs_edit_cow.rs": "408598fe457ba231a137894ad67680b2202dac8b426b96b6cac9f11a0d9cc66b",
+    "src/fs_apfs_edit_disk.rs": "7bc126f63a80e73045d668c83e59afa7e9bdaf8a9154c464213b3211f7cfbbf6",
+    "src/fs_apfs_edit_namespace.rs": "3f00c0a3363a54722fe5e3e5e98e73f93aa1a9a12c35a7b8f2e5654244521e7b",
+    "src/fs_apfs_edit_reclaim.rs": "7fc6fb0a49f13800290d78e676593b105601dbf0145b585380a814fe0fbb4071",
+    "src/fs_apfs_edit_retention.rs": "2a461b4527937f7cb741f9625ba6f9dd73ae397af335aae707a825a52f814049",
+    "src/fs_apfs_edit_tree.rs": "0bfae8e6bafd782e6e6b8d5a0383f1ed1231c4095a0e076bb9bb729a07093566",
+    "src/fs_apfs_index.rs": "9f35d54205732604597a532a8a0c03167253fe3698e6a7b1fd811a984e4df81d",
+    "src/fs_apfs_retention.rs": "5e99529b3d71587635361a4df6195601c2510aab0d08e5029af8363e3e00bb66",
+    "src/fs_apfs_tree.rs": "ec340a79f3cb0c7e9cb94a2f42abefe23d32850961e54268581f0150d18db899",
+    "src/fs_build_io.rs": "53ac137dc52061fe3367a8aa4ce3244c681892f88812b58ad9cb17bd879b4bcc",
+    "src/fs_copy.rs": "d09e3ee763feff463e2f9e17075e2ddc0ad44b06a04015fffe7d39664bf3fe13",
+    "src/fs_core.rs": "13578863c442643b043d991b05c71937b816c5f7d19b45239fedc09484dd2d4a",
+    "src/fs_discovery.rs": "dab8ae728b1c07a117a383968fc04f98c173d0c6bf9189484ee3aae6d111571c",
+    "src/fs_exfat.rs": "c6b6f6636ac4181c4ae3a3d4c3235d1d56f3fdb51122444bbb381b323a926589",
+    "src/fs_exfat_audit.rs": "04caa4e7949b50334949a64561a763e8daa97e6bbf707a74bb871b9082115ecb",
+    "src/fs_exfat_builder.rs": "67e47610f8a8e22023eb76d4687f8e78c1ab4082614a26d69888823e1637c3cb",
+    "src/fs_exfat_copy.rs": "fc9459df243c12b675eec2a9f6d8eb22ef4df41a5174c193c974838e4c1965c0",
+    "src/fs_exfat_edit.rs": "f0a92484303096258d087082037a34746c449ee89740746013369303d4dae42a",
+    "src/fs_exfat_edit_namespace.rs": "261e72b43840aac2d7056c2eca80fe71378a0f54e84724aa0ecc9bc5418e44f7",
+    "src/fs_exfat_tree.rs": "9f54b6545d74146ea93f17475c6c8bfbd90c7367652e4cd4bdf31eb955f7427e",
+    "src/fs_exfat_volume.rs": "2741e9ae4a13927cccc22ef50518e2826dc05327d1ab36cc461a39edbf86bc6c",
+    "src/fs_ext.rs": "0714c522cbe0a9650d5f731e0da246206c1b6999052b49cb2725f429af0d90fc",
+    "src/fs_ext_acl.rs": "ba52c148b5a12f517b9a64448ddc8ee29b685cde70f29367721b3a269e7393d6",
+    "src/fs_ext_acl_birth.rs": "b8480bb78ba2497f19ca384ad977911e6eac9649a7e2bf8d729f03d7f1d60f1e",
+    "src/fs_ext_acl_container.rs": "676423dfb2fa6e18fd9fa4743313341eef42627f1fe7b32d34cd046202ee0056",
+    "src/fs_ext_acl_container_codec.rs": "ab76a5a96f9020347658c39a56574c16f834dbef5efa53637a428b3021b072cf",
+    "src/fs_ext_acl_plan.rs": "1851206c331bb698af85e18a3b5c457997046d4b0a95d263f55791c8324ff3d1",
+    "src/fs_ext_acl_recovery.rs": "fbf640eab5f80f3ceb25e6d4ef15c1c65583acc6e8e9a239c8a634faf53162f0",
+    "src/fs_ext_acl_semantics.rs": "6a20bbb7dacb453b978ecb5ddd8da282a8de8e915b38547ed8d2193a4fcc7dae",
+    "src/fs_ext_acl_session.rs": "ff24d7d5cb8590a5db92c9ed474b978ccfe4baa619c8b35d59bfb3d5187e6651",
+    "src/fs_ext_acl_write.rs": "f96207f092bede602bd6052afbc4a30ad962dab4dd2684dc8de00b566c057918",
+    "src/fs_ext_audit.rs": "3f71a78267a5a1b223ec7fe42e1b8febcd30c454663757f02f89263b4891fe3b",
+    "src/fs_ext_builder.rs": "a0b816262c7fe11bcc4c27c8d1e027ee71d4a1dbccf1fe1a20a2e87110895410",
+    "src/fs_ext_checksum.rs": "bfadf520259c1736e411e5e672016aa80e25519a571017371176301e39c6093f",
+    "src/fs_ext_copy.rs": "cddc9a255dec67d9eb53c026e21d9b4b30d893c0d93298d649fe6ced1b820a33",
+    "src/fs_ext_directory.rs": "1db0791243c0543d3a87be4e7cb6c7235f64627ec2974cd48d42dba8616b7cf2",
+    "src/fs_ext_edit.rs": "92402b53490f686cf6f87bb74c6ed828dad02266b27bfb6dd397768c87ab9c9f",
+    "src/fs_ext_edit_allocation.rs": "4d0d78527f73cb31740cd57b119c6e76a281ff48146f4fa55e8a63c14852b20e",
+    "src/fs_ext_edit_allocation_overwrite_tests.rs": "faaeb08fbcffbfd7bad485843fffa34872f1cea6e842091810b3875b4ff38ae0",
+    "src/fs_ext_edit_allocation_sparse_tests.rs": "34046ace76028c09227aadde97b7c210a18d949c2f8a7f1bd083498b95befda4",
+    "src/fs_ext_edit_allocation_symlink_tests.rs": "552f790c40ac276a2c9e80a00096c6ee5b4289a9d48ffc0664d7710877633c0e",
+    "src/fs_ext_edit_geometry.rs": "e9b58aafdf778f3acc2afd8f76995f95698d6754bdb25c81f54d6ea588d4c7a7",
+    "src/fs_ext_edit_namespace.rs": "bdab42baa59e018bef0d740b96f6b1d397c023f1afeb2e91d5e346c5f2f5fdbd",
+    "src/fs_ext_edit_ordered_tests.rs": "3227bc0048aa0c89ad5a1295e860547346d1573cf6696560a70d22e1b64b8463",
+    "src/fs_ext_edit_transaction.rs": "2f98fd5882bf1e79fa761821ba0da98f4c5d78ddfbffe2ebd1cdf2e00bfac01a",
+    "src/fs_ext_extent.rs": "af87a3056c6559df51f2aaabf1d8b60d7954d2a6a22ab5fb5c45ea3a0f59d612",
+    "src/fs_ext_hash.rs": "4c91f74e36aa9fb733cfbcaaccf4d2b3240ecc067275c16866a0413fc481b8eb",
+    "src/fs_ext_integrity.rs": "d0b2879714d05cdedc40ec0fe648764f276f37bb3f72307dfda16dea843a561c",
+    "src/fs_ext_jbd.rs": "99042a3cd08c87c84619beb385cefda096153c14ccb6975c7d547c0099aff34f",
+    "src/fs_ext_jbd_acl.rs": "a0b3c2f6517855aa3114a37478aac49d582f81ed8a6990e6f184d338df0497d0",
+    "src/fs_ext_jbd_bootstrap.rs": "e7a3c94ffd6cdcb991bcb6e63022cd2110280607d2c30ba894c074f816ab3ba1",
+    "src/fs_ext_jbd_foreign.rs": "eebf372077c24c818d23695f493f962c3be004ad34e93dcf58dbadbff66f694d",
+    "src/fs_ext_jbd_foreign_native.rs": "e828fed69dc7913b3233008937e79cd4db277c3ca7aad8822acbc9c5fa8393da",
+    "src/fs_ext_jbd_foreign_native_cuts.rs": "728bf7eb725d015089dff50a563340573e322d189b4df45e1a1364800d583d0e",
+    "src/fs_ext_jbd_foreign_recover.rs": "f55176edd30330e263f3aaaf0c05fde689dcce2e99555f9af92e67bac7ad8636",
+    "src/fs_ext_jbd_foreign_recover_tests.rs": "e2bfe98602905817e5883c44699c2a9365f1667a6856539d147704f047f4c2c8",
+    "src/fs_ext_jbd_header_last_tests.rs": "3e40a06f077098317cf609924e01d6455fa829d176b68cb21098091062c8d9ef",
+    "src/fs_ext_jbd_legacy.rs": "25b79b0a9f8505946f3daacd7bf755bb4665bcf76f5830204c4dcb0292b62057",
+    "src/fs_ext_jbd_modern_extent.rs": "e5d349a4d3961599ed2fb749a970c52f8e5968d3d558c2157cbcfe45431b56db",
+    "src/fs_ext_jbd_modern_htree.rs": "0390a44f5a386e1f8a40b5b834fa0267d863b243ab4e16c42f62d10bbc642958",
+    "src/fs_ext_jbd_modern_indirect.rs": "d1709a3af81ac21f837ca9afb2c02baca9bcfff7508405fbd7df676b9b3143a1",
+    "src/fs_ext_jbd_modern_indirect_tests.rs": "6b91df823c01334076672a4c1464cb46fce5d22c2546ab2c7751a7afadcfa7a6",
+    "src/fs_ext_jbd_modern_inode.rs": "d4b2488325482377107ce4fb821e56af395d6fe41434a9dcef653601ffb0a446",
+    "src/fs_ext_jbd_modern_namespace.rs": "8a458887be007fbf9aa4f411cf95f3b3b6fbdd4b57063e7ec5eceb38e7e94e5e",
+    "src/fs_ext_jbd_modern_namespace_tests.rs": "57992bfd3d7e26008ce6c87d9b59d3239d8d1da694530208d3b3801e53d268da",
+    "src/fs_ext_jbd_modern_plan.rs": "2abca329df04cbb1a47a89263c0b324b9dfee8a8bfcb0d65b81b49f47a172397",
+    "src/fs_ext_jbd_modern_preallocate.rs": "69ec838ac6fee097e6b51217a96c83144bf8f800b4284851cefedca5861a58eb",
+    "src/fs_ext_jbd_modern_preallocate_tests.rs": "57ddb085ae4a7d5addbbcf26bb9b1f6c095dede8e95ee6b67dccbd68dae2d7ee",
+    "src/fs_ext_jbd_modern_tests.rs": "ee2da681fc4d761d550d9979a48823e0e6104a19264c467a50e9fba8101da4fa",
+    "src/fs_ext_jbd_native.rs": "41f7c81530135db31deb6e1d8f48ba27d05fb61cb003f5463bd6270d804a5158",
+    "src/fs_ext_jbd_native_indirect.rs": "121874e94508d110491c471b6ec55366f1558e44d11f84f8673309e0b3b4abfe",
+    "src/fs_ext_jbd_native_inode.rs": "c687cd2eacf83177f61b21c1268fff62bb997f0d07784b780f93d14c56a89f50",
+    "src/fs_ext_jbd_native_legacy.rs": "0479d74ad8722aa4d6a907ae23d8bc9be39d612a4ae126a213a2d53bb06c8c9b",
+    "src/fs_ext_jbd_native_namespace.rs": "26cde0edc467c4e5d26dbbbc3101ea5617a754091dae319365ffa6005a5b92fd",
+    "src/fs_ext_jbd_ordered_tests.rs": "9964e1bf55e11e92767dcf630accc35aadc979b66e57714580f1b10d2e117173",
+    "src/fs_ext_jbd_overlay.rs": "87c8cab16e84af3985a9bf1e0603f83444db42126ef0e5bd776af11ec03beed8",
+    "src/fs_ext_jbd_owned_native_cuts.rs": "4a4dd7ff7d62491cd2572b293dba2fc66d29d1993bb81cef0e2860e0f414ba8d",
+    "src/fs_ext_jbd_recovery.rs": "fe21bb52df0b2b8e95a04c4b624c4d154a5fc79da0ac8a75a69981178fbed532",
+    "src/fs_ext_jbd_session.rs": "55c1fe4f321d83ee5ccb869bcc741e82ff2b839c01e9798fb142c7dff863a373",
+    "src/fs_ext_jbd_transaction.rs": "ff748cd6cbed1efb85b385e9f3b74d9388fa8400f64a5018429c563e8449f250",
+    "src/fs_ext_jbd_xattr.rs": "b1804a5e590d5eb3221b3978302c472832541b7c60bf9235f6cf652fe9101da8",
+    "src/fs_ext_jbd_xattr_native_cases.rs": "4761954a6a0dbffd2fdc67d6139914c9ebc15191b7f36fec7bb256deb3fea136",
+    "src/fs_ext_jbd_xattr_native_cuts.rs": "8b1b7b897b43ff8f5e5751b32b5b049269087bc052274747069c49d9cebd2e89",
+    "src/fs_ext_journal.rs": "8d1b507e07fa045e805a2dd122180603ae266eace55b2fdd96bc8268f18fd23c",
+    "src/fs_ext_metadata.rs": "2dcf5df947414acaedcedb7107ffbd4cacb086a1ab732fc752ab911b309dc764",
+    "src/fs_ext_modern.rs": "7dfbbdada666f6a76b6c3b28acdc55cf73899eb206ab60730aa7aa9a379cfdd3",
+    "src/fs_ext_owned.rs": "5daf4eefdbe95027d46c77ded9e41e4076c4d928ba9102f9861765369efe1523",
+    "src/fs_ext_resize.rs": "1ffafd3b2b86c75d735ade23fbe37f8eda9a24334dbb3986743d1bc06640e3ce",
+    "src/fs_ext_tree.rs": "d6bb7b286b33f5a252cc2164c281c835c37964052ced5c05d37cece967634da8",
+    "src/fs_ext_xattr.rs": "f29ea112653e9308fff496cede786c48468fa0a43d8b8bd9ba8c5cbce57d6733",
+    "src/fs_ext_xattr_plan.rs": "23e0519722e581736a6c04fa9d132345087fdf1cdfd627c9c98a39d3bcfc537d",
+    "src/fs_ext_xattr_recovery.rs": "e38181f9b2f464ecb61331da5e4b460fcb2d0d5690391c449cd7c10764aee4bb",
+    "src/fs_ext_xattr_session.rs": "4c2979533972f83fa6423ffec05f53cc581ff10c17824ee37050c94b7bf0f1a3",
+    "src/fs_ext_xattr_write.rs": "47d04d9aa6d3896e6821d41acc1ebfdccd0a4c6335503bc52a18880e7d974b42",
+    "src/fs_fat.rs": "425bbf1d90be0bab2c3960db4a948e7cb5a03f5f3472a374a81ef2e24fafa60f",
+    "src/fs_fat_audit.rs": "e96e855c3c102083edd3a462b9265147f97cbb9b6e113f06447aa1945844664d",
+    "src/fs_fat_builder.rs": "4c1df7f6abee4c4f3e95f5ead44dea168a7cb2d414789b12b8fc78a7bbaee8db",
+    "src/fs_fat_edit.rs": "f3b168f7850f7f7c4fc56ffb85803e2dfcb79368b0eb0d5cacf9e56f0b32f3e5",
+    "src/fs_fat_edit_namespace.rs": "dbe6dd2a9458951477d21dd51c77f7cbf6a22c0f33d1d7a385af1ac93cf8ff70",
+    "src/fs_fat_edit_resize.rs": "72800858ba1ab87897d1bb93f728a9e3613cd03dca682f50cd0909250781a893",
+    "src/fs_fat_tree.rs": "9cfbaccb1a5a03463a0141ee5bb7b5e2581f717da48fa72f7f60839be79eb041",
+    "src/fs_file.rs": "78e18ebe94afbba551b497a164c494503e20df3884b45c602b2da3ff1ae7e305",
+    "src/fs_flash.rs": "b29a7abbfad60eb4c74cca6026ad33732b52908bb8f7d94cc6b19ac8abe96827",
+    "src/fs_hfs.rs": "cf83c60b616cfa87c8bf237b0bea85dc9a0d856162f493f70b30fab25c4d2aeb",
+    "src/fs_hfs_audit.rs": "312e133362728cbf11f9ff81c98cb4d74df937891238f8f32fc164819253c581",
+    "src/fs_hfs_tree.rs": "69df939f6fe7205873fb6a034b701f3a8c4629d8793b0d59bc8a1ac86fcfa06d",
+    "src/fs_hfsplus.rs": "7bcfe4074a2e80db8ecf833a436b5a9066350242971583f5dab5682ac5f5b184",
+    "src/fs_hfsplus_allocation_builder.rs": "1a2ab053f649a04669ecd542ab19c348b71615c20c675b6ff77aaa4cc56753f1",
+    "src/fs_hfsplus_audit.rs": "8f8cd8f4fce345e64e416ef48b47fd8d00a372f550e0e8c34b283d83565e0c8a",
+    "src/fs_hfsplus_builder.rs": "d17511a0a7e0fc81c58f76ac01eb63d3b5fb05015c3b8bace27b876bbce5fc1e",
+    "src/fs_hfsplus_builder_inventory.rs": "d8444e3484976b6f88161f65a1e12a438681b8c122c11450ebebca58fbd7b461",
+    "src/fs_hfsplus_builder_layout.rs": "e27d5712b9f85c666b22b562bc0a3a91164ed99d74f576becfa774d7a535da99",
+    "src/fs_hfsplus_edit.rs": "92a522d54f49e75c3be308756f2b5273406108790da7ec5403fb71d9a83a08c4",
+    "src/fs_hfsplus_fork_builder.rs": "de307fe04ecedc7742ef065e1f6012fba0a26e3f658d44b4e63c3fb62bd916b8",
+    "src/fs_hfsplus_metadata_builder.rs": "d4d7324a78d667a6d5bbb293fb218bf444d343413523968270694be930503d92",
+    "src/fs_hfsplus_node.rs": "b90a8aba287a912d0f4d7e712dd2371c16630130e2236c4a636102e43b439c3a",
+    "src/fs_hfsplus_owned_create.rs": "60bea0caa96278922240caa7cd86397b9f32091f9b497bf90adccededcfea21e",
+    "src/fs_hfsplus_owned_cuts.rs": "8dcb0e9322be55636e78d5095be18e7784dc6ed48e9a137a5efc13d2740bc951",
+    "src/fs_hfsplus_owned_namespace.rs": "d3fd39fc6bc9b0b742bc7a5c16dee502df18d05df99409f5af337b89eeef5297",
+    "src/fs_hfsplus_owned_namespace_cuts.rs": "388a42392b5d0f63eec58ec8645f1125c34c4d4f3fa1a900a1755ffde2faf9cc",
+    "src/fs_hfsplus_owned_namespace_native.rs": "a4803b7eed21b185f51bb37b8c8d4bc0d342237103cae7ca4751a61c7b12ac9f",
+    "src/fs_hfsplus_owned_namespace_native_cuts.rs": "0e4dff5649e54d2c98e8038a5a64a099b3810402aa5e3d18b26bcb68814f585b",
+    "src/fs_hfsplus_owned_prepare.rs": "4318e0f48f6c0694d1de1928f7115f4c65aaa9e5287c923ddbd3e03442be2c8b",
+    "src/fs_hfsplus_owned_recovery.rs": "309acbe5b1fb605b42f2b7de32533166141fb027e1aef59045d2837f9f90512f",
+    "src/fs_hfsplus_owned_resize.rs": "e7079d3bfe105b5b77ca48f09c81c22c9a87b0b32043790f8507a1463c42db81",
+    "src/fs_hfsplus_owned_resize_commit.rs": "7067beee803246a41a0d52839087100f91fc8e52e2c0ab8268a326b82606a66a",
+    "src/fs_hfsplus_owned_resize_cuts.rs": "71180e17c1120d828d224febe6412ddfd7dd52517fb916d957f585fbd35d2063",
+    "src/fs_hfsplus_owned_resize_forks_native.rs": "0da373d76661016f07521a6076a22eb6898f1ba12906864827bca720ec96d0db",
+    "src/fs_hfsplus_owned_resize_metadata.rs": "c0fb26a75012ab9628f2841227856334af668faf379c1db64339ba979e9bfc1b",
+    "src/fs_hfsplus_owned_resize_native.rs": "851142c456f1eb7e479c396384f96d5d5816704dd32421fe0e5ae4e7751b7091",
+    "src/fs_hfsplus_owned_resize_native_cuts.rs": "b9762362ad8ea608fdf9410f5113ec5d586eb89647ac3ed8dac918a49cc48c44",
+    "src/fs_hfsplus_owned_resize_recovery.rs": "764bbcdf188c161f10b3b05852f5c83133169e2d41a01a4d4c6e3623821b43a2",
+    "src/fs_hfsplus_owned_transaction.rs": "d88de87ee79ea765cd3ecf5633fd0dfcbb66a9387525fff42ccd9c623f5bc32e",
+    "src/fs_hfsplus_tree.rs": "46b839859b236ded491ea614c2784c8b53f3b351a8bfaeab5eb80909f12f78d8",
+    "src/fs_image.rs": "ee6df7111a6269f3fcbb8749b2dc3491e6d067c6a6d332ebb2f0f0811361f115",
+    "src/fs_jffs2.rs": "ccc1e5db8967bf0911aef6ba368f34885470480213f50e8cc3f94350995eb655",
+    "src/fs_jffs2_audit.rs": "c30d6ccbdeec7f568a3d8079c8800af97127c43fc4e848101751f75cc220c462",
+    "src/fs_jffs2_builder.rs": "825bb627ae6f16f45b363ba3ba3b7aa737c2cdd7cb09a935fd9d56a09f9b4f77",
+    "src/fs_jffs2_builder_compression.rs": "27fb8c1089d55e46bfd21ab9f5e5c1070ad153cc1e46a9ded0f493004ab8064a",
+    "src/fs_jffs2_compression.rs": "9549652afc73655bd58f9fad553c3a40280d3da97acf495f7db11915b62961c0",
+    "src/fs_jffs2_edit.rs": "b07434e74d1d71b71eaedbba1a97b723b3f95d5459300dc2bcc9aa1009c353c4",
+    "src/fs_jffs2_edit_compression.rs": "b4ba481e8fc5e8c2051091839e9eb858c38848311a73962016c7864a4a9a947c",
+    "src/fs_jffs2_edit_compression_tests.rs": "869c542ba0fa700f03fe83f5b0c18519f18a29a22b5dec272980e728f94b05f4",
+    "src/fs_jffs2_edit_file.rs": "485a668fbc482766d7d1b60ae3534caa3dc3ea657b470a5d17eda985d822df55",
+    "src/fs_jffs2_edit_gc.rs": "ff67b5d89b062bf650a4d724ac4150cbfc9cef4ce92286f701e2736815410dcf",
+    "src/fs_jffs2_edit_journal.rs": "11525c79492a42643bcbeaee5bdbb9d25ed3a8ec1cc895a829a48e346cd8d9e0",
+    "src/fs_jffs2_edit_namespace.rs": "6d7de88aaf8adcfffc6833e87f89b50196d6198a75ea1dd9f7b9e5842313b480",
+    "src/fs_jffs2_tree.rs": "e0a96bbfb918df437965fec723dba98a354a5aa423858494b0024ffca96408af",
+    "src/fs_jfs.rs": "87df734cd59b1022d844eac706fe36e32967774932f4c5ff91af7e524ac08239",
+    "src/fs_jfs_audit.rs": "38eca796df7829eee03f271ddccc104c74801784a7c25c60b4b0a14f8731c374",
+    "src/fs_jfs_edit.rs": "5e296d6da7230afe8f6fe51a029a7d0d5ede2c83a1e8688dc4e47fc06dec5f6f",
+    "src/fs_jfs_edit_allocation.rs": "3c0a1ba574f51119caee047747a7bf9450c53b35440e9572f211f3ab03cff5d3",
+    "src/fs_jfs_edit_journal.rs": "ac77fda7e879348a1d2272d76b7feb264af766db444cfecd8a7ff663e0f1046f",
+    "src/fs_jfs_edit_namespace.rs": "6a6c5c73cd29fdff7acc8605981f813d9bd7c33547275f7aeeef053ee38c281e",
+    "src/fs_jfs_edit_rename.rs": "c7c39bb3dcb1a9030b67561515c00f908c1acd2dd780c80a96e9851ea3fef97e",
+    "src/fs_jfs_edit_rollover.rs": "2ead6279c7cae389d96f79be55f1b39272bb2341afd580778393ec5854cfe7a5",
+    "src/fs_jfs_tree.rs": "1f9fff31c5b81aeec32ea393a08df9610db8154c08c51004f204736c8f215a64",
+    "src/fs_maintenance.rs": "129dc10bcc2cdc25994feeb980097778dd11bc3ea020494b22a70557c93f3362",
+    "src/fs_maintenance_audit.rs": "0e5c2cf8d7e4b104eedd93919cbd0a8e3f1f970129533ffc0451284e02c9d5a6",
+    "src/fs_maintenance_format.rs": "1c127ba5cd6d5c77ab3886001ac30ea2a15e15b189082930be0a1ef1ec43b4a9",
+    "src/fs_maintenance_format_tests.rs": "a3e7ba6895ad100ade69290570de984d63c1bfafd3b161c08ceb6afac3ba5838",
+    "src/fs_ntfs.rs": "7686da4cf73cd372937e260128b58f654acabdb50d97ebb209b7248ccc97b2cb",
+    "src/fs_ntfs_audit.rs": "60b4f839cb9e4973ad24da70336ffcfa0efabc934b5e2fc8813bbb63a6b5c1c1",
+    "src/fs_ntfs_bootstrap.rs": "3fd7d7cb41038d786451de9aba68d2c88cbb2d2d69a08879349ee42fde3cbb69",
+    "src/fs_ntfs_compressed.rs": "2a8f2363a09234c1b957972de4c7dcd219103f738a125ff4cf48620022dd30e7",
+    "src/fs_ntfs_logfile/active_seed.rs": "49850cd6004f2926b0695885d4e2368553e110168093ad27b3f2f84db73f585d",
+    "src/fs_ntfs_logfile/checkpoint.rs": "196ad8493dbf79a486e97acdc4350100252d5d9a686c7594069c3561d57c8de9",
+    "src/fs_ntfs_logfile/checkpoint_dumps.rs": "bb6eaffadfe59831382e10eaa91bf994f6777d6c9bb40cea486d947ae7768b3b",
+    "src/fs_ntfs_logfile/client_record.rs": "e263e0c9fd3fb43589c817954a605a4c7f5221ed370b65258a3e817fb21bb822",
+    "src/fs_ntfs_logfile/native_analysis_context/target_query/target_runs.rs": "af5b6a4ce132118c6f5e626c6f41c0b9035f7323a20007f23db5bda2a490f98e",
+    "src/fs_ntfs_logfile/native_analysis_context/target_query.rs": "13aca25383c468404c167021fcc78f49cbe2e644c883719988bd65bb57050ac9",
+    "src/fs_ntfs_logfile/native_analysis_context.rs": "3bdf6aa3a298b648da9a38c7a7c96b2cde548b629b0c59c790b27a15529bee16",
+    "src/fs_ntfs_logfile/pages.rs": "e6aee74400bb60bcdb75aab5294f90381d2f864ac42b833701ca1d63819ac535",
+    "src/fs_ntfs_logfile/record.rs": "13a373bc3619bf98d4accaed5f6bf839adceca4afba91b5a2ef4d53c28d672cc",
+    "src/fs_ntfs_logfile/record_links.rs": "43f39f4b2fd79cc48b782a7cc8fde04b590daabb2b9dc1204e2cd6fecd9ef985",
+    "src/fs_ntfs_logfile/restart_selection.rs": "47c26925c03967ba6e920fa5c355650eebac3132b3714f4851691410b3ce94de",
+    "src/fs_ntfs_logfile/restart_table.rs": "3772ba2d221d8a50ba75e1c9d44effb6420118be74526708682dcbd84bd8c509",
+    "src/fs_ntfs_logfile/table_entries.rs": "30f799c5592ccb5c9dd154ab3b2f89c61056c8a99f801e4dab93610a64ace765",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/open_analysis.rs": "dc6585fc8142ff6fbfc4df5dd92f59848aa663f235d432ea0ebe2398dbcb61ee",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs/redo_analysis/native_file.rs": "83ad3c50f7df728b06c987e7dbfbe7b008bf10ee1c2af84635a8a989e4369d05",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs/redo_analysis/undo_analysis/mirror_finalization.rs": "f5d279edca140ce2663b7edadfa7c747086d11ac63e2cbef77a193d388b751d2",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs/redo_analysis/undo_analysis.rs": "de05b3b36f694d92b43f0601e7d3ade6ac314cd35d9956e8779dbb11827e3d96",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs/redo_analysis.rs": "aa4816c9725741550b12cad77ba5b455a86dd9b81b6567a83e13041779e35f3c",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents/native_dirty_runs.rs": "0e1183efff68569a4002527386278d3cee931692f16577df9d628b6041d305dc",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis/target_intents.rs": "270e3bef635fa8b335058db4f74cec2dba12f9a09136b4e8140d49b925fde428",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis/dirty_analysis.rs": "d45334e9521530b887d1d51bfeebf7a4070f1c87c13438479396e02cedc7c73d",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis/replay_analysis.rs": "baa19dbb3466348f777f43b778d396db3b20c982bf1a9d9d9aabca710405f3e6",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor/checkpoint_analysis.rs": "effe91763341538dfe4a8fa51aebdc32f5d67fe0e1cd82d5efdc2cc32aa09dfb",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay/successor.rs": "49d6f9d9e5b6974bac8878db66b718d49778ea2f097ac67a64b92dc285ba3706",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/overlay.rs": "e973a09920383092309e4ac1e296411d608c3ad8ac2a9635a1fd34a35d8e2708",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary/partial.rs": "2b06668b38390e06ec683ea536af76aeffd56cbf33bfde0a0f6736599c612845",
+    "src/fs_ntfs_logfile/tail_discovery/ordinary.rs": "3a9edf14f71005b1d3b8b97a62eff54a6dd4cadcb650ff229d55d3ba399b2424",
+    "src/fs_ntfs_logfile/tail_discovery.rs": "aaa32e70e868f53c46283854caf9a54f11d59a04036992e9608bf845de4113fb",
+    "src/fs_ntfs_logfile.rs": "9895c32358968c74e323b8a33085e3998ab634a0b20fe5bb0b4c1afca811be9d",
+    "src/fs_ntfs_metadata.rs": "acaf5953279511eef94ae68e66de060c3cfae00fd5b117118a4d5a45ef718617",
+    "src/fs_ntfs_native_log_target.rs": "86b31f9e7bd0faa7f7006d18339374d1576fbcc4a31bfe540a03a88a4a6c434f",
+    "src/fs_ntfs_secure.rs": "8dfbe931544fb6bcfa4d6482856515cc2b8868c745303bcd5ae6d9a13c405353",
+    "src/fs_ntfs_security.rs": "d2519cf1b235046bfeac3df69c389d2b6509338ccaeac0d7ef2f98fc0a408c4b",
+    "src/fs_ntfs_stream.rs": "08f1b6dd8614c279787ebb1d0436123ce0d9add834683586023df3924a1bc4ef",
+    "src/fs_ntfs_tree.rs": "953f20fb4c8b331a4add92cb41e9a6480aa4f586087a29d12a96b276a6ea02e6",
+    "src/fs_ntfs_usn.rs": "eb4d08504490f77732bfc6d21376472dbe7f8a979e7b01b2dc69f442f2803f34",
+    "src/fs_ntfs_usn_extract.rs": "49983b8aaea68574319fbf64fe065c75c6ee5dab0ebe8a6b2527a7294f4553e3",
+    "src/fs_pagination.rs": "189babdc0aed8fc360cd6062e881b32e3e07782461d49db70d36b3569494447f",
+    "src/fs_pipeline.rs": "0cbc682b40d8f17cd193120431b4832e94f11ea07eeda5d4629e93561fcc7834",
+    "src/fs_storage.rs": "e2ecc81957c3a1cabfbed4f3df8032369217d893881efa6999e347906de8f1e2",
+    "src/fs_undo.rs": "070f52dfda33cc45af910df46f3e7352db1bf107bddc5c8757e2302b1b38515f",
+    "src/fs_xfs.rs": "52bc4836aa4eecb2a861794d9f6f7a5f228b0e1defa437d88591b1cdf2fd2bc2",
+    "src/fs_xfs_audit.rs": "c68cdbace2f0494fa0970fb30cde7d7a41764ca6aa0b5051ac27f46fdb0cbae3",
+    "src/fs_xfs_tree.rs": "5af10308e5b73e5e01dd07721052c8d5327082f2077c51ec7a1fc988f2c023b9",
+    "src/gpt.rs": "cf2609e494374ec0078f9ab12b5860a21cbe02e7faa5892fd625c316fd3de861",
+    "src/guid.rs": "bf5a4765ee04efaa17ca83ff4ba99a8047ecbdc50cc49cc011779d4e60ddb2b3",
+    "src/io.rs": "ce4194333430d580e310f957bfa0eed5c5d0f1115d5e3e687340feadb3f27883",
+    "src/layout.rs": "f470daa1d4b372fbbfd764e22b907b758bd1e2ffaf5c918edeae46f08cb42987",
+    "src/lib.rs": "e0d70f66471101c8548bfb6ef07d02ec1acd974717af1bca88ecffa187a6c04c",
+    "src/partition.rs": "e7d272a2e6c713abd507e6a286e50607ea0e292165b04f90472d6c384f450492",
+    "src/payload.rs": "6140746bbe97a4b3f5a04f9da1b80dc67063bc15cff85432f75d8ef28bc04774",
+    "src/platform.rs": "d3ea50a867c289f66292f2c137b041f52b27ecf5fb869646a7f069b9050e4c74",
+    "src/recovery.rs": "7dcc4286c36913680d30ec52732106537406f798559e2e16eb7f3d37b3a80a48",
+    "src/storage.rs": "7238e55f0dbe3db990b37e37b1bcd72582949e2ac02998d57f1c66b9b511eb25",
+    "src/uefi.rs": "9f1b8bb690e1bb5931caa060298198c3efd8bfefb142373feec7701682a73de1",
+    "src/volume_probe.rs": "8325b0c37b98ad3dcef06197de1d09d390df444c54110121a76cb523fcda1976",
+    "Cargo.toml": "649acef8ef84a86eefcb4ddb27d16e589a3b688f1801bc4ea6394038743b3ccd",
+    "Cargo.lock": "9695f7168b9a6d0391a5bd4de9addb540c6d0ff7b027152614f6c30c447cbdc5",
+    "examples/filesystem-forensics.rs": "c8a0dda920bda92a11c0cde5cdb78b3922f5f25099ea1996a9f97ec70673254f"
+  },
+  "library_sources_unchanged": true,
+  "finished_utc": "2026-10-13T12:48:22.201859+00:00"
+}

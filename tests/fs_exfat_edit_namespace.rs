@@ -931,7 +931,6 @@ fn native_exfatprogs_tsk_namespace() {
         source_before,
         Sha256::digest(std::fs::read(&native).unwrap())
     );
-    drop(run);
     receipt.push_str(&format!("resource_limit_bytes=33554432\nplanning_affected_limit_bytes=1048576\nplanning_work_limit=200000\nundo_patch_limit=1024\nundo_body_limit_bytes=4192256\nframing=unchanged\nframed_image_sha256={framed_before:x}\noriginal_mkfs_source_sha256={source_before:x}\nvalidator_image_sha256={before:x}\nroot_growth_clusters={growth}\nsubdirectory_growth_clusters={subdirectory_growth}\nexpected_files=51\neditor_and_TSK_payloads=match\nresource_refund=passed\nstatus=passed\n"));
     std::fs::write(root.join("receipt.txt"), receipt).unwrap();
 }

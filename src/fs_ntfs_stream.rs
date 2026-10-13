@@ -1,8 +1,11 @@
 //! Isolated draft: exact DATA streams and bounded attribute-list resolution.
 use super::*;
+#[path = "fs_ntfs_native_log_target.rs"]
+mod native_log_target;
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)] // Mirrors the allocation types supplied by the std prelude.
 use crate::platform::prelude::*;
+pub(crate) use native_log_target::*;
 /// Additional aggregate ceilings, independent of per-record decoder limits.
 #[derive(Clone, Copy, Debug)]
 pub struct NtfsStreamLimits {
@@ -30,6 +33,8 @@ pub struct NtfsDataStream {
     pub initialized: u64,
     /// Native sparse flag, not a claim of compression support.
     pub sparse: bool,
+    /// Native LZNT1 compression state of this stream, independent of object flags.
+    pub compressed: bool,
     /// Attribute occurrences contributing to this stream.
     pub segments: usize,
 }
@@ -81,7 +86,7 @@ pub struct NtfsNativeFileName<'a> {
     /// Exact UTF16LE name bytes, including non-Unicode code units.
     pub name: &'a [u8],
 }
-fn standard_view(value: &[u8]) -> Option<NtfsNativeStandardInformation<'_>> {
+pub(crate) fn standard_view(value: &[u8]) -> Option<NtfsNativeStandardInformation<'_>> {
     if !matches!(value.len(), 48 | 72) {
         return None;
     }
@@ -97,7 +102,7 @@ fn standard_view(value: &[u8]) -> Option<NtfsNativeStandardInformation<'_>> {
         security_id: (value.len() == 72).then(|| u32le(value, 52)),
     })
 }
-fn filename_view(value: &[u8]) -> Option<NtfsNativeFileName<'_>> {
+pub(crate) fn filename_view(value: &[u8]) -> Option<NtfsNativeFileName<'_>> {
     if value.len() < 66 || value.len() != 66 + usize::from(value[64]) * 2 {
         return None;
     }
@@ -159,19 +164,40 @@ impl NtfsNativeAttribute {
     }
 }
 #[derive(Clone, Copy)]
-struct Located {
-    record: usize,
-    attribute: Attribute,
+pub(crate) struct Located {
+    pub(crate) record: usize,
+    pub(crate) attribute: Attribute,
 }
-struct Resolved {
-    records: Vec<NtfsRecord>,
-    attributes: Vec<Located>,
+pub(crate) struct Resolved {
+    pub(crate) records: Vec<NtfsRecord>,
+    pub(crate) attributes: Vec<Located>,
     _reservation: Reservation,
 }
-fn attribute_bytes(record: &NtfsRecord, a: Attribute) -> &[u8] {
+/// Physical allocation before logical EOF/initialized-size clipping.
+pub(crate) struct NativeClaim {
+    pub(crate) record: usize,
+    pub(crate) attribute: Attribute,
+    pub(crate) lowest_vcn: u64,
+    pub(crate) highest_vcn: u64,
+    pub(crate) offset: u64,
+    pub(crate) length: u64,
+}
+pub(crate) struct NativeMap {
+    pub(crate) content: Content,
+    pub(crate) segments: usize,
+    pub(crate) initialized: u64,
+    pub(crate) sparse: bool,
+    pub(crate) allocated: u64,
+    pub(crate) length: u64,
+    pub(crate) native_extents: Vec<FileExtent>,
+    pub(crate) runs: usize,
+    pub(crate) claims: Vec<NativeClaim>,
+    pub(crate) reservation: Reservation,
+}
+pub(crate) fn attribute_bytes(record: &NtfsRecord, a: Attribute) -> &[u8] {
     &record.bytes[a.start..a.start + a.length]
 }
-fn native_name(record: &NtfsRecord, a: Attribute) -> &[u8] {
+pub(crate) fn native_name(record: &NtfsRecord, a: Attribute) -> &[u8] {
     let b = attribute_bytes(record, a);
     let start = usize::from(u16le(b, 10));
     if b[9] == 0 {
@@ -271,7 +297,7 @@ impl NtfsVolume {
             .identity)
     }
 
-    fn complete_record(
+    pub(crate) fn complete_record(
         &self,
         number: u64,
         profile: RecordProfile,
@@ -302,7 +328,7 @@ impl NtfsVolume {
             profile,
         )
     }
-    fn resolve_stream_record(
+    pub(crate) fn resolve_stream_record(
         &self,
         object: &ObjectId,
         limits: NtfsStreamLimits,
@@ -500,6 +526,21 @@ impl NtfsVolume {
                 }
             }
         }
+        // The list describes other attributes but owns allocation itself as well.
+        for attribute in &lists {
+            if !attributes
+                .iter()
+                .any(|a| a.record == 0 && a.attribute.start == attribute.start)
+            {
+                if attributes.len() == limits.attributes {
+                    return Err(budget("NTFS resolved attribute ceiling"));
+                }
+                attributes.push(Located {
+                    record: 0,
+                    attribute: *attribute,
+                });
+            }
+        }
         Ok(Resolved {
             records,
             attributes,
@@ -516,6 +557,15 @@ impl NtfsVolume {
         r: &Resources,
     ) -> Result<Budgeted<Vec<NtfsNativeAttribute>>> {
         let resolved = self.resolve_stream_record(object, limits, r)?;
+        self.retain_native_attributes(&resolved, object, limits, r)
+    }
+    fn retain_native_attributes(
+        &self,
+        resolved: &Resolved,
+        object: &ObjectId,
+        limits: NtfsStreamLimits,
+        r: &Resources,
+    ) -> Result<Budgeted<Vec<NtfsNativeAttribute>>> {
         let count = resolved
             .records
             .iter()
@@ -568,6 +618,26 @@ impl NtfsVolume {
         limits: NtfsStreamLimits,
         r: &Resources,
     ) -> Result<Budgeted<Vec<NtfsDataStream>>> {
+        self.data_streams_for(object, limits, None, r)
+    }
+    /// Inspect DATA/ADS including the explicitly bounded native LZNT1 profile.
+    /// This does not admit compressed objects to capture or ownership audits.
+    pub fn data_streams_with_compression(
+        &self,
+        object: &ObjectId,
+        limits: NtfsStreamLimits,
+        compression: NtfsCompressionLimits,
+        r: &Resources,
+    ) -> Result<Budgeted<Vec<NtfsDataStream>>> {
+        self.data_streams_for(object, limits, Some(compression), r)
+    }
+    fn data_streams_for(
+        &self,
+        object: &ObjectId,
+        limits: NtfsStreamLimits,
+        compression: Option<NtfsCompressionLimits>,
+        r: &Resources,
+    ) -> Result<Budgeted<Vec<NtfsDataStream>>> {
         let resolved = self.resolve_stream_record(object, limits, r)?;
         let charge = (limits.attributes as u64)
             .checked_mul(1024)
@@ -598,16 +668,19 @@ impl NtfsVolume {
                     return Err(bad("NTFS duplicate DATA stream start"));
                 }
                 let (content, segments, initialized, sparse, _map_lease) =
-                    self.stream_content(&resolved, 0x80, &name, limits, r)?;
+                    self.stream_content(&resolved, 0x80, &name, limits, compression, r)?;
+                let compressed = matches!(content, Content::Compressed(_));
                 let length = match content {
                     Content::Resident(ref b) => b.len() as u64,
                     Content::Mapped(ref f) => f.len(),
+                    Content::Compressed(ref f) => f.len(),
                 };
                 streams.push(NtfsDataStream {
                     name,
                     length,
                     initialized,
                     sparse,
+                    compressed,
                     segments,
                 });
             }
@@ -634,6 +707,29 @@ impl NtfsVolume {
         limits: NtfsStreamLimits,
         r: &Resources,
     ) -> Result<NtfsFile> {
+        self.open_stream_for(object, name, limits, None, r)
+    }
+    /// Open an exact DATA stream with explicit limits for native LZNT1 units.
+    /// Supports plain, sparse, compressed and zero units; EFS and WOF remain
+    /// unavailable. The source must remain immutable, as for other readers.
+    pub fn open_stream_with_compression(
+        &self,
+        object: &ObjectId,
+        name: &[u16],
+        limits: NtfsStreamLimits,
+        compression: NtfsCompressionLimits,
+        r: &Resources,
+    ) -> Result<NtfsFile> {
+        self.open_stream_for(object, name, limits, Some(compression), r)
+    }
+    fn open_stream_for(
+        &self,
+        object: &ObjectId,
+        name: &[u16],
+        limits: NtfsStreamLimits,
+        compression: Option<NtfsCompressionLimits>,
+        r: &Resources,
+    ) -> Result<NtfsFile> {
         let resolved = self.resolve_stream_record(object, limits, r)?;
         if resolved.records[0].is_directory() && name.is_empty() {
             return Err(Error::new(
@@ -641,14 +737,13 @@ impl NtfsVolume {
                 "NTFS unnamed directory DATA unavailable",
             ));
         }
-        if resolved.records[0]
-            .file_flags
-            .is_some_and(|f| f & (0x400 | 0x800 | 0x1000 | 0x4000) != 0)
-        {
+        if resolved.records[0].file_flags.is_some_and(|f| {
+            f & (0x400 | 0x1000 | 0x4000) != 0 || compression.is_none() && f & 0x800 != 0
+        }) {
             return Err(unsupported("NTFS special object stream capture"));
         }
         let (content, _, _, _, reservation) =
-            self.stream_content(&resolved, 0x80, name, limits, r)?;
+            self.stream_content(&resolved, 0x80, name, limits, compression, r)?;
         Ok(NtfsFile {
             identity: object.clone(),
             context: self.context.clone(),
@@ -672,7 +767,7 @@ impl NtfsVolume {
         }
         let resolved = self.resolve_stream_record(object, limits, r)?;
         let (content, _, _, _, reservation) =
-            self.stream_content(&resolved, kind, name, limits, r)?;
+            self.stream_content(&resolved, kind, name, limits, None, r)?;
         Ok(NtfsFile {
             identity: object.clone(),
             context: self.context.clone(),
@@ -680,14 +775,50 @@ impl NtfsVolume {
             _reservation: reservation,
         })
     }
-    fn stream_content(
+    pub(crate) fn resolved_native_file(
         &self,
         resolved: &Resolved,
         kind: u32,
         name: &[u16],
         limits: NtfsStreamLimits,
         r: &Resources,
+    ) -> Result<NtfsFile> {
+        let (content, _, _, _, reservation) =
+            self.stream_content(resolved, kind, name, limits, None, r)?;
+        Ok(NtfsFile {
+            identity: resolved.records[0].identity.clone(),
+            context: self.context.clone(),
+            content,
+            _reservation: reservation,
+        })
+    }
+    pub(crate) fn stream_content(
+        &self,
+        resolved: &Resolved,
+        kind: u32,
+        name: &[u16],
+        limits: NtfsStreamLimits,
+        compression: Option<NtfsCompressionLimits>,
+        r: &Resources,
     ) -> Result<(Content, usize, u64, bool, Reservation)> {
+        let map = self.native_map(resolved, kind, name, limits, compression, r)?;
+        Ok((
+            map.content,
+            map.segments,
+            map.initialized,
+            map.sparse,
+            map.reservation,
+        ))
+    }
+    pub(crate) fn native_map(
+        &self,
+        resolved: &Resolved,
+        kind: u32,
+        name: &[u16],
+        limits: NtfsStreamLimits,
+        compression: Option<NtfsCompressionLimits>,
+        r: &Resources,
+    ) -> Result<NativeMap> {
         let selected_charge = (limits.attributes as u64)
             .checked_mul(crate::platform::mem::size_of::<Located>() as u64)
             .ok_or_else(|| budget("NTFS selected segment charge"))?;
@@ -721,13 +852,18 @@ impl NtfsVolume {
             let lease = r.memory.reserve(value.len() as u64 + 512)?;
             let mut bytes = vector(value.len())?;
             bytes.extend_from_slice(value);
-            return Ok((
-                Content::Resident(bytes),
-                1,
-                value.len() as u64,
-                false,
-                lease,
-            ));
+            return Ok(NativeMap {
+                content: Content::Resident(bytes),
+                segments: 1,
+                initialized: value.len() as u64,
+                sparse: false,
+                allocated: 0,
+                length: value.len() as u64,
+                native_extents: Vec::new(),
+                runs: 0,
+                claims: Vec::new(),
+                reservation: lease,
+            });
         }
         if u64le(first_bytes, 16) != 0 {
             return Err(bad("NTFS DATA lacks VCN0"));
@@ -736,12 +872,44 @@ impl NtfsVolume {
         let initialized = u64le(first_bytes, 56);
         let allocated = u64le(first_bytes, 40);
         let sparse = first.attribute.flags & 0x8000 != 0;
+        let compressed = first.attribute.flags & 1 != 0;
+        if compressed && compression.is_none() {
+            return Err(unsupported(
+                "NTFS compressed stream requires explicit compression limits",
+            ));
+        }
+        if compressed && (kind != 0x80 || u16le(first_bytes, 34) != 4) {
+            return Err(unsupported("NTFS LZNT1 stream compression-unit profile"));
+        }
+        let bad_clusters = u64le(&resolved.records[0].identity.native, 0) == 8
+            && kind == 0x80
+            && name == [0x24, 0x42, 0x61, 0x64];
+        if bad_clusters
+            && (length
+                != self.geometry.volume_bytes / self.geometry.cluster_bytes
+                    * self.geometry.cluster_bytes
+                || initialized != 0)
+        {
+            return Err(bad("NTFS $BadClus virtual geometry/initialized size"));
+        }
         if initialized > length || !allocated.is_multiple_of(self.geometry.cluster_bytes) {
             return Err(bad("NTFS stream sizes"));
         }
         let map_lease = r.memory.reserve(
             map_charge(limits.runs)?
                 .checked_add(2 * self.geometry.record_bytes as u64)
+                .and_then(|n| {
+                    n.checked_add(
+                        (limits.runs as u64)
+                            .checked_mul(crate::platform::mem::size_of::<FileExtent>() as u64)?,
+                    )
+                })
+                .and_then(|n| {
+                    n.checked_add(
+                        (limits.runs as u64)
+                            .checked_mul(crate::platform::mem::size_of::<NativeClaim>() as u64)?,
+                    )
+                })
                 .ok_or_else(|| budget("NTFS stream working charge"))?,
         )?;
         let mut extents = vector(
@@ -751,6 +919,8 @@ impl NtfsVolume {
                 .ok_or_else(|| budget("NTFS stream extent cap overflow"))?,
         )?;
         let mut physical = vector(limits.runs)?;
+        let mut claims = vector(limits.runs)?;
+        let mut native_extents = vector(limits.runs)?;
         let mut next = 0u64;
         let mut run_count = 0usize;
         for located in &selected {
@@ -775,22 +945,53 @@ impl NtfsVolume {
             let offset = next
                 .checked_mul(self.geometry.cluster_bytes)
                 .ok_or_else(|| bad("NTFS continuation offset overflow"))?;
-            let mut normalized = vector(b.len())?;
-            normalized.extend_from_slice(b);
+            let mut normalized = vector(b.len() + 8)?;
+            // Only the base compressed segment carries the physical-size field.
+            // Insert an extended sparse header for the structural run decoder.
+            if compressed && next != 0 || bad_clusters && !sparse && !compressed {
+                normalized.extend_from_slice(&b[..64]);
+                normalized.extend_from_slice(&[0; 8]);
+                normalized.extend_from_slice(&b[64..]);
+                let run_at = u16le(b, 32)
+                    .checked_add(8)
+                    .ok_or_else(|| bad("NTFS compressed run offset overflow"))?;
+                normalized[32..34].copy_from_slice(&run_at.to_le_bytes());
+                if b[9] != 0 {
+                    let name_at = u16le(b, 10)
+                        .checked_add(8)
+                        .ok_or_else(|| bad("NTFS compressed name offset overflow"))?;
+                    normalized[10..12].copy_from_slice(&name_at.to_le_bytes());
+                }
+            } else {
+                normalized.extend_from_slice(b);
+            }
+            if compressed {
+                if b[35..40].iter().any(|byte| *byte != 0) {
+                    return Err(unsupported("NTFS compressed reserved header fields"));
+                }
+                normalized[12..14].copy_from_slice(&0x8000u16.to_le_bytes());
+                normalized[34..36].fill(0);
+            }
+            if bad_clusters && !sparse && !compressed {
+                normalized[12..14].copy_from_slice(&0x8000u16.to_le_bytes());
+            }
+            #[cfg(feature = "forensics")]
+            self.normalize_forensic_sparse_unit(b, &mut normalized);
             normalized[16..24].fill(0);
             normalized[24..32].copy_from_slice(&clusters.wrapping_sub(1).to_le_bytes());
             for at in [40, 48, 56] {
                 normalized[at..at + 8].copy_from_slice(&segment_bytes.to_le_bytes());
             }
             // Segment headers carry whole-stream physical size only at VCN0.
-            if sparse {
+            if sparse || compressed {
                 normalized[64..72].fill(0);
             }
             let remaining = limits
                 .runs
                 .checked_sub(run_count)
                 .ok_or_else(|| budget("NTFS stream run cap"))?;
-            // Decode a segment's runlist structurally; aggregate physical accounting below.
+            // $BadClus uses the same structural hole admission after checking
+            // its original whole-stream geometry above; carrier identity is irrelevant.
             let mapping = decode_segment(
                 &normalized,
                 &self.geometry,
@@ -799,21 +1000,46 @@ impl NtfsVolume {
                     ..self.limits
                 },
                 r,
-                sparse,
+                sparse || compressed || bad_clusters,
             )?;
             run_count = run_count
                 .checked_add(mapping.runs)
                 .filter(|n| *n <= limits.runs)
                 .ok_or_else(|| budget("NTFS aggregate stream runs"))?;
             physical.extend_from_slice(&mapping.physical);
+            for &(physical_offset, physical_length) in &mapping.physical {
+                claims.push(NativeClaim {
+                    record: located.record,
+                    attribute: a,
+                    lowest_vcn: next,
+                    highest_vcn: high,
+                    offset: physical_offset,
+                    length: physical_length,
+                });
+            }
             for e in mapping.extents {
                 let start = offset
                     .checked_add(e.offset)
                     .ok_or_else(|| bad("NTFS continuation logical overflow"))?;
+                native_extents.push(FileExtent {
+                    offset: start,
+                    length: e.length,
+                    kind: e.kind,
+                });
                 let end = start
                     .checked_add(e.length)
                     .ok_or_else(|| bad("NTFS continuation end overflow"))?
-                    .min(length);
+                    .min(if compressed { allocated } else { length });
+                if compressed {
+                    if end > start {
+                        extents.push(FileExtent {
+                            offset: start,
+                            length: end - start,
+                            kind: e.kind,
+                        });
+                    }
+                    continue;
+                }
                 let split = end.min(initialized).max(start);
                 if split > start {
                     extents.push(FileExtent {
@@ -845,7 +1071,7 @@ impl NtfsVolume {
         if physical.windows(2).any(|w| w[0].0 + w[0].1 > w[1].0) {
             return Err(bad("NTFS overlapping DATA segment allocations"));
         }
-        if sparse {
+        if sparse || compressed {
             let sum = physical
                 .iter()
                 .try_fold(0u64, |n, (_, len)| n.checked_add(*len))
@@ -854,6 +1080,29 @@ impl NtfsVolume {
                 return Err(bad("NTFS aggregate sparse physical size"));
             }
         }
+        if let Some(compression) = compression.filter(|_| compressed) {
+            let file = compressed::CompressedContent::new(
+                self.context.source.clone(),
+                length,
+                initialized,
+                self.geometry.cluster_bytes,
+                u16le(first_bytes, 34),
+                extents,
+                compression,
+            )?;
+            return Ok(NativeMap {
+                content: Content::Compressed(file),
+                segments: selected.len(),
+                initialized,
+                sparse,
+                allocated,
+                length,
+                native_extents,
+                runs: run_count,
+                claims,
+                reservation: map_lease,
+            });
+        }
         let file = ExtentFile::new(
             self.context.source.clone(),
             length,
@@ -861,13 +1110,18 @@ impl NtfsVolume {
             limits.runs.saturating_mul(2),
         )
         .map_err(|e| Error::io("NTFS assembled stream map", e))?;
-        Ok((
-            Content::Mapped(file),
-            selected.len(),
+        Ok(NativeMap {
+            content: Content::Mapped(file),
+            segments: selected.len(),
             initialized,
             sparse,
-            map_lease,
-        ))
+            allocated,
+            length,
+            native_extents,
+            runs: run_count,
+            claims,
+            reservation: map_lease,
+        })
     }
 }
 // Existing structural mapping decoder validates sparse accounting per segment;

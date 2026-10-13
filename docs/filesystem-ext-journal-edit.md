@@ -1,8 +1,674 @@
 # Native ext journal editing work
 
-The owned native JBD2 engine is under implementation. The current transaction codec and borrowed-storage constructor are compiled only in tests; no public editor capability is exposed. The existing classic `ExtEditor` retains its external-undo contract. Remaining implementation includes public native capability, broader inode/profile support, and the complete independent native operation interruption matrix. The private checksum profile now implements bounded linear-directory and HTree create/mkdir/rename/move/delete, directory growth and extent-backed replacement/extension/truncation. Classic indirect-map checksum planners have portable interruption tests and independent 1/2/4KiB native operation evidence. The staged recovery path now completes its final-redo ownership audit before its first write.
+The `std` build now exposes `fs_ext::ExtJournalSession`, an owned ordered
+classic-ext3 surface for regular-file append/create/truncate/range overwrite/sparse extension and journaled directory
+creation, rename/move, hardlink creation, file unlink and empty-directory removal,
+plus exact unfollowed symlink creation, target replacement, reading, rename and
+unlink. Manifest version seven admits Linux revision-one filesystems with 128-byte inodes, 1/2/4 KiB blocks,
+exact compatible/incompatible/read-only feature words 4/2/1 (RECOVER is permitted
+only as the recovery-state bit), and an internal checksumless journal without
+REVOKE and with first block one. File handles and reads are bound to the owner and
+session generation; mutation and recovery invalidate prior handles. Explicit
+owned recovery checks the replayed profile before writes and retains
+`NeedsRecovery` through post-recovery profile, source and cancellation checks.
+Foreign dirty logs are not an automatic fallback. Mutable storage never becomes
+an immutable reader, and the caller must ensure exclusive backend access.
 
-The bounded scanner handles legacy, checksum-v2 and checksum-v3 records, ring wrap, escaped data, committed revocations and incomplete transaction tails. The private writer supports native v2/v3 checksums and a separately bound owned legacy profile. Legacy publication preserves the native no-checksum feature bits and uses a SHA256 integrity footer in kernel-ignored commit padding; recovery rejects foreign unsealed legacy transactions. This footer is not a native journal checksum feature or an authentication claim. Publication durably clears the future commit header, writes and verifies descriptor/data plus the commit body, then publishes its twelve-byte header and verifies the complete commit. A torn header cannot expose a body that has not already passed its durable barrier. Both record count and work, including duplicate/revocation comparisons, consume explicit ceilings; retained maps and redo buffers use shared leases. Whole transaction validation precedes any authorized home-block replay.
+The earlier manifest-one public-session host checks passed at
+`/data/cache/partmgr-maintenance-ext-public-session-checks-20261011-v2/result.json`,
+including six public consumer tests. Public ordered v2 and renewed private
+fulljournal v10 native gates pass for their bound source snapshot. Historical
+private receipts retain their original scope. Broader ordered operations,
+modern profiles, metadata/ACL editing and the complete maintenance plan remain
+unfinished; E1 is not declared complete.
+
+The existing classic `ExtEditor` retains its external-undo contract. Broader
+checksum, extent, HTree and modern namespace engines remain private. Their earlier
+profile receipts do not widen the public ordered capability.
+
+The bounded scanner handles legacy, checksum-v2 and checksum-v3 records, ring wrap, escaped data, committed revocations and incomplete transaction tails. The private writer supports native v2/v3 checksums and a separately bound owned legacy profile. Legacy publication preserves the native no-checksum feature bits and uses a SHA256 integrity footer in kernel-ignored commit padding; the owned recovery path rejects foreign unsealed legacy transactions. This footer is not a native journal checksum feature or an authentication claim. Publication durably clears the future commit header, writes and verifies descriptor/data plus the commit body, then publishes its twelve-byte header and verifies the complete commit. A torn header cannot expose a body that has not already passed its durable barrier. Both record count and work, including duplicate/revocation comparisons, consume explicit ceilings; retained maps and redo buffers use shared leases. Whole transaction validation precedes any authorized home-block replay.
+
+A separate private foreign-journal preflight now uses the native scanner without
+the owned preparation or legacy footer requirement. It validates the original
+active journal header and checksum before normalizing an inactive header solely
+inside the replay overlay. Actual native start and sequence fields govern the
+scan. The complete overlay ownership audit must pass, including unchanged journal
+inode and allocation mapping. The returned plan borrows exclusive storage,
+retains its original controls and leased replay/audit evidence, and rechecks
+length, controls and cancellation without writing or implementing `ReadAt`.
+Known unadmitted journal feature profiles return unsupported outcomes.
+
+The private owned session also admits cold storage through `open_for_recovery`.
+Admission reads bounded bootstrap geometry and retains `NeedsRecovery`, even
+for a clean image. Only explicit owned recovery followed by a fresh complete
+ownership audit and final length/cancellation checks publishes `Ready` and file
+handles. This entry point requires exclusively owned partmgr-authored recovery
+storage; it does not select foreign recovery automatically. Backend errors,
+including backend-defined format-like error kinds, remain fatal during initial
+clean inspection instead of selecting the owned bootstrap fallback. Tests cover
+read-only admission, late backend/cancellation/length failures, resource refusal
+and foreign dirty-log refusal.
+
+Renewed private fulljournal classic-ext3 qualification passed at
+`/data/cache/partmgr-ext-owned-release-binding-20261011-v10/result.json`, with
+the native receipt under `positive/qualification.json`. The optimized library
+test covers 1,320 modeled write/flush interruption cases and 121 distinct
+persisted images across 1/2/4 KiB, 128-byte-inode profiles. Extension crosses the
+direct-to-single-indirect allocation boundary. Independent e2fsprogs replay
+must match cold owned recovery across every byte outside independently decoded
+journal data, including journal mapping metadata and superblock timestamps.
+Fixture tools use a fixed clock; timestamp bytes are not masked.
+
+The same session also performs replacement, rename, truncate, create and delete;
+each resulting image receives native consistency, complete payload and preserved
+unrelated inode/hardlink checks. The receipt retains 817 commands and source,
+binary, tool and artifact bindings; missing-source, stale-source, reused-output
+and altered-verifier controls fail. Earlier failed attempts remain retained.
+This is offline recovery of modeled persisted bytes, not mounted-kernel or
+hardware-crash evidence. It does not cover interruption of every repeated
+operation, modern checksummed/extents profiles, ACL/xattr editing, or ordered
+data semantics; the public ordered receipt below qualifies that separate policy.
+
+Replacement and planned mutation now retain `NeedsRecovery` through fresh
+post-transaction length and cancellation checks. Cancellation inside the last
+backend length callback cannot publish `Ready`; a backend error or changed
+length at that boundary also retains recovery state and the original cause.
+The regression compares the complete committed image and write count, then
+requires clean explicit recovery without additional writes. Removing only the
+new guards reproduces the old erroneous success; that controlled regression is
+retained at
+`/data/cache/partmgr-ext-session-ready-regression-20261011-v1/result.json`.
+
+All five repository host checks pass for the public-session 346-file source snapshot at
+`/data/cache/partmgr-maintenance-ext-public-session-checks-20261011-v2/result.json`.
+These checks cover formatting, strict all-target/all-feature Clippy, all-feature
+host tests and the additional recorded target checks. Host checks do not
+establish native replay, mounted crash behavior or firmware behavior. The separate
+source-bound native gates below retain their exact policy scopes.
+
+The classic allocation planner now retains private ordered-data evidence for
+regular-file creation and extension. Each fresh-data token is tied to the
+planner, owner/generation, native inode generation and logical block. Append
+roles distinguish an existing EOF suffix from newly allocated whole blocks;
+directory bodies, indirect blocks and other metadata remain outside those roles.
+The final prospective ownership audit and regular-file mapping check share one
+source-bound decoder. Projection lookups, sorting and role comparisons consume
+finite planning work and preserve cancellation and backend causes. Independent
+1/2/4 KiB tests cover tail-only and aligned appends, empty files, direct-to-indirect
+allocation, creation, cross-planner token refusal and prewrite resource failures.
+A separate private ordered controller now consumes this sealed evidence for
+classic regular-file append and creation. The existing fulljournal controller
+remains separate. Before its first write, the ordered path completes source and
+generation checks, bounded allocation, combined prospective ownership audit,
+metadata encoding and ring/physical-footprint/work preflight. It durably publishes
+preparation, activation and the filesystem recovery fence before writing file
+data. Existing EOF writes affect only the exact suffix; the old visible prefix
+is preserved. Fresh regular data and suffix writes are flushed and their complete
+containing blocks read back before mutation commit publication. Mutation redo
+contains metadata only; directory bodies, allocation maps and indirect blocks
+remain metadata.
+
+Independent host fixtures at 1/2/4 KiB cover 444 immediate-persistence write/flush
+interruption cases with cold owned recovery, metadata-only redo, exact EOF
+suffixes and old-or-new visible outcomes. They also check creation, unsupported
+profiles, resource refusal and sealed owner/generation binding. This is modeled
+host evidence. The public source-bound native gate for append and create
+passed for its archived source snapshot; subsequent private namespace changes require renewed native qualification. It requires independent e2fsprogs replay, native payload/namespace checks,
+exact new-state homes and an independently derived old-state mask limited to
+originally free regular data blocks and the old EOF suffix. Journal mapping
+metadata remains in the exact comparison; only journal data is excluded.
+
+The public ordered receipt is
+`/data/cache/partmgr-ext-ordered-release-binding-20261011-v2/result.json`, with
+native evidence under `positive/qualification.json`: 2,448 modeled cuts,
+209 distinct persisted preimages, 1,354 recorded commands and nine separately
+checked same-owner append/create/append-created snapshots. The entire ordered
+cut/recovery/read path uses the public API. The verifier also
+independently decodes baseline journal descriptors for all six block-size/operation
+profiles and rejects regular-file data redo. Three retained prior-fulljournal
+baselines fail this policy check at
+`/data/cache/partmgr-ext-ordered-redo-negative-20261011-v2/result.json`.
+The final rehash at
+`/data/cache/partmgr-ext-public-session-final-rehash-20261011-v1.json` verifies
+202 compiled sources per native gate against the workspace at that receipt, 3,026
+fulljournal and 4,815 ordered outer artifacts, and all 346 host source hashes.
+Both ordered and fulljournal release bindings reject missing/stale sources,
+reused output and altered verifiers. These remain offline modeled persisted-byte
+experiments, not mounted-kernel or hardware-crash evidence.
+
+The `std` public `fs_ext::ExtJournalSession` now declares profile manifest
+version seven. Its filesystem allowlist is unchanged: Linux revision one,
+128-byte inodes, 1/2/4 KiB blocks, feature words 4/2/1 with transient RECOVER,
+and an internal checksumless journal without REVOKE and first block one.
+Alongside ordered regular-file append/create/truncate, `write_at` and `extend_sparse`, it exposes `create_directory`,
+`rename`, `hard_link`, `unlink_file`, `remove_directory`, `create_symlink`,
+`replace_symlink_target`, `unlink_symlink` and `read_symlink`. The manifest-seven
+symlink integration passes all five source-bound host checks; source-bound native interruption/recovery, adversarial controls and final rehash pass for the archived manifest-seven snapshot.
+The [current implementation checkpoint](filesystem-maintenance-status.md#current-implementation-checkpoint--2026-10-12)
+also distinguishes unintegrated preallocation, counter-repair and NTFS drafts. Names are exact bytes; creation
+uses explicit native metadata. Rename refuses existing destinations and cycles.
+Deletion requires explicit native time, nonzero and at least the inode count;
+source-owned planner kind guards distinguish regular unlink from empty-directory
+removal before publication. No recursive deletion or payload wiping is implied.
+Successful mutation/recovery invalidates handles; errors can conservatively
+retain `NeedsRecovery`. Physical controller and planner authority remain private.
+
+The sealed classic namespace controller accepts mkdir, rename/move,
+regular-file unlink and empty-directory deletion through sealed
+`NativeNamespacePatches`. Extraction requires source/generation binding and an
+explicit supported namespace report; absence of ordered-data evidence alone is
+insufficient. All namespace replacements, including directory bodies and newly
+allocated directory/indirect blocks, remain journaled metadata. Before writes,
+an independent original-owner scan excludes every allocated regular-file payload
+block from namespace redo, including the entire block containing a partial EOF.
+It bounds file maps, allocation-bitmap reads, comparisons and cancellation.
+
+Independent host tests cover 984 modeled namespace interruption cases with cold
+recovery across 1/2/4 KiB. All five host/portable checks pass in
+`/data/cache/partmgr-maintenance-ext-namespace-checks-20261011-v3/result.json`.
+
+The private native namespace release gate has now passed at
+`/data/cache/partmgr-ext-namespace-release-binding-20261011-v2/result.json`:
+6,024 modeled cases, 454 distinct persisted preimages, 2,700 native commands,
+8,143 outer artifact hashes and 203 compiled-source bindings. Both the Rust
+positive and independent native verifier exit zero; missing/stale-source and
+reused-evidence controls exit 101, while altered-verifier and missing-corpus
+controls exit one. All five host/portable checks for that snapshot pass at
+`/data/cache/partmgr-maintenance-ext-namespace-checks-20261011-v3/result.json`.
+
+The failed first native v1 precheck (exit 12) remains retained. V2 permits that
+pre-replay status only for the narrowly classified combination of directory
+corruption, aborted checking and a recovery obligation; six such diagnostics
+are retained. Native replay, strict post-replay checking and exact home-byte
+comparisons remain mandatory. This is offline modeled persisted-byte evidence,
+not mounted-kernel or hardware-crash qualification.
+
+Final receipt/artifact rehash passed at
+`/data/cache/partmgr-ext-namespace-final-rehash-20261011-v2.json`, confirming
+347 host-source hashes, 203 compiled sources and all 8,143 native artifacts.
+All eight additional adversarial controls passed at
+`/data/cache/partmgr-ext-namespace-negative-controls-20261011-v2/result.json`
+with 6,011 retained artifact hashes: omitted matrix row, forged outcome, altered
+unrelated payload, deletion time, directory links, free-space counter, regular
+payload redo and omitted new-directory redo. The last control reconstructs valid
+journal framing and fails specifically on missing directory metadata. Original
+artifacts remain unchanged; the failed first control-harness attempt is retained.
+The renewed public six-operation namespace v3 gate passed for the corrected
+source snapshot at
+`/data/cache/partmgr-ext-public-namespace-release-binding-20261011-v2/result.json`:
+6,024 modeled cases, 454 persisted preimages, 2,700 native commands, 8,147 outer
+artifact hashes and 205 compiled sources. Both positive controls pass; all five
+fatal missing/stale-source, reuse, altered-verifier and missing-corpus controls
+reject. Its earlier v1 receipt retains its archived source scope.
+
+The corrected public namespace v4 release gate passed at
+`/data/cache/partmgr-ext-public-namespace-v4-release-binding-20261011-v2/result.json`:
+2,136 modeled cases, 162 persisted preimages, 1,410 native commands, 27 same-owner
+snapshots, 4,589 outer artifact hashes and 205 compiled sources. Populated
+cross-parent directory moves and final indirect-map unlink are checked at
+1/2/4 KiB, alongside nine successive public operations per geometry. Both
+positive controls pass; missing/stale-source and reused-evidence controls exit
+101, while altered-verifier and missing-corpus controls exit one. All five
+corrected host/portable checks pass at
+`/data/cache/partmgr-maintenance-ext-public-namespace-checks-20261011-v2/result.json`.
+
+The failed first v4 release and intermediate diagnostic results remain retained:
+canonical verifier corrections handle hyphenated operation names and exclude
+the journal inode from ordinary regular-payload classification. Diagnostic
+success alone was not acceptance; the corrected release reran the source-bound
+gates. All six additional v4 adversarial controls reject at
+`/data/cache/partmgr-ext-public-namespace-v4-negative-controls-20261011-v1/result.json`
+(SHA-256 `758aeafbd120e3270ef23409d08995b88f5b6a7ee06b20e5d6569d46436dee2d`),
+retaining 2,793 artifact hashes. They cover an omitted matrix row, forged outcome,
+parent link count, moved-tree `..`, indirect bitmap release and raw inode
+preservation. The combined final rehash passed at
+`/data/cache/partmgr-ext-public-namespace-final-rehash-20261011-v1.json`,
+verifying 349 host-source hashes, 205 compiled sources per native gate and all
+12,736 outer native artifact hashes. The accepted v3 receipt SHA-256 is
+`d850775338cdecbe1fa0650b5fe0f6732818ee51f1454efa3854564ec0156189`;
+the accepted v4 receipt SHA-256 is
+`da80d3711698e3bd9c2689cb07ff3caed793a62b619d5132e98eeb428b08b130`.
+All eight renewed v3 adversarial controls reject at
+`/data/cache/partmgr-ext-public-namespace-negative-controls-20261011-v1/result.json`
+(SHA-256 `3b8ef65eb45829e19628182d51f3d9367f9af01790ba5a156d6a2990c36bf73d`),
+retaining 6,027 artifact hashes. They cover an omitted matrix row, forged outcome,
+unrelated payload, deletion time, link count, free-space counter, regular-data
+redo destination and omitted mkdir redo. The exact archived runner/index match
+the accepted inputs, and the original artifacts remain unchanged.
+
+The public forced-directory-growth gate passed at
+`/data/cache/partmgr-ext-directory-growth-release-binding-20261011-v1/result.json`:
+2,280 modeled interruption cases, 178 distinct persisted preimages, 1,430 native
+commands, 4,655 outer artifact hashes and 207 compiled sources. Native-authored,
+fully packed destination directories force public rename to grow from one to two
+direct blocks or from twelve to thirteen blocks across the single-indirect
+boundary at each 1/2/4 KiB geometry. Independent packing proofs establish that no
+original slot can hold the 255-byte destination name. New directory blocks and,
+when needed, the indirect map block are metadata redo; original regular payload
+blocks remain excluded. Every actual write/barrier is cut under immediate and
+volatile persistence, including failed-flush persistence and zero/half/full torn
+writes. Public cold recovery must produce exactly the old or complete new home
+image outside journal data allocation. Native replay, filesystem checks, mapping
+and full unrelated payload comparisons independently verify those outcomes.
+The independently expanded native directory supplies a semantic layout reference,
+not an atomic native rename oracle.
+
+All five host/portable checks pass at
+`/data/cache/partmgr-maintenance-ext-directory-growth-checks-20261011-v1/result.json`,
+including ten public consumer tests. Operation planning now uses the minimum of
+the caller and session `file_blocks` limits; the session previously replaced the
+caller's narrower ceiling. Complete ownership auditing retains the session audit
+limits. Final rehash passed at
+`/data/cache/partmgr-ext-directory-growth-final-rehash-20261011-v1.json`, verifying
+351 host-source hashes, 207 compiled sources and all 4,655 native artifact hashes.
+The native receipt SHA-256 is
+`c3aadbb5126d3e1e3f11c0adba043c09a59c0c7c580f36ac5ac574925c152996`;
+the host receipt SHA-256 is
+`cc4a9a251ab0612f0334c565517d5bba6e48ece895b28827ba9852e71f635d05`.
+All seven additional adversarial controls reject at
+`/data/cache/partmgr-ext-directory-growth-negative-controls-20261011-v1/result.json`
+(SHA-256 `6cce2fb7a23fe7307aa5f3151ce85f1c04e26a65db67e51ad7f2575dc8e6194a`),
+retaining 3,480 rehashed artifacts and the exact archived runner; original inputs
+remain unchanged. They cover missing rows, forged outcomes, altered directory
+packing, new indirect allocation, original payload EOF slack and coherent omission
+of directory or indirect metadata redo. Both omission controls fail specifically
+at the required-metadata assertion. The altered-packing control rejects at
+directory-graph preservation before reaching the usable-slack predicate.
+This receipt qualifies these two forced-growth operations at its own
+source snapshot; previous append/create and namespace receipts retain their exact
+archived source scopes.
+
+Public `ExtJournalSession::truncate(file, length, planning, cancellation)` now
+accepts strictly smaller sizes through a current same-owner handle under manifest
+three, with the same filesystem/journal allowlist as manifest two. Zero and
+block-aligned truncations release detached data/indirect blocks through metadata
+redo; a partial EOF in a hole stays a hole. For a mapped partial EOF, one block
+from ORIGINAL audited-free space receives the retained prefix and a zero suffix.
+The metadata transaction replaces only the final retained mapping and releases
+the replaced original and detached blocks. Hardlinks retain the same inode and
+observe the same new length; native identity, generation, ownership, times and
+link count remain unchanged.
+
+Original regular payload blocks, including formerly visible suffixes and EOF
+slack, are neither overwritten nor journaled. Fresh COW data flushes and reads
+back before metadata commit. A leased exact original-block guard is checked in
+planning and again before first publication; full prospective auditing and
+operation-specific retained-map checks precede writes. Allocation/release edits
+coalesce only for this sealed ordered transaction. External-undo and private
+full-journal truncate behavior remains unchanged. A mapped partial truncation
+can refuse for lack of ORIGINAL free space even when it would release blocks;
+same-plan releases cannot supply COW storage while OLD remains reachable.
+
+The corrected public truncate gate passed at
+`/data/cache/partmgr-ext-truncate-release-binding-20261011-v3/result.json`:
+5,784 modeled cuts, 439 persisted preimages, 6,125 native commands, 18,454 outer
+artifact hashes and 209 compiled sources. Six success cases at each 1/2/4 KiB
+geometry cover zero, direct boundary, indirect-root removal boundary, mapped
+partial direct/indirect and partial EOF hole. Three fully allocated models
+separately verify zero-write ENOSPC refusal. Public cold recovery and native
+replay independently select OLD or complete NEW with full alias payload reads,
+allocation/mapping checks and filesystem validation. OLD excludes only journal
+data and the independently proven originally-free COW block; every original
+regular block and metadata byte remains exact. NEW requires exact final homes
+outside journal data, including unchanged former regular physical bytes and the
+new prefix/zero tail. Independent redo checks exclude original regular and fresh
+COW data while requiring changed metadata destinations. Native truncate's own
+tail/mapping policy is not a byte-exact oracle for this COW policy.
+
+All five host/portable checks pass at
+`/data/cache/partmgr-maintenance-ext-truncate-checks-20261011-v3/result.json`,
+including thirteen public consumer tests. Final rehash passed at
+`/data/cache/partmgr-ext-truncate-final-rehash-20261011-v1.json`, verifying
+353 host-source hashes, 209 compiled sources and all 18,454 native artifact hashes.
+The native receipt SHA-256 is
+`b7619fe7abf84f48cfa4fcb8cf88571e60ec2e894f5307594f8523c3aed1b253`;
+the host receipt SHA-256 is
+`cc4a9a251ab0612f0334c565517d5bba6e48ece895b28827ba9852e71f635d05`.
+The failed v2 verifier receipt remains retained: it treated sparse-hole sentinel
+zero as a physical regular block and rejected legitimate primary-superblock redo
+at 2 KiB. The corrected verifier excludes that sentinel; a fresh v3 build, all
+checks and the native gate passed. All eleven additional adversarial controls
+reject at
+`/data/cache/partmgr-ext-truncate-negative-controls-20261011-v1/result.json`
+(SHA-256 `dc5c6f62e7f44c237b99cfd01c670727b1f9b0b1eba6df8b8287e9b55acc7be6`),
+retaining 20,981 output artifact hashes; final rehash confirms the original
+accepted artifacts remain unchanged. Controls cover a missing matrix row, forged
+decision, original EOF slack, COW prefix, COW zero tail, free counter, hardlink
+count, original regular-data redo, COW-data redo, OLD visible tail and sparse-hole
+sentinel zero treated as physical block zero. Both redo controls reject at the
+required payload-exclusion diagnostic. The last two reject at exact home-image
+comparison beyond the permitted COW mask. Independent rehash passed for all
+20,981 control-output hashes and the exact archived runner; original accepted
+artifacts remain unchanged. Earlier manifest-two receipts retain their exact
+archived source scopes;
+this receipt qualifies ordered truncate at its own source snapshot.
+
+Public `ExtJournalSession::hard_link(source_parent, source_name,
+destination_parent, destination_name, planning, cancellation)` now creates an
+exact byte-name reference to an existing regular inode under manifest four,
+with the same filesystem/journal allowlist as manifest three. Current owner-bound
+parents resolve the source; actual inode mode must be regular. Existing
+destinations reject, including an existing alias of the same inode. Source native
+inode bytes remain exact except link count: length, mapping, generation,
+ownership, mode and timestamps are preserved, as is the entire original physical
+payload including EOF slack. Timestamp preservation is explicit; this operation
+does not adopt an implicit kernel ctime update.
+
+All aliases share one inode. Later append or COW truncate through any current
+alias changes the content seen through every surviving alias. Nonfinal unlink
+releases no allocation; final unlink releases the inode/data once. A roomy
+parent succeeds with zero free blocks; packed-parent growth requires originally
+free directory/map storage and can refuse before writes. Source inode allocation
+and parent link counts remain unchanged. Metadata-only redo excludes original
+regular physical data. Success invalidates handles; uncertain dispatch retains
+`NeedsRecovery` through explicit recovery and profile revalidation.
+
+Creation uses an explicit 32,000-link EXT2-compatible operation policy:
+31,999 to 32,000 is admitted, while another creation rejects before writes.
+This is not the native ext3/ext4 on-disk maximum; the Linux ext4 driver supports
+a wider 65,000-link limit. Wider creation policies remain unqualified. Existing
+higher-count volumes are not newly rejected during read-only inspection or unlink.
+A complete audited 4 KiB host fixture contains 31,999 actual unique references;
+it verifies the boundary without forging inode counts. Independent public tests
+also cover all block sizes, shared alias mutations, exact physical preservation,
+zero-free roomy/packed cases and refusal/resource behavior.
+
+The source-bound public hardlink gate passed at
+`/data/cache/partmgr-ext-hardlink-release-binding-20261011-v1/result.json`:
+3,960 modeled cuts, 298 persisted preimages, 2,481 native commands, 7,719 outer
+artifact hashes and 211 compiled sources. Same-parent, cross-parent and forced
+one-to-two/twelve-to-thirteen-block destination growth run at 1/2/4 KiB. Every
+actual write/barrier is cut under immediate/volatile persistence, failed-flush
+persistence and zero/half/full write prefixes. Public cold recovery and native
+replay independently establish exact OLD or complete NEW homes outside actual
+journal data; there is no regular-data, COW or unreachable-payload mask. Native
+checks verify source inode preservation except count, namespace topology, all
+alias payloads/physical slack, allocation counters and required new directory/
+indirect metadata redo, while excluding regular-data redo destinations.
+
+All five host/portable checks pass at
+`/data/cache/partmgr-maintenance-ext-hardlink-checks-20261011-v4/result.json`,
+including eighteen owned consumer tests and one external-undo smoke test.
+Final rehash passed at
+`/data/cache/partmgr-ext-hardlink-final-rehash-20261011-v1.json`, verifying
+355 host-source hashes, 211 compiled sources and all 7,719 native artifact hashes.
+The native receipt SHA-256 is
+`85660ef3e612355c6c8623e6773685d2d02babe0118feba3f5b2306dc79591ab`;
+the host receipt SHA-256 is
+`cc4a9a251ab0612f0334c565517d5bba6e48ece895b28827ba9852e71f635d05`.
+All ten additional adversarial controls reject at
+`/data/cache/partmgr-ext-hardlink-negative-controls-20261011-v1/result.json`
+(SHA-256 `adeb245dc00d6a775f5a34d0528f901f1be1041e25a67f5baf37e09d6f0cf7bc`).
+Independent rehash passed for all 7,423 output artifacts and the exact archived
+runner; original accepted inputs remain unchanged. Missing new-directory and
+indirect redo controls reject specifically at required-metadata checks;
+regular-data redo rejects at the payload-destination exclusion, and altered OLD
+homes reject at exact home-image comparison. Earlier manifest-three
+truncate and manifest-two namespace/growth receipts retain their exact archived
+source scopes; this receipt qualifies hardlink at its own snapshot.
+
+Manifest five adds public `ExtJournalSession::write_at(file, offset, input,
+planning, cancellation) -> io::Result<u64>` with the same filesystem/journal
+allowlist as manifest four. A current owner-bound regular-file handle authorizes
+a nonempty exact input wholly within existing EOF; checked endpoints refuse
+overflow and implicit extension. Success returns the entire snapshotted declared
+input length after durable commit, never a short-success count. All aliases share
+the mapping change. Logical length, native generation, ownership, mode, times and
+link count remain exact; mutation invalidates prior handles.
+
+Each touched logical block receives distinct originally audited-free storage.
+Mapped replacements copy every unaffected byte, including physical EOF slack,
+then apply the exact input intersections. Touched holes start as zeros and only
+touched blocks materialize; untouched mappings remain exact. Metadata publication
+updates mapping/allocation/counter/sector fields and releases replaced originals.
+Every original regular physical block remains unchanged. Neither original nor
+fresh COW data is encoded in metadata redo. Same-plan releases cannot supply COW
+space while OLD remains reachable, so net-zero overwrite may refuse ENOSPC.
+
+The session's immutable-length adapter pins the wrapper/planner/success count;
+input identity and declared length are checked throughout reads. Short reads
+are accumulated; premature zero or oversized reads, backend errors and
+cancellation retain their causes. Full prospective ownership auditing and
+operation-specific evidence validate original/final maps, exact touched coverage,
+original-free destinations and complete replacement bodies. Leased exact source
+block guards are rechecked before first publication and after fresh data flush/
+readback before mutation commit. Uncertain publication retains `NeedsRecovery`;
+explicit owned recovery establishes the old or complete new mapping. Finite
+memory/work/journal/physical-footprint ceilings cover simultaneous input snapshots,
+guards, maps, audit, data and metadata; whole-file operations may require larger
+explicit bounds than one-block operations.
+
+All five host/portable checks pass at
+`/data/cache/partmgr-maintenance-ext-overwrite-checks-20261011-v4/result.json`.
+Twenty-four public owned consumer tests include arbitrary multiblock/direct-to-
+indirect writes, full-file and EOF boundaries, partial/full holes, aliases, exact
+original physical payload/slack preservation, immutable count sampling, source
+and input failures, cancellation/budgets, genuine ENOSPC and cold recovery.
+Private tests additionally reject forged range, map and replacement-body evidence.
+
+The source-bound public range-overwrite gate passed at
+`/data/cache/partmgr-ext-overwrite-release-binding-20261011-v2/result.json`
+(SHA-256 `c6ffa3c412d1f0a4c4a63e8d4eeb36357f51cc52288fbe26092b5eff1ffcc492`):
+6,336 modeled cuts, 484 persisted preimages, 6,797 native commands, three zero-write
+ENOSPC refusals, 20,535 outer artifact hashes and 219 compiled sources. Both Rust
+and independent native positive controls pass. Missing-source, reused-evidence
+and stale-source controls reject with exit 101; altered-verifier and missing-
+corpus controls reject with exit one. The failed first outer receipt remains
+retained: its positive gate passed, but runner binding failed; fresh v2 acceptance
+includes the corrected runner binding. Final rehash passed at
+`/data/cache/partmgr-ext-overwrite-final-rehash-20261011-v2.json`, verifying
+358 host-source hashes, 219 compiled sources and all 20,535 outer artifact hashes.
+All thirteen additional adversarial controls reject at
+`/data/cache/partmgr-ext-overwrite-negative-controls-20261011-v1/result.json`
+(SHA-256 `8a4146cfa00fcd857615e923d04cb599e43cd4e8ea9daaa9ec5e72e364b2d7b5`),
+retaining 28,456 output artifact hashes. Controls cover missing rows, forged
+outcomes, original EOF slack, COW prefix/body/suffix, bitmap accounting, inode link
+count, original/COW data redo, omitted bitmap redo, OLD visible tail and physical
+block zero incorrectly masked as a hole sentinel. Both data-redo controls fail
+specifically at regular-payload exclusion; omitted bitmap redo fails because a
+home change lacks redo. OLD-tail and sentinel controls fail exact home comparison
+beyond the permitted fresh-COW mask. The runner verifies original accepted
+artifacts remain unchanged. Independent rehash passed at
+`/data/cache/partmgr-ext-overwrite-negative-controls-rehash-20261011-v1.json`,
+covering all thirteen controls and 28,456 output hashes, the exact receipt and
+archived runner (SHA-256
+`0308006061e842263163b91057f23f1a727fb291cbd1a0dd4a47f6304bfdbc6f`).
+This completes the scoped manifest-five overwrite evidence; subsequent
+manifest-six sparse extension has scoped host/native and adversarial qualification
+bound to its exact archived revision. Manifest-seven symlinks pass host checks; source-bound native interruption/recovery, adversarial controls and final rehash pass for the archived manifest-seven snapshot.
+
+The ignored `native_owned_ext3_ordered_overwrite_cuts` gate uses independent
+`ext-overwrite-oracle.py` / `ext-overwrite-cuts-verify.py` tools and
+`PARTMGR_EXT_OVERWRITE_CORPUS`, `PARTMGR_EXT_OVERWRITE_EVIDENCE` and
+`PARTMGR_GATE_SOURCE_ROOT`. Every actual write/barrier is cut under the declared
+immediate/volatile, failed-flush and zero/half/full-prefix models. Rust cold
+recovery and native journal replay independently establish OLD or complete NEW.
+OLD permits only actual journal data and independently proven originally-free
+final COW destinations; original regular bytes, including EOF slack, are never
+masked. NEW preserves exact successful homes outside journal data and validates
+independent input overlays, alias contents, maps and allocation accounting.
+Retained redo inspection excludes original/final regular data and requires changed
+mapping/bitmap/inode metadata. Earlier manifest-four hardlink, manifest-three
+truncate and older namespace/growth receipts retain their exact archived source
+scopes; this receipt qualifies range overwrite at its own source snapshot.
+
+Manifest six adds public `ExtJournalSession::extend_sparse(file, new_length,
+planning, cancellation)` with the same filesystem/journal allowlist as manifest
+five. It requires a strictly larger logical length through a current owner-bound
+regular-file handle. All newly visible bytes are zero and aliases share the new
+length. This creates holes rather than reserving payload capacity; `write_at`
+continues to require a range wholly inside the existing EOF.
+
+Empty/aligned EOF and partial EOF already in a hole preserve all old mappings and
+append holes without regular data writes. A mapped partial EOF always receives
+one fresh originally audited-free COW block, even for same-block growth: its old
+visible prefix is copied and the entire remainder zeroed. Original physical data,
+including hidden EOF bytes, remains exact. The old tail block is released only
+in committed metadata. Native identity, generation, ownership, mode, times and
+link count stay unchanged; sectors reflect actual allocations, not logical holes.
+Original indirect-node identities, including admitted empty nodes, are retained;
+unexpected pointer-metadata allocation/release refuses. No large-file feature is
+implicitly enabled. Native length/pointer representation and logical `file_blocks`
+ceilings remain explicit; long holes still consume bounded inventory resources.
+
+Mapped partial extension requires original-free storage and can refuse ENOSPC
+while aligned/hole extension succeeds on a fully allocated volume when no metadata
+allocation is needed. Separate sealed sparse evidence proves exact original/final
+maps, zero/one data role, original-free tail, copied prefix/zero suffix and native
+metadata preservation under the complete prospective audit. Existing controller
+checks exact leased guards before any publication and after fresh data durability
+before mutation commit. Errors after attempted publication retain `NeedsRecovery`;
+explicit recovery selects the old or complete new length/map before readiness.
+
+All five host/portable checks passed for the archived manifest-six revision at
+`/data/cache/partmgr-maintenance-ext-sparse-checks-20261011-v2/result.json`.
+Twenty-eight public owned consumer tests include all block sizes, empty/aligned/
+hole/mapped partial EOF, same-block and direct/single-indirect crossings, aliases,
+exact old physical bytes, raw sectors/empty-indirect identity, genuine no-free
+contrasts, strict bounds/budgets/cancellation and source failures before/after data
+with cold recovery. A private focused test rejects eight forged sparse proofs and
+accepts two valid controls. The source-bound native interruption gate passed at
+`/data/cache/partmgr-ext-sparse-extension-release-binding-20261011-v3/result.json`
+(SHA-256 `c5f7255139a2fc82fbf0e629df2d065c316b393046bf15aa54e4e527d19f8fba`).
+It retains 8,808 cut cases, 616 distinct preimages, 10,050 independent native
+commands, three ENOSPC cases and 30,010 outer artifact hashes. These cover
+1/2/4 KiB blocks, empty/aligned/hole/mapped EOF and no-free distinctions.
+Independent final rehash passed for 361 host sources, 222 compiled sources
+and all 30,010 native artifacts at
+`/data/cache/partmgr-ext-sparse-extension-final-rehash-20261011-v3.json`.
+Sixteen adversarial verifier controls also pass at
+`/data/cache/partmgr-ext-sparse-extension-negative-controls-20261011-v1/result.json`
+(SHA-256 `c3abc4a6a795e1b4ed3daaf5552cae4b63e8736f0f92387ce730aa35e1065a93`),
+with 32,287 artifacts independently rehashed at
+`/data/cache/partmgr-ext-sparse-negative-rehash-20261011-v1.json`.
+This closes the scoped manifest-six sparse-extension milestone. These receipts
+qualify their exact archived revision; the subsequent manifest-seven symlink
+integration requires fresh host/native qualification. Earlier interrupted attempts
+are retained without acceptance.
+
+The ignored `native_owned_ext3_ordered_sparse_extend_cuts` gate uses
+`PARTMGR_EXT_SPARSE_CORPUS`, `PARTMGR_EXT_SPARSE_EVIDENCE` and
+`PARTMGR_GATE_SOURCE_ROOT`, with `ext-sparse-extension-oracle.py` and independent
+`ext-sparse-extension-cuts-verify.py`. Required OLD comparison may exclude only
+actual journal data and the exact zero/one originally-free mapped-tail COW block;
+holes are not physical block-zero masks. NEW must match strict final homes outside
+journal data, complete alias prefix/zeros, map/bitmap/sectors and unchanged original
+physical payload. Earlier manifest-five overwrite and other accepted receipts
+retain their exact archived source scope; they do not qualify this new revision.
+
+Manifest seven integrates `create_symlink`, `replace_symlink_target`,
+`unlink_symlink` and `read_symlink`; existing `rename` also handles unfollowed
+symlinks. All five required host/portable checks pass against the same 365-source
+snapshot at `/data/cache/partmgr-maintenance-ext-symlink-checks-20261011-v5/result.json`;
+source-start, source-end and live source hashes independently match. Source-bound native
+interruption/recovery, adversarial controls and final rehash pass for this
+archived manifest-seven snapshot. The filesystem and
+journal feature allowlists remain unchanged.
+
+Canonical fast targets contain 1..59 non-NUL bytes inline; canonical slow targets
+contain 60..blocksize-1 bytes in one direct block, with a native terminator.
+Empty targets, embedded NUL, lengths at least one block and unqualified short
+block-backed source layouts are refused. Target bytes remain uninterpreted:
+dangling paths, slash/dot components, absolute paths, non-UTF8 bytes and cycles
+are not followed. Parent components must resolve as directories. Creation uses
+explicit native metadata; replacement preserves inode identity, generation,
+native times and every alias across fast-to-fast, fast-to-slow, slow-to-fast
+and slow-to-slow transitions. Rename preserves the target. Nonfinal unlink
+changes only link ownership; final unlink releases the inode and slow target
+allocation and records explicit native deletion time without wiping payload.
+
+Slow target bodies are journaled metadata. Replacement allocates any required
+fresh slow block from the original audited-free set before releasing the old
+block; slow-to-slow cannot recycle its original block. With no free blocks,
+fast-to-fast and slow-to-fast can succeed when directory/inode prerequisites
+permit, while operations needing fresh slow storage or parent-directory growth
+refuse before writes. Fast creation needs a free inode and insertion room but
+no target data block. Exact leased raw-inode and old slow-body guards accompany
+typed semantic evidence through planning and both controller guard passes.
+Full prospective ownership audit checks the resulting namespace and allocation.
+OLD and NEW native home comparisons may mask only actual journal data blocks;
+a fresh slow target is metadata and receives no regular-data OLD mask.
+
+Focused compiled evidence is retained in `/tmp/partmgr-ext-symlink-public-v1.log`
+(eight public consumer tests across 1/2/4 KiB),
+`/tmp/partmgr-ext-symlink-audit-v1.log` (six independent audit tests, scoped to
+1 KiB) and `/tmp/partmgr-ext-symlink-private-v2.log` (one private test exercising
+nine forged-authority attacks and two valid controls). The public cases cover
+all four storage transitions, exact aliases/native fields, unfollowed lifecycle,
+packed-parent growth, genuine no-free distinctions, invalid inputs and source
+guard failures with cold recovery obligations. The maintenance-audit retained
+finding test also passes in `/tmp/partmgr-ext-symlink-retained-finding-v1.log`:
+its previously blanket-unsupported symlink fixture now uses the explicitly
+unadmitted short block-backed layout. The complete five-command host gate now
+passes at `/data/cache/partmgr-maintenance-ext-symlink-checks-20261011-v5/result.json`,
+with 365 unchanged source hashes independently matched to the live tree.
+Earlier failed host attempts remain retained without acceptance. Native replay,
+interruption and adversarial qualification are still required.
+
+The integrated ignored `native_owned_ext3_ordered_symlink_cuts` gate uses
+`PARTMGR_EXT_SYMLINK_CORPUS`, `PARTMGR_EXT_SYMLINK_EVIDENCE` and
+`PARTMGR_GATE_SOURCE_ROOT`, with `ext-symlink-oracle.py` and independent
+`ext-symlink-cuts-verify.py`. Its prepared corpus is input evidence, not writer
+acceptance. Manifest-seven host checks pass for their exact source snapshot;
+complete native replay/cut matrices, adversarial verifier controls and final
+rehash remain required.
+
+Repeated-sequence interruption matrices and broader E2 coverage remain open.
+The earlier 27 same-owner snapshots establish successful successive operations,
+rather than interruption coverage of those sequences. Wider hardlink policies,
+qualification of the integrated symlink lifecycle, preallocation, modern write
+profiles and metadata/ACL editing remain outside this curated surface. This is
+offline modeled persistence evidence, without mounted-concurrency, kernel-crash
+or hardware-durability qualification. E1 and the complete maintenance plan remain
+incomplete.
+
+A separate private recovery entry point now preflights the same mutable storage
+capability, checkpoints all final redo blocks with durable readback, publishes
+the journal sequence and then inactive start with separate barriers, and clears
+only the primary recovery-flag byte last. It admits checksumless journal and
+filesystem controls with journal first block one. Before publication it inventories
+every journal block header and chooses a sequence absent from the whole journal,
+preventing a torn start from selecting an old transaction. A mismatched first
+sequence requires either an already absent current sequence or a bounded alternate
+scan whose final redo bytes exactly match durable homes. Ambiguous states refuse
+before writing. Any error after possible mutation retains its cause and reports
+uncertain durability; retry revalidates the complete source.
+
+Nine independent synthetic recovery tests, alongside six preflight tests, cover every modeled write/flush cut,
+prefix tears, high-byte rollover, stale historical commits, volatile persistence,
+short writes, readback failure, cancellation, phase budgets, inactive closure and
+clean idempotent retry. These are storage fault models, not native crash evidence.
+
+Recovery also rejects changes to group zero's raw inode-table pointer, including
+the high word for a 64-byte descriptor. Preserving the final journal inode and
+allocation map alone cannot make a torn relocation recoverable. A counterexample
+with a structurally clean final state exercises this distinction.
+
+The modeled native-cut gate now covers 374 fault cases, 21 distinct persisted
+images and 84 native commands across 1/2/4 KiB profiles. It feeds modeled persisted
+bytes to independent e2fsprogs recovery and checks cold partmgr retry. Native
+sequence 3 or 4 is checked independently against the cut state; partmgr's absent
+restart sequence remains 3. `E2FSCK_TIME` fixes timestamps deterministically;
+timestamp bytes are compared, not masked. The final qualification passed at
+`/data/cache/partmgr-ext-foreign-native-cuts-20261011-v3/qualification.json`.
+The receipt binds the completed matrix and its rejection controls. This is
+modeled interruption evidence, not kernel, mount, hardware or native crash capture.
+
+Foreign preflight keeps the first unconsumed scan transaction ID separate from
+the virtual empty journal's restart ID. The restart ID advances one further,
+modulo 2^32, matching the
+[pinned Linux recovery fence](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/fs/jbd2/recovery.c#L324).
+The independent three-geometry e2fsprogs oracle at
+`/data/cache/partmgr-ext-foreign-preflight-oracle-20261011-v3/receipt.json`
+observes transaction 1, scan boundary 2 and native empty sequence 3; it preserves
+the original dirty images and compares recovered markers and complete payloads.
+The private recovery gate now executes partmgr preflight and recovery against
+these images and compares the entire resulting image byte-for-byte with the
+independent e2fsprogs result at all three geometries. Clean retries perform no
+writes. The binding/rejection receipt is
+`/data/cache/partmgr-ext-foreign-recovery-qualification-20261011-v1/qualification.json`.
+This does not establish kernel-authored dirty-log correctness, native crash
+recovery, checksummed foreign publication or a public editor capability.
 
 Wire details follow the [kernel journal format](https://www.kernel.org/doc/html/latest/filesystems/ext4/journal.html), [commit implementation](https://github.com/torvalds/linux/blob/master/fs/jbd2/commit.c), [recovery implementation](https://github.com/torvalds/linux/blob/master/fs/jbd2/recovery.c) and [`journal_tag_bytes()`](https://github.com/torvalds/linux/blob/master/fs/jbd2/journal.c). Without 64-bit destinations, v2 tags occupy ten bytes, v3 tags sixteen bytes, and legacy tags eight bytes. Native data CRCs cover the escaped journal representation; restoration of the native magic occurs after validation.
 

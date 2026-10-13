@@ -1,0 +1,70 @@
+{
+  "result": "passed",
+  "image_sha256_before_after": "bc5e170fc8dd134c9e7f15a3f46f52543b8b37847ade685cdd38a85f878ed852",
+  "binary_sha256": "f56b71786d48a4e4267d60145554951c7033f4f762bb8b97aad9f4e3a4eabe15",
+  "script_sha256": "a9431b029b1b5f98af91b9e345a3351596438cd195ed3d6de0e8562ba2fd81d9",
+  "record_count": 50,
+  "raw_records_and_provenance_preserved": true,
+  "structural_observations_preserved": true,
+  "commands": [
+    {
+      "argv": [
+        "/data/cache/rust/debug/examples/filesystem-forensics",
+        "timeline-usn",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-known-20261013-b-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-windows-frozen-b",
+        "--stability-provider",
+        "closed-native-capture",
+        "--records",
+        "1000000",
+        "--read-bytes",
+        "1073741824",
+        "--memory-bytes",
+        "67108864",
+        "--output-bytes",
+        "1073741824"
+      ],
+      "exit_status": 0
+    },
+    {
+      "argv": [
+        "/data/cache/rust/debug/examples/filesystem-forensics",
+        "timeline-usn",
+        "/data/cache/partmgr-forensics-native-20261013/ntfs-known-20261013-b-volume.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-windows-frozen-b",
+        "--stability-provider",
+        "closed-native-capture",
+        "--records",
+        "1000000",
+        "--read-bytes",
+        "1073741824",
+        "--memory-bytes",
+        "67108864",
+        "--output-bytes",
+        "1073741824",
+        "--sort",
+        "--temporary-dir",
+        "/data/cache/partmgr-forensics-native-20261013/timeline-usn-cli-final-fat-copies/temporary"
+      ],
+      "exit_status": 0
+    }
+  ],
+  "source_sha256": {
+    "src/forensics_journal.rs": "1e2be7d48276e0e80a15eb676411dabda0ca59556da1fb4bd71e29f7b4474617",
+    "src/forensics_sort.rs": "50d87b8eb69a465f34d657d6eba883145e4d1b2a747849bdc329c517b085c876",
+    "src/forensics_timeline_spool.rs": "9a361af6fd75122b368bb924a3142a713ffe309e65960417ac2dd331be92a304",
+    "examples/filesystem-forensics.rs": "c8a0dda920bda92a11c0cde5cdb78b3922f5f25099ea1996a9f97ec70673254f"
+  }
+}

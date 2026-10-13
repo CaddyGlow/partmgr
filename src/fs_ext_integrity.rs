@@ -89,13 +89,13 @@ impl Integrity {
         self.has_metadata()
             .then_some(MetadataChecksums { seed: self.seed })
     }
-    // Native checksum writing remains in the private journal qualification module.
-    #[cfg(all(test, feature = "std"))]
+    // Native checksum writing is consumed only by the private journal engine.
+    #[cfg(feature = "std")]
     pub fn inode_seed(&self, number: u32, generation: u32) -> u32 {
         self.metadata()
             .map_or(0, |c| c.inode_seed(number, generation))
     }
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(feature = "std")]
     pub fn stamp_directory_leaf(
         &self,
         number: u32,
@@ -114,7 +114,7 @@ impl Integrity {
         bytes[tail + 8..tail + 12].copy_from_slice(&checksum.to_le_bytes());
         self.directory_leaf(number, generation, bytes).map(|_| ())
     }
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(feature = "std")]
     pub fn stamp_inode(&self, number: u32, generation: u32, bytes: &mut [u8]) -> io::Result<()> {
         if !matches!(bytes.len(), 128 | 256) {
             return Err(unsupported("ext integrity inode size"));
@@ -135,7 +135,7 @@ impl Integrity {
         self.inode(number, bytes)
     }
     // Native writers remain private until their full profile qualification.
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(feature = "std")]
     pub fn stamp_descriptor(&self, group: u32, bytes: &mut [u8]) -> io::Result<()> {
         if !matches!(bytes.len(), 32 | 64) {
             return Err(unsupported("ext integrity descriptor size"));

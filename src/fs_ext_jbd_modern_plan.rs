@@ -14,6 +14,9 @@ use crate::{
 mod extent_writer;
 #[path = "fs_ext_jbd_modern_indirect.rs"]
 mod indirect_writer;
+#[path = "fs_ext_jbd_modern_preallocate.rs"]
+mod preallocate;
+pub(super) use preallocate::keep_size;
 fn write_inode(
     context: &mut Context<'_, '_>,
     inode: &ExtInode,
@@ -37,6 +40,47 @@ pub(super) use namespace::{Create, Delete, Rename, create, delete, rename};
 pub(super) struct Plan {
     pub(super) patches: Vec<WriteRange>,
     _reservation: Reservation,
+    source_guards: Option<preallocate::SourceGuards>,
+}
+impl Plan {
+    pub(super) fn bind_source_guards(&mut self, scope: u128, generation: u64) -> io::Result<()> {
+        if let Some(guards) = &mut self.source_guards {
+            guards.bind(scope, generation)?;
+        }
+        Ok(())
+    }
+    pub(super) fn source_guards(&self) -> impl Iterator<Item = (u64, &[u8])> {
+        self.source_guards.iter().flat_map(|g| g.guards())
+    }
+    pub(super) fn validate_source_guards(
+        &self,
+        scope: u128,
+        generation: u64,
+        decoder: &ExtStorageDecoder<'_>,
+        r: &Resources,
+        work_limit: usize,
+    ) -> io::Result<usize> {
+        match &self.source_guards {
+            Some(guards) => guards.validate(scope, generation, decoder, r, work_limit),
+            None => Ok(0),
+        }
+    }
+    pub(super) fn inode_guard_geometry(&self, at: u64, size: usize) -> bool {
+        self.source_guards
+            .as_ref()
+            .is_some_and(|g| g.inode_guard_geometry(at, size))
+    }
+
+    pub(super) fn check_source_guards(
+        &self,
+        storage: &dyn crate::storage::Storage,
+        resources: &Resources,
+    ) -> io::Result<()> {
+        if let Some(guards) = &self.source_guards {
+            guards.check(storage, resources)?;
+        }
+        Ok(())
+    }
 }
 struct Group {
     bitmap: Vec<u8>,
@@ -296,7 +340,10 @@ impl<'a, 's> Context<'a, 's> {
             .ok_or_else(|| budget("modern release count overflow"))?;
         Ok(())
     }
-    fn finish(mut self) -> io::Result<Plan> {
+    fn finish(self) -> io::Result<Plan> {
+        self.finish_with_work().map(|(plan, _)| plan)
+    }
+    fn finish_with_work(mut self) -> io::Result<(Plan, usize)> {
         let g = &self.decoder.geometry;
         let proof = g.modern.as_ref().unwrap();
         for (number, mut row) in crate::platform::mem::take(&mut self.groups) {
@@ -363,7 +410,21 @@ impl<'a, 's> Context<'a, 's> {
             superblock[1020..].copy_from_slice(&checksum.to_le_bytes());
         }
         self.patch(1024, &superblock)?;
-        self.patches.sort_by_key(WriteRange::offset);
+        // Explicit finite insertion sort: every comparison and swap is charged.
+        // Reservation operations must not inherit an uncharged library sort.
+        for index in 1..self.patches.len() {
+            let mut at = index;
+            while at > 0 {
+                self.tick(1)?;
+                if self.patches[at - 1].offset() <= self.patches[at].offset() {
+                    break;
+                }
+                self.tick(1)?;
+                self.patches.swap(at - 1, at);
+                at -= 1;
+            }
+        }
+        self.tick(self.patches.len().saturating_sub(1))?;
         for pair in self.patches.windows(2) {
             if pair[0]
                 .offset()
@@ -373,10 +434,14 @@ impl<'a, 's> Context<'a, 's> {
                 return Err(invalid("modern mutation patches overlap"));
             }
         }
-        Ok(Plan {
-            patches: self.patches,
-            _reservation: self.reservation,
-        })
+        Ok((
+            Plan {
+                patches: self.patches,
+                _reservation: self.reservation,
+                source_guards: None,
+            },
+            self.work,
+        ))
     }
 }
 

@@ -918,7 +918,7 @@ impl HfsVolume {
         if used.len() != overflow.len() {
             return Err(bad("HFS orphan overflow extent record"));
         }
-        if (attributes & 0x200 != 0) != !bad_blocks.is_empty() {
+        if (attributes & 0x200 != 0) == bad_blocks.is_empty() {
             return Err(bad("HFS spared-block flag differs from bad-block file"));
         }
         w.tick(bitmap_bytes, r)?;

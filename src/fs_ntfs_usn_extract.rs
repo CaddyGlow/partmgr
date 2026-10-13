@@ -296,7 +296,10 @@ impl NtfsUsnReader {
             if length < 8 || !length.is_multiple_of(8) {
                 return Err(failure(ErrorKind::InvalidData, "USN record length framing").into());
             }
-            if length > bytes.len() || count == self.limits.records {
+            if length > bytes.len() {
+                return Err(failure(ErrorKind::BudgetExhausted, "USN record byte ceiling").into());
+            }
+            if count == self.limits.records {
                 return Err(failure(ErrorKind::BudgetExhausted, "USN record/count ceiling").into());
             }
             if length as u64 > data_end - offset {

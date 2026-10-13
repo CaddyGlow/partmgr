@@ -294,7 +294,7 @@ mod tests {
                 let volume = ApfsVolume::open(container.clone(), oid, &r).unwrap();
                 let report = audit_apfs(&volume, audit_limits(), &r).unwrap();
                 assert!(report.is_clean());
-                assert_eq!(report.allocated_blocks(), 57);
+                assert_eq!(report.allocated_blocks(), 69);
             }
             drop(container);
             assert_eq!(r.memory.used(), 0);

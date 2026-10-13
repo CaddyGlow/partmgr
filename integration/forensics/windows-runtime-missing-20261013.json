@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "profile": "disposable-windows-readonly-vhd",
+  "os": "Microsoft Windows NT 10.0.26200.0",
+  "powershell": "5.1.26100.7920",
+  "device": "\\\\.\\PhysicalDrive1",
+  "logical_sector_size": 512,
+  "backend": "upstream-physical-disk",
+  "binary_sha256": "7decd2f2fe5b963fbf1b23c07f2ae0edca9d5b8f7d2c03ad7aafde727667d6a2",
+  "fixture_hash_domain": "original_fixed_vhd_container_bytes",
+  "fixture_sha256_before": "b5a77189d676f2dc83180c2967dff8348ed5162adaf422ca41b6be9434d5a8c7",
+  "fixture_sha256_after": "b5a77189d676f2dc83180c2967dff8348ed5162adaf422ca41b6be9434d5a8c7",
+  "exit_code": -1073741515,
+  "stdout": "",
+  "selected_test_executed": false,
+  "immutable_fixture_verified": true,
+  "passed": false
+}

@@ -232,7 +232,8 @@ mod tests {
             file_blocks: 256,
             directory_entries: 32,
             affected_bytes: 1 << 20,
-            work: 100000,
+            // Include bounded overlay lookups while validating the native journal map.
+            work: 250000,
             undo: crate::fs_undo::UndoLimits {
                 patches: 1024,
                 body_bytes: 4 << 20,

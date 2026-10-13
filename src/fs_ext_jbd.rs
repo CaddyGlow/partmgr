@@ -7,6 +7,12 @@ use crate::platform::prelude::*;
 use crate::platform::{cell::Cell, io};
 #[path = "fs_ext_jbd_bootstrap.rs"]
 mod bootstrap;
+#[cfg(test)]
+#[path = "fs_ext_jbd_foreign.rs"]
+mod foreign;
+#[cfg(all(test, feature = "std"))]
+#[path = "fs_ext_jbd_header_last_tests.rs"]
+mod header_last_tests;
 #[path = "fs_ext_jbd_legacy.rs"]
 mod legacy;
 #[path = "fs_ext_jbd_modern_plan.rs"]
@@ -14,8 +20,19 @@ mod modern_plan;
 #[cfg(all(test, feature = "std", unix))]
 #[path = "fs_ext_jbd_native.rs"]
 mod native;
+#[cfg(all(test, feature = "std"))]
+#[path = "fs_ext_jbd_ordered_tests.rs"]
+mod ordered_tests;
 #[path = "fs_ext_jbd_overlay.rs"]
 mod overlay;
+#[path = "fs_ext_owned.rs"]
+mod owned;
+pub use owned::{
+    ExtJournalFile, ExtJournalLimits, ExtJournalProfile, ExtJournalSession, ExtJournalState,
+};
+#[cfg(all(test, feature = "std", unix))]
+#[path = "fs_ext_jbd_owned_native_cuts.rs"]
+mod owned_native_cuts;
 #[path = "fs_ext_jbd_recovery.rs"]
 mod recovery;
 #[path = "fs_ext_jbd_session.rs"]
@@ -63,6 +80,11 @@ impl<'a> super::ExtDecoder<&'a dyn crate::storage::Storage> {
         resources: &Resources,
     ) -> io::Result<(Self, NativeJournalProof)> {
         let decoder = Self::open_owned_profile_qualification(storage, scope, resources)?;
+        if decoder.geometry.modern.is_none() && decoder.geometry.external_xattrs {
+            return Err(unsupported(
+                "classic external xattrs are read-only pending atomic lifetime admission",
+            ));
+        }
         if !decoder.geometry.has_journal {
             return Err(unsupported(
                 "native ext editor requires internal JBD2 journal",
@@ -128,6 +150,7 @@ pub(crate) struct ReplayPlan {
     pub(crate) blocks: Vec<ReplayBlock>,
     pub(crate) next_sequence: u32,
     pub(crate) committed_transactions: usize,
+    #[cfg(test)]
     pub(crate) discarded_tail: bool,
     _reservation: Reservation,
 }
@@ -201,6 +224,7 @@ const CAPSULE_MAGIC: &[u8; 16] = b"PMGRJBD2PREPARE1";
 pub(crate) struct Preparation {
     pub(crate) superblock: [u8; MAX_BLOCK],
     pub(crate) journal_superblock: [u8; 1024],
+    #[cfg(test)]
     pub(crate) next_logical: u32,
     _reservation: Reservation,
 }
@@ -410,6 +434,7 @@ pub(crate) fn preparation(
     Ok(Preparation {
         superblock: data,
         journal_superblock: original,
+        #[cfg(test)]
         next_logical: geometry.next(third),
         _reservation: scratch,
     })
@@ -546,6 +571,100 @@ pub(crate) fn encode(
     })
 }
 
+// Additional resources used only by descriptor header-last publication.
+// Encoded data beginning with MAGIC is escaped, so this classifier cannot treat
+// a payload as a descriptor. The only production constructor is encode().
+fn encoded_descriptor(block: &LogBlock) -> bool {
+    be32(&block.bytes, 0) == MAGIC && be32(&block.bytes, 4) == 1
+}
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PublicationOverhead {
+    pub(super) written: usize,
+    pub(super) read: usize,
+    pub(super) work: usize,
+}
+pub(super) fn publication_overhead(
+    encoded: &EncodedTransaction,
+    bs: usize,
+) -> io::Result<PublicationOverhead> {
+    if !(1024..=MAX_BLOCK).contains(&bs) || !bs.is_power_of_two() {
+        return Err(invalid("JBD2 publication accounting block size"));
+    }
+    let (_, preceding) = encoded
+        .blocks
+        .split_last()
+        .ok_or_else(|| invalid("JBD2 empty publication accounting"))?;
+    let descriptors = preceding
+        .iter()
+        .filter(|block| encoded_descriptor(block))
+        .count();
+    let written = descriptors
+        .checked_mul(12)
+        .ok_or_else(|| budget("JBD2 descriptor write overhead"))?;
+    let read = descriptors
+        .checked_mul(bs + 12)
+        .ok_or_else(|| budget("JBD2 descriptor read overhead"))?;
+    // Byte-by-byte successful short writes may use one cancellation/length/
+    // write/progress step per byte. Extra readback bytes are read and compared.
+    // Each staged descriptor copies MAX_BLOCK bytes and zeroes 12 header bytes.
+    // Eight linear visits per encoded block cover classifier/accounting passes;
+    // 32 fixed steps per descriptor cover the added IO/range/check branches.
+    let work = written
+        .checked_mul(4)
+        .and_then(|n| read.checked_mul(2).and_then(|r| n.checked_add(r)))
+        .and_then(|n| {
+            descriptors
+                .checked_mul(MAX_BLOCK + 12 + 32)
+                .and_then(|r| n.checked_add(r))
+        })
+        .and_then(|n| {
+            encoded
+                .blocks
+                .len()
+                .checked_mul(8)
+                .and_then(|r| n.checked_add(r))
+        })
+        .and_then(|n| n.checked_add(1)) // added durable barrier
+        .ok_or_else(|| budget("JBD2 descriptor publication work overhead"))?;
+    Ok(PublicationOverhead {
+        written,
+        read,
+        work,
+    })
+}
+pub(super) fn publication_budget(
+    base_work: usize,
+    base_bytes: usize,
+    first: &EncodedTransaction,
+    second: &EncodedTransaction,
+    bs: usize,
+    maximum_work: usize,
+    maximum_bytes: u64,
+) -> io::Result<()> {
+    let a = publication_overhead(first, bs)?;
+    let b = publication_overhead(second, bs)?;
+    let _read_reservation = a
+        .read
+        .checked_add(b.read)
+        .ok_or_else(|| budget("JBD2 descriptor read reservation overflow"))?;
+    if base_work
+        .checked_add(a.work)
+        .and_then(|n| n.checked_add(b.work))
+        .is_none_or(|n| n > maximum_work)
+    {
+        return Err(budget("JBD2 descriptor publication work reservation"));
+    }
+    if base_bytes
+        .checked_add(a.written)
+        .and_then(|n| n.checked_add(b.written))
+        .and_then(|n| u64::try_from(n).ok())
+        .is_none_or(|n| n > maximum_bytes)
+    {
+        return Err(budget("JBD2 descriptor publication physical reservation"));
+    }
+    Ok(())
+}
+
 /// Durably write descriptor/data blocks before the native commit record.
 /// Activating the journal and publishing the filesystem dirty fence are separate
 /// owned-session steps; this helper never checkpoints filesystem home blocks.
@@ -613,11 +732,19 @@ pub(crate) fn publish_log(
     if preceding.is_empty() || be32(&commit.bytes, 0) != MAGIC || be32(&commit.bytes, 4) != 2 {
         return Err(invalid("JBD2 missing encoded commit"));
     }
+    // Escaped data cannot begin with MAGIC; only encoded descriptors do.
+    let descriptor = encoded_descriptor;
     // Clear both the future tail and commit header before any new descriptor/data.
     // An inactive ring may retain a valid commit with the upcoming native sequence.
     write(storage, encoded.next_logical, 0, &scratch[..block_bytes])?;
     write(storage, commit.logical, 0, &[0; 12])?;
+    for block in preceding.iter().filter(|block| descriptor(block)) {
+        write(storage, block.logical, 0, &[0; 12])?;
+    }
     storage.flush()?;
+    for block in preceding.iter().filter(|block| descriptor(block)) {
+        verify(storage, block.logical, &[0; 12], &mut scratch[..12])?;
+    }
     verify(storage, commit.logical, &[0; 12], &mut scratch[..12])?;
     verify(
         storage,
@@ -626,18 +753,33 @@ pub(crate) fn publish_log(
         &mut scratch[..block_bytes],
     )?;
     for block in preceding {
-        write(storage, block.logical, 0, &block.bytes[..block_bytes])?;
+        if descriptor(block) {
+            write(storage, block.logical, 12, &block.bytes[12..block_bytes])?;
+        } else {
+            write(storage, block.logical, 0, &block.bytes[..block_bytes])?;
+        }
     }
     // The complete commit body is durable while its publication header is zero.
     write(storage, commit.logical, 12, &commit.bytes[12..block_bytes])?;
     storage.flush()?;
     for block in preceding {
-        verify(
-            storage,
-            block.logical,
-            &block.bytes[..block_bytes],
-            &mut scratch[..block_bytes],
-        )?;
+        if descriptor(block) {
+            let mut expected = block.bytes;
+            expected[..12].fill(0);
+            verify(
+                storage,
+                block.logical,
+                &expected[..block_bytes],
+                &mut scratch[..block_bytes],
+            )?;
+        } else {
+            verify(
+                storage,
+                block.logical,
+                &block.bytes[..block_bytes],
+                &mut scratch[..block_bytes],
+            )?;
+        }
     }
     let mut unpublished = commit.bytes;
     unpublished[..12].fill(0);
@@ -647,6 +789,20 @@ pub(crate) fn publish_log(
         &unpublished[..block_bytes],
         &mut scratch[..block_bytes],
     )?;
+    // A recognisable descriptor header must never expose a torn UUID/tag body.
+    // All descriptor/data bodies are durable before any descriptor is visible.
+    for block in preceding.iter().filter(|block| descriptor(block)) {
+        write(storage, block.logical, 0, &block.bytes[..12])?;
+    }
+    storage.flush()?;
+    for block in preceding.iter().filter(|block| descriptor(block)) {
+        verify(
+            storage,
+            block.logical,
+            &block.bytes[..block_bytes],
+            &mut scratch[..block_bytes],
+        )?;
+    }
     write(storage, commit.logical, 0, &commit.bytes[..12])?;
     storage.flush()?;
     verify(
@@ -660,6 +816,7 @@ pub(crate) fn publish_log(
 
 /// Scan the whole bounded log before returning any block authorized for replay.
 /// `destination` must exclude journal storage and any unsupported native targets.
+#[cfg(test)]
 pub(crate) fn scan(
     geometry: &Geometry,
     maximum_records: usize,
@@ -740,6 +897,7 @@ fn scan_profile(
     let mut integrity = legacy::Integrity::new(geometry, sequence);
     let mut committed = 0;
     let mut pending_bad = false;
+    #[cfg(test)]
     let mut discarded = false;
     let mut log = geometry.start;
     let mut reads = 0usize;
@@ -771,7 +929,10 @@ fn scan_profile(
         let control_log = log;
         read_block(log, &mut control[..block_bytes])?;
         if be32(&control, 0) != MAGIC || be32(&control, 8) != sequence {
-            discarded = !pending.is_empty() || !revocations.is_empty();
+            #[cfg(test)]
+            {
+                discarded = !pending.is_empty() || !revocations.is_empty();
+            }
             break;
         }
         log = geometry.next(log);
@@ -781,7 +942,10 @@ fn scan_profile(
                     integrity.feed(control_log, &control[..block_bytes])?;
                 }
                 if !geometry.metadata_valid(&mut control[..block_bytes], block_bytes - 4) {
-                    discarded = true;
+                    #[cfg(test)]
+                    {
+                        discarded = true;
+                    }
                     break;
                 }
                 let checked = !matches!(geometry.checksums, Checksums::None);
@@ -878,7 +1042,10 @@ fn scan_profile(
                     return Err(unsupported("JBD2 revocation feature absent"));
                 }
                 if !geometry.metadata_valid(&mut control[..block_bytes], block_bytes - 4) {
-                    discarded = true;
+                    #[cfg(test)]
+                    {
+                        discarded = true;
+                    }
                     break;
                 }
                 let end = be32(&control, 12) as usize;
@@ -907,7 +1074,10 @@ fn scan_profile(
                     integrity.verify(geometry, &control[..block_bytes])?;
                 }
                 if !geometry.metadata_valid(&mut control[..block_bytes], 16) {
-                    discarded = true;
+                    #[cfg(test)]
+                    {
+                        discarded = true;
+                    }
                     break;
                 }
                 if !matches!(geometry.checksums, Checksums::None) && control[12..16] != [0; 4] {
@@ -942,7 +1112,10 @@ fn scan_profile(
                 integrity = legacy::Integrity::new(geometry, sequence);
             }
             _ => {
-                discarded = !pending.is_empty() || !revocations.is_empty();
+                #[cfg(test)]
+                {
+                    discarded = !pending.is_empty() || !revocations.is_empty();
+                }
                 break;
             }
         }
@@ -957,6 +1130,7 @@ fn scan_profile(
         blocks,
         next_sequence: sequence,
         committed_transactions: committed,
+        #[cfg(test)]
         discarded_tail: discarded,
         _reservation: reservation,
     })
@@ -1518,3 +1692,11 @@ mod tests {
         assert_eq!(r.memory.used(), 0);
     }
 }
+
+#[allow(dead_code)]
+#[path = "fs_ext_jbd_xattr.rs"]
+pub(crate) mod xattr;
+
+#[allow(dead_code)]
+#[path = "fs_ext_jbd_acl.rs"]
+pub(crate) mod acl;

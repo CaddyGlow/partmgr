@@ -153,7 +153,7 @@ fn native_logical_nor_both_endian_payload_and_symlink_gate() {
     #[cfg(unix)]
     {
         let link = root.join("nested/link");
-        if !link.symlink_metadata().is_ok() {
+        if link.symlink_metadata().is_err() {
             std::os::unix::fs::symlink("payload", link).unwrap();
         }
     }

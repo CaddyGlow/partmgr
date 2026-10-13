@@ -1058,7 +1058,6 @@ fn native_ads_attribute_list_independent_oracles() {
     drop(streams);
     drop(v);
     assert_eq!(r.memory.used(), 0);
-    drop(run);
     for (file, digest) in bindings {
         assert_eq!(
             format!("{:x}", Sha256::digest(fs::read(file).unwrap())),

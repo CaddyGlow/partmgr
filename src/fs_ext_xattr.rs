@@ -202,3 +202,227 @@ mod tests {
         }
     }
 }
+
+/// Limits for read-only observations; validation remains independent of ownership admission.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ObservationLimits {
+    pub bytes: usize,
+    pub entries: usize,
+    pub value_bytes: usize,
+    pub work: usize,
+}
+/// Borrowed native key/value, retaining uninterpreted namespaces byte-for-byte.
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Observation<'a> {
+    pub index: u8,
+    pub name: &'a [u8],
+    pub value: &'a [u8],
+    pub entry_hash: u32,
+}
+#[allow(dead_code)]
+impl<'a> Observation<'a> {
+    /// Only ext4-native access/default ACL keys (indices 2/3, empty name).
+    pub fn acl(
+        &self,
+        limits: super::acl::Limits,
+        r: &Resources,
+    ) -> io::Result<Option<super::acl::Acl<'a>>> {
+        if matches!(self.index, 2 | 3) {
+            if !self.name.is_empty() {
+                return Err(invalid("ext ACL xattr key must have empty name"));
+            }
+            return super::acl::decode(self.value, limits, r).map(Some);
+        }
+        Ok(None)
+    }
+}
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(super) struct Observations<'a> {
+    bytes: &'a [u8],
+    start: usize,
+    base: usize,
+    count: usize,
+    pub reference_count: u32,
+}
+#[allow(dead_code)]
+impl<'a> Observations<'a> {
+    pub fn len(&self) -> usize {
+        self.count
+    }
+    pub fn entries(&self) -> impl Iterator<Item = Observation<'a>> + '_ {
+        let mut at = self.start;
+        let mut left = self.count;
+        core::iter::from_fn(move || {
+            if left == 0 {
+                return None;
+            }
+            let length = usize::from(self.bytes[at]);
+            let size = u32le(self.bytes, at + 8) as usize;
+            let offset = self.base + usize::from(u16le(self.bytes, at + 2));
+            let item = Observation {
+                index: self.bytes[at + 1],
+                name: &self.bytes[at + 16..at + 16 + length],
+                // Native empty values have no required valid offset.
+                value: if size == 0 {
+                    &self.bytes[0..0]
+                } else {
+                    &self.bytes[offset..offset + size]
+                },
+                entry_hash: u32le(self.bytes, at + 12),
+            };
+            at = (at + 16 + length).next_multiple_of(4);
+            left -= 1;
+            Some(item)
+        })
+    }
+}
+/// Validate bounded structure before exposing borrowed observations. Neither
+/// CRC nor refcount ownership is established here; callers retain those audits.
+#[allow(dead_code)]
+pub(super) fn observe<'a>(
+    bytes: &'a [u8],
+    header: usize,
+    external: bool,
+    limits: ObservationLimits,
+    r: &Resources,
+) -> io::Result<Observations<'a>> {
+    r.cancellation.check().map_err(io::Error::other)?;
+    if bytes.len() > limits.bytes {
+        return Err(unsupported("ext xattr observation byte ceiling"));
+    }
+    // Existing validator scans <=256 entries, comparing each previous native key.
+    // Preflight a conservative bound before any scan/scratch reservation.
+    let work = bytes
+        .len()
+        .checked_mul(258)
+        .ok_or_else(|| unsupported("ext xattr observation work overflow"))?;
+    if work > limits.work {
+        return Err(unsupported("ext xattr observation work ceiling"));
+    }
+    let summary = validate(bytes, header, external, r)?;
+    if summary.entries > limits.entries {
+        return Err(unsupported("ext xattr observation entry ceiling"));
+    }
+    let start = header + if external { 32 } else { 4 };
+    let result = Observations {
+        bytes,
+        start,
+        base: if external { 0 } else { start },
+        count: summary.entries,
+        reference_count: summary.reference_count,
+    };
+    let mut total = 0usize;
+    for item in result.entries() {
+        r.cancellation.check().map_err(io::Error::other)?;
+        total = total
+            .checked_add(item.value.len())
+            .filter(|n| *n <= limits.value_bytes)
+            .ok_or_else(|| unsupported("ext xattr observation value ceiling"))?;
+    }
+    r.cancellation.check().map_err(io::Error::other)?;
+    Ok(result)
+}
+#[cfg(all(test, feature = "std"))]
+mod observation_tests {
+    use super::*;
+    use crate::fs_core::{Budget, Cancellation};
+    fn r() -> Resources {
+        Resources {
+            memory: Budget::new(16384),
+            cancellation: Cancellation::default(),
+        }
+    }
+    fn limits() -> ObservationLimits {
+        ObservationLimits {
+            bytes: 4096,
+            entries: 256,
+            value_bytes: 4096,
+            work: 4096 * 258,
+        }
+    }
+    fn fixture(external: bool) -> (Vec<u8>, usize) {
+        let mut b = vec![0; if external { 1024 } else { 256 }];
+        let header = if external { 0 } else { 160 };
+        let start = header + if external { 32 } else { 4 };
+        b[header..header + 4].copy_from_slice(&0xea020000u32.to_le_bytes());
+        if external {
+            b[4..8].copy_from_slice(&2u32.to_le_bytes());
+            b[8..12].copy_from_slice(&1u32.to_le_bytes());
+        }
+        b[start + 1] = 2;
+        let value = b.len() - 16;
+        b[start + 2..start + 4]
+            .copy_from_slice(&((value - if external { 0 } else { start }) as u16).to_le_bytes());
+        b[start + 8..start + 12].copy_from_slice(&16u32.to_le_bytes());
+        b[value..value + 4].copy_from_slice(&1u32.to_le_bytes());
+        for (n, (tag, perm)) in [(1u16, 7u16), (4, 5), (32, 0)].into_iter().enumerate() {
+            let at = value + 4 + n * 4;
+            b[at..at + 2].copy_from_slice(&tag.to_le_bytes());
+            b[at + 2..at + 4].copy_from_slice(&perm.to_le_bytes());
+        }
+        (b, header)
+    }
+    #[test]
+    fn inline_external_observations_decode_acl_without_mutation_or_retained_allocations() {
+        for external in [false, true] {
+            let (b, h) = fixture(external);
+            let before = b.clone();
+            let r = r();
+            let obs = observe(&b, h, external, limits(), &r).unwrap();
+            assert_eq!(obs.len(), 1);
+            assert_eq!(obs.reference_count, if external { 2 } else { 1 });
+            let item = obs.entries().next().unwrap();
+            assert!(item.name.is_empty());
+            let acl = item
+                .acl(
+                    super::super::acl::Limits {
+                        bytes: 1024,
+                        entries: 64,
+                        work: 4096,
+                    },
+                    &r,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(acl.mode(), Some(0o750));
+            assert_eq!(b, before);
+            assert_eq!(r.memory.used(), 0);
+        }
+    }
+    #[test]
+    fn observations_enforce_work_entry_value_memory_and_cancel_ceilings() {
+        let (b, h) = fixture(true);
+        let r = r();
+        for l in [
+            ObservationLimits {
+                work: 0,
+                ..limits()
+            },
+            ObservationLimits {
+                bytes: 0,
+                ..limits()
+            },
+            ObservationLimits {
+                entries: 0,
+                ..limits()
+            },
+            ObservationLimits {
+                value_bytes: 15,
+                ..limits()
+            },
+        ] {
+            assert!(observe(&b, h, true, l, &r).is_err());
+            assert_eq!(r.memory.used(), 0);
+        }
+        let low = Resources {
+            memory: Budget::new(0),
+            cancellation: Cancellation::default(),
+        };
+        assert!(observe(&b, h, true, limits(), &low).is_err());
+        r.cancellation.cancel();
+        assert!(observe(&b, h, true, limits(), &r).is_err());
+    }
+}

@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "profile": "disposable-windows-partmgr-readonly-vhd",
+  "started_utc": "2026-10-13T09:35:03.4067079Z",
+  "os": "Microsoft Windows NT 10.0.26200.0",
+  "powershell": "5.1.26100.7920",
+  "backend": "partmgr-raw-native-device-equivalence",
+  "runner_sha256": "f2a4679b5e11fa1fec68726d547ef241018145f08bb928d4e52b27e15a021a56",
+  "expected_fixture_sha256": "98a1f36fc232bff97fcb812a6c23e17c21a07e882006e6acb1b318f09525305e",
+  "expected_binary_sha256": "a64ad210747760d27f29de36ccc324438525630c11ab22ab5fb1cb34c69eab6b",
+  "fixture_hash_domain": "original_raw_dd_file_bytes",
+  "container_hash_domain": "original_fixed_vhd_container_bytes",
+  "logical_hash_domain": "logical_disk_bytes_from_native_physical_device",
+  "fixture_bytes": 8388608,
+  "diskpart": [
+    {
+      "commands": [
+        "create vdisk file=\"C:\\WINDOWS\\SystemTemp\\partmgr-native-688db516-177b-4da5-9a10-53cd21aafd0f\\fat-partition.vhd\" maximum=8 type=fixed",
+        "select vdisk file=\"C:\\WINDOWS\\SystemTemp\\partmgr-native-688db516-177b-4da5-9a10-53cd21aafd0f\\fat-partition.vhd\"",
+        "attach vdisk"
+      ],
+      "exit_code": 0,
+      "output": "\nMicrosoft DiskPart version 10.0.26100.1150\n\nCopyright (C) Microsoft Corporation.\nOn computer: DEPLOYV-3R51II0\n\n\n    0 percent completed\n  100 percent completed\n\n\nDiskPart successfully created the virtual disk file.\n\nDiskPart successfully selected the virtual disk file.\n\n\n  100 percent completed\n\n\nDiskPart successfully attached the virtual disk file."
+    },
+    {
+      "commands": [
+        "select vdisk file=\"C:\\WINDOWS\\SystemTemp\\partmgr-native-688db516-177b-4da5-9a10-53cd21aafd0f\\fat-partition.vhd\"",
+        "detach vdisk",
+        "attach vdisk readonly"
+      ],
+      "exit_code": 0,
+      "output": "\nMicrosoft DiskPart version 10.0.26100.1150\n\nCopyright (C) Microsoft Corporation.\nOn computer: DEPLOYV-3R51II0\n\nDiskPart successfully selected the virtual disk file.\n\nDiskPart successfully detached the virtual disk file.\n\n\n  100 percent completed\n\n\nDiskPart successfully attached the virtual disk file."
+    },
+    {
+      "commands": [
+        "select vdisk file=\"C:\\WINDOWS\\SystemTemp\\partmgr-native-688db516-177b-4da5-9a10-53cd21aafd0f\\fat-partition.vhd\"",
+        "detach vdisk"
+      ],
+      "exit_code": 0,
+      "output": "\nMicrosoft DiskPart version 10.0.26100.1150\n\nCopyright (C) Microsoft Corporation.\nOn computer: DEPLOYV-3R51II0\n\nDiskPart successfully selected the virtual disk file.\n\nDiskPart successfully detached the virtual disk file."
+    }
+  ],
+  "passed": true,
+  "binary_sha256": "a64ad210747760d27f29de36ccc324438525630c11ab22ab5fb1cb34c69eab6b",
+  "fixture_sha256_before": "98a1f36fc232bff97fcb812a6c23e17c21a07e882006e6acb1b318f09525305e",
+  "device_resolution": {
+    "owned_image_path": "C:\\WINDOWS\\SystemTemp\\partmgr-native-688db516-177b-4da5-9a10-53cd21aafd0f\\fat-partition.vhd",
+    "image_attached": true,
+    "image_device_path": "\\\\.\\PhysicalDrive1",
+    "disk_number": 1,
+    "native_capacity": 8388608,
+    "native_logical_sector_size": 512,
+    "native_is_read_only": true,
+    "ioctl_disk_is_writable_succeeded": false,
+    "ioctl_disk_is_writable_error": 19,
+    "ioctl_disk_attributes_available": true,
+    "ioctl_disk_attributes": 0,
+    "msft_disk_visible": false
+  },
+  "storage_provider_discovery_error": "No MSFT_Disk objects found with property 'Number' equal to '1'.  Verify the value of the property and retry.",
+  "device": "\\\\.\\PhysicalDrive1",
+  "logical_sector_size": 512,
+  "disk_read_only": true,
+  "container_sha256_before": "103bb6ada36785aed5b915d6320d99b76355563a4d2c4e95d5be20235b5b0399",
+  "logical_sha256_before": "98a1f36fc232bff97fcb812a6c23e17c21a07e882006e6acb1b318f09525305e",
+  "exit_code": 0,
+  "stdout": "\nrunning 1 test\nnative FAT/partition equivalence passed: logical_sector=512; backends=raw,native-device; partition_lba=8; slots=5; FAT_copies=2; allocation_entries=5698; owners=2\ntest native_fat_partition_equivalence_for_disposable_device ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.61s\n",
+  "selected_test_executed": true,
+  "fixture_sha256_after": "98a1f36fc232bff97fcb812a6c23e17c21a07e882006e6acb1b318f09525305e",
+  "container_sha256_after": "103bb6ada36785aed5b915d6320d99b76355563a4d2c4e95d5be20235b5b0399",
+  "logical_sha256_after": "98a1f36fc232bff97fcb812a6c23e17c21a07e882006e6acb1b318f09525305e",
+  "immutable_fixture_verified": true,
+  "owned_fixture_removed": true,
+  "finished_utc": "2026-10-13T09:35:12.2791037Z"
+}

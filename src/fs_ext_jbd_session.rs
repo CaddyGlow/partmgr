@@ -31,6 +31,9 @@ pub(crate) struct File {
     _reservation: Reservation,
 }
 impl File {
+    pub(crate) fn len(&self) -> u64 {
+        self.inode.len()
+    }
     pub(crate) fn inode_number(&self) -> u32 {
         self.inode.number()
     }
@@ -42,10 +45,32 @@ pub(crate) enum Operation<'a> {
         metadata: &'a crate::fs_ext_edit::ExtCreateMetadata,
         payload: &'a [u8],
     },
+    CreateSymlink {
+        parent: &'a [crate::fs_core::NativeName],
+        name: &'a [u8],
+        target: &'a [u8],
+        metadata: &'a crate::fs_ext_edit::ExtCreateMetadata,
+    },
+    ReplaceSymlinkTarget {
+        parent: &'a [crate::fs_core::NativeName],
+        name: &'a [u8],
+        target: &'a [u8],
+    },
+    UnlinkSymlink {
+        parent: &'a [crate::fs_core::NativeName],
+        name: &'a [u8],
+        deletion_time: u32,
+    },
     CreateDirectory {
         parent: &'a [crate::fs_core::NativeName],
         name: &'a [u8],
         metadata: &'a crate::fs_ext_edit::ExtCreateMetadata,
+    },
+    HardLink {
+        source: &'a [crate::fs_core::NativeName],
+        name: &'a [u8],
+        destination: &'a [crate::fs_core::NativeName],
+        new_name: &'a [u8],
     },
     Rename {
         source: &'a [crate::fs_core::NativeName],
@@ -62,20 +87,104 @@ pub(crate) enum Operation<'a> {
         file: &'a File,
         input: &'a dyn crate::fs_core::FileRead,
     },
+    Overwrite {
+        file: &'a File,
+        offset: u64,
+        input: &'a dyn crate::fs_core::FileRead,
+        input_length: u64,
+    },
+    SparseExtend {
+        file: &'a File,
+        length: u64,
+    },
+    // Private controller entry remains unavailable to public callers until the native gate passes.
+    #[cfg_attr(not(all(test, feature = "std")), allow(dead_code))]
+    PreallocateKeepSize {
+        file: &'a File,
+        offset: u64,
+        length: u64,
+    },
     Truncate {
         file: &'a File,
         length: u64,
     },
 }
+// Pin the public success count to the same logical input length used by the
+// planner, even when a hostile backend changes its length between callbacks.
+struct OverwriteInput<'a> {
+    input: &'a dyn crate::fs_core::FileRead,
+    length: u64,
+}
+impl crate::fs_core::FileRead for OverwriteInput<'_> {
+    fn identity(&self) -> &ObjectId {
+        self.input.identity()
+    }
+    fn len(&self) -> u64 {
+        self.length
+    }
+    fn read_at(&self, at: u64, out: &mut [u8], r: &Resources) -> crate::fs_core::Result<usize> {
+        r.cancellation.check()?;
+        if self.input.len() != self.length {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "overwrite input length changed",
+            ));
+        }
+        let count = self.input.read_at(at, out, r)?;
+        if self.input.len() != self.length {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "overwrite input length changed during read",
+            ));
+        }
+        r.cancellation.check()?;
+        Ok(count)
+    }
+    fn visit_extents(
+        &self,
+        r: &Resources,
+        visitor: &mut dyn FnMut(crate::fs_core::LogicalExtent) -> crate::fs_core::Result<()>,
+    ) -> crate::fs_core::Result<()> {
+        r.cancellation.check()?;
+        if self.input.len() != self.length {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "overwrite input length changed",
+            ));
+        }
+        self.input.visit_extents(r, visitor)?;
+        if self.input.len() != self.length {
+            return Err(Error::new(
+                ErrorKind::StalePlan,
+                "overwrite input length changed",
+            ));
+        }
+        r.cancellation.check()
+    }
+}
 enum OperationPlan {
-    Classic(crate::fs_ext_edit::ExtEditBatch),
+    Classic {
+        patches: Vec<crate::storage::WriteRange>,
+        _lease: Reservation,
+    },
     Modern(modern_plan::Plan),
+    Ordered(crate::fs_ext_edit::NativeOrderedPatches),
+    Namespace(crate::fs_ext_edit::NativeNamespacePatches),
 }
 impl OperationPlan {
+    fn classic(batch: crate::fs_ext_edit::ExtEditBatch) -> Self {
+        let (patches, lease) = batch.into_native_patches();
+        Self::Classic {
+            patches,
+            _lease: lease,
+        }
+    }
     fn patches(&self) -> &[crate::storage::WriteRange] {
         match self {
-            Self::Classic(plan) => plan.patches(),
+            Self::Classic { patches, .. } => patches,
             Self::Modern(plan) => &plan.patches,
+            Self::Ordered(plan) => plan.metadata(),
+            Self::Namespace(plan) => plan.patches(),
         }
     }
 }
@@ -90,6 +199,62 @@ pub(crate) struct Session<S: Storage> {
     memory: Budget,
 }
 impl<S: Storage> Session<S> {
+    pub(crate) fn state(&self) -> State {
+        self.state
+    }
+    /// Keep public readiness fenced through its narrower profile reinspection.
+    pub(super) fn revalidate(
+        &mut self,
+        cancellation: &Cancellation,
+        check: impl FnOnce(&S, &Resources) -> io::Result<()>,
+    ) -> io::Result<()> {
+        self.state = State::NeedsRecovery;
+        let resources = self.resources(cancellation);
+        check(&self.storage, &resources)?;
+        if self.storage.len()? != self.length {
+            return Err(io::Error::other(Error::new(
+                ErrorKind::StalePlan,
+                "native ext public reinspection source length changed",
+            )));
+        }
+        cancellation.check().map_err(io::Error::other)?;
+        self.state = State::Ready;
+        Ok(())
+    }
+    /// Admit exclusively owned storage for explicit partmgr-authored recovery.
+    /// This only inspects bounded bootstrap geometry: ownership and preparation
+    /// remain unproven until recover succeeds. Native foreign logs are not a
+    /// fallback profile. Even a clean source remains NeedsRecovery here.
+    pub(crate) fn open_for_recovery(storage: S, limits: Limits, r: &Resources) -> io::Result<Self> {
+        r.cancellation.check().map_err(io::Error::other)?;
+        let serial = NEXT_SESSION
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .map_err(|_| budget("native ext session identity exhausted"))?;
+        let scope = (18u128 << 64) | u128::from(serial);
+        let length = storage.len()?;
+        let bootstrap = bootstrap::Bootstrap::read(&storage, 65536, limits.audit.work, r)?;
+        let volume_length = u64::from(super::super::u32le(&bootstrap.primary, 4))
+            .checked_mul(bootstrap.geometry.block_bytes as u64)
+            .ok_or_else(|| invalid("native ext recovery volume length overflow"))?;
+        drop(bootstrap);
+        if storage.len()? != length {
+            return Err(io::Error::other(Error::new(
+                ErrorKind::StalePlan,
+                "native ext cold admission source length changed",
+            )));
+        }
+        r.cancellation.check().map_err(io::Error::other)?;
+        Ok(Self {
+            storage,
+            scope,
+            generation: 0,
+            state: State::NeedsRecovery,
+            length,
+            volume_length,
+            limits,
+            memory: r.memory.clone(),
+        })
+    }
     pub(crate) fn open(storage: S, limits: Limits, r: &Resources) -> io::Result<Self> {
         let serial = NEXT_SESSION
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
@@ -113,6 +278,7 @@ impl<S: Storage> Session<S> {
             )));
         }
         drop((decoder, proof, audit));
+        r.cancellation.check().map_err(io::Error::other)?;
         Ok(Self {
             storage,
             scope,
@@ -231,6 +397,51 @@ impl<S: Storage> Session<S> {
         drop((decoder, proof));
         self.file(number, cancellation)
     }
+    pub(crate) fn read_symlink(
+        &self,
+        path: &[crate::fs_core::NativeName],
+        cancellation: &Cancellation,
+    ) -> io::Result<crate::fs_core::Budgeted<Vec<u8>>> {
+        self.ready(cancellation)?;
+        if path.is_empty() || path.len() > self.limits.audit.work {
+            return Err(budget("native ext file path ceiling"));
+        }
+        let r = self.resources(cancellation);
+        let (decoder, proof) =
+            super::super::ExtDecoder::open_native_clean(&self.storage, self.scope, &r)?;
+        let mut number = 2;
+        let mut work = 0usize;
+        for name in path {
+            cancellation.check().map_err(io::Error::other)?;
+            if !matches!(name, crate::fs_core::NativeName::Bytes(bytes) if !bytes.is_empty() && bytes.len() <= 255 && bytes != b"." && bytes != b".." && !bytes.contains(&0) && !bytes.contains(&b'/'))
+            {
+                return Err(unsupported(
+                    "native ext file path requires exact bounded byte names",
+                ));
+            }
+            let directory = decoder.directory(
+                number,
+                self.limits.audit.directory_blocks,
+                self.limits.audit.directory_entries,
+                &r,
+            )?;
+            work = work
+                .checked_add(directory.entries().len() + 1)
+                .filter(|work| *work <= self.limits.audit.work)
+                .ok_or_else(|| budget("native ext file path work ceiling"))?;
+            number = directory
+                .entries()
+                .iter()
+                .find(|entry| &entry.name == name)
+                .ok_or_else(|| invalid("native ext file path absent"))?
+                .inode;
+        }
+        let target = decoder.symlink_target(number, 1, &r)?;
+        drop((decoder, proof));
+        self.ready(cancellation)?;
+        cancellation.check().map_err(io::Error::other)?;
+        Ok(target)
+    }
     pub(crate) fn read_at(
         &self,
         file: &File,
@@ -251,6 +462,7 @@ impl<S: Storage> Session<S> {
             self.storage.read_exact_at(physical, bytes)
         })
     }
+    #[cfg(test)]
     pub(crate) fn replace(
         &mut self,
         file: &File,
@@ -362,35 +574,154 @@ impl<S: Storage> Session<S> {
             &r,
         )?;
         drop((records, reservation));
+        // Backend callbacks can cancel during the transaction's last length
+        // observation. Keep recovery sticky through fresh session guards.
+        if self.storage.len()? != self.length {
+            return Err(io::Error::other(Error::new(
+                ErrorKind::StalePlan,
+                "native ext committed session source length changed",
+            )));
+        }
+        cancellation.check().map_err(io::Error::other)?;
         self.state = State::Ready;
         Ok(())
     }
     // Reviewable filesystem operations only; callers cannot submit physical offsets.
+    #[cfg(test)]
     pub(crate) fn operate(
+        &mut self,
+        operation: Operation<'_>,
+        planning: crate::fs_ext_edit::ExtEditLimits,
+        cancellation: &Cancellation,
+    ) -> io::Result<()> {
+        self.operate_mode(operation, planning, cancellation, false, None)
+    }
+    pub(crate) fn operate_ordered(
+        &mut self,
+        operation: Operation<'_>,
+        planning: crate::fs_ext_edit::ExtEditLimits,
+        cancellation: &Cancellation,
+    ) -> io::Result<()> {
+        self.operate_mode(operation, planning, cancellation, true, None)
+    }
+    pub(crate) fn delete_kind(
+        &mut self,
+        parent: &[crate::fs_core::NativeName],
+        name: &[u8],
+        deletion_time: u32,
+        directory: bool,
+        planning: crate::fs_ext_edit::ExtEditLimits,
+        cancellation: &Cancellation,
+    ) -> io::Result<()> {
+        self.operate_mode(
+            Operation::Delete {
+                parent,
+                name,
+                deletion_time,
+            },
+            planning,
+            cancellation,
+            true,
+            Some(directory),
+        )
+    }
+    fn operate_mode(
         &mut self,
         operation: Operation<'_>,
         mut planning: crate::fs_ext_edit::ExtEditLimits,
         cancellation: &Cancellation,
+        ordered: bool,
+        expected_directory: Option<bool>,
     ) -> io::Result<()> {
         self.ready(cancellation)?;
+        if ordered
+            && !matches!(
+                &operation,
+                Operation::Extend { .. }
+                    | Operation::Overwrite { .. }
+                    | Operation::SparseExtend { .. }
+                    | Operation::Truncate { .. }
+                    | Operation::CreateFile { .. }
+                    | Operation::CreateDirectory { .. }
+                    | Operation::CreateSymlink { .. }
+                    | Operation::ReplaceSymlinkTarget { .. }
+                    | Operation::UnlinkSymlink { .. }
+                    | Operation::HardLink { .. }
+                    | Operation::Rename { .. }
+                    | Operation::Delete { .. }
+            )
+        {
+            return Err(unsupported("ordered native operation is not qualified"));
+        }
+        let namespace = ordered
+            && matches!(
+                &operation,
+                Operation::CreateDirectory { .. }
+                    | Operation::CreateSymlink { .. }
+                    | Operation::ReplaceSymlinkTarget { .. }
+                    | Operation::UnlinkSymlink { .. }
+                    | Operation::HardLink { .. }
+                    | Operation::Rename { .. }
+                    | Operation::Delete { .. }
+            );
         let next_generation = self
             .generation
             .checked_add(1)
             .ok_or_else(|| budget("native ext generation exhausted"))?;
-        if let Operation::Extend { file, .. } | Operation::Truncate { file, .. } = &operation {
+        if let Operation::Extend { file, .. }
+        | Operation::PreallocateKeepSize { file, .. }
+        | Operation::Truncate { file, .. }
+        | Operation::Overwrite { file, .. }
+        | Operation::SparseExtend { file, .. } = &operation
+        {
             self.handle(file, cancellation)?;
         }
         let r = self.resources(cancellation);
         planning.audit = self.limits.audit;
-        planning.file_blocks = self.limits.file_blocks;
+        planning.file_blocks = planning.file_blocks.min(self.limits.file_blocks);
         planning.affected_bytes = planning.affected_bytes.min(self.limits.affected_bytes);
         let (decoder, proof) =
             super::super::ExtDecoder::open_native_clean(&self.storage, self.scope, &r)?;
+        if ordered && decoder.geometry().modern.is_some() {
+            return Err(unsupported(
+                "ordered native operation requires classic profile",
+            ));
+        }
         let audit = crate::fs_ext_audit::audit_decoder(&decoder, self.limits.audit, &r)
             .map_err(io::Error::other)?;
-        let batch =
+        let reservation_operation = matches!(&operation, Operation::PreallocateKeepSize { .. });
+        let mut batch =
             if decoder.geometry().modern.is_some() {
                 match operation {
+                    Operation::CreateSymlink { .. }
+                    | Operation::ReplaceSymlinkTarget { .. }
+                    | Operation::UnlinkSymlink { .. } => {
+                        return Err(unsupported("symlink mutations require classic profile"));
+                    }
+                    Operation::SparseExtend { .. } => {
+                        return Err(unsupported(
+                            "sparse extension requires classic ordered profile",
+                        ));
+                    }
+                    Operation::Overwrite { .. } => {
+                        return Err(unsupported("ordered overwrite requires classic profile"));
+                    }
+                    Operation::HardLink { .. } => {
+                        return Err(unsupported("hardlink creation requires classic profile"));
+                    }
+                    Operation::PreallocateKeepSize {
+                        file,
+                        offset,
+                        length,
+                    } => OperationPlan::Modern(modern_plan::keep_size(
+                        &decoder,
+                        &audit,
+                        &file.inode,
+                        offset,
+                        length,
+                        planning,
+                        &r,
+                    )?),
                     Operation::Extend { file, input } => OperationPlan::Modern(
                         modern_plan::extend(&decoder, &audit, &file.inode, input, planning, &r)?,
                     ),
@@ -476,6 +807,42 @@ impl<S: Storage> Session<S> {
                 )
                 .map_err(io::Error::other)?;
                 let batch = match operation {
+                    Operation::PreallocateKeepSize { .. } => {
+                        return Err(unsupported(
+                            "persistent KEEP_SIZE reservation requires extent profile",
+                        ));
+                    }
+                    Operation::CreateSymlink {
+                        parent,
+                        name,
+                        target,
+                        metadata,
+                    } => {
+                        let parent = context
+                            .open_directory(parent, &r)
+                            .map_err(io::Error::other)?;
+                        context.plan_create_symlink(&parent, name, target, metadata, &r)
+                    }
+                    Operation::ReplaceSymlinkTarget {
+                        parent,
+                        name,
+                        target,
+                    } => {
+                        let parent = context
+                            .open_directory(parent, &r)
+                            .map_err(io::Error::other)?;
+                        context.plan_replace_symlink_target(&parent, name, target, &r)
+                    }
+                    Operation::UnlinkSymlink {
+                        parent,
+                        name,
+                        deletion_time,
+                    } => {
+                        let parent = context
+                            .open_directory(parent, &r)
+                            .map_err(io::Error::other)?;
+                        context.plan_unlink_symlink(&parent, name, deletion_time, &r)
+                    }
                     Operation::CreateFile {
                         parent,
                         name,
@@ -496,6 +863,20 @@ impl<S: Storage> Session<S> {
                             .open_directory(parent, &r)
                             .map_err(io::Error::other)?;
                         context.plan_create_directory(&directory, name, metadata, &r)
+                    }
+                    Operation::HardLink {
+                        source,
+                        name,
+                        destination,
+                        new_name,
+                    } => {
+                        let source = context
+                            .open_directory(source, &r)
+                            .map_err(io::Error::other)?;
+                        let destination = context
+                            .open_directory(destination, &r)
+                            .map_err(io::Error::other)?;
+                        context.plan_hardlink(&source, name, &destination, new_name, &r)
                     }
                     Operation::Rename {
                         source,
@@ -519,7 +900,13 @@ impl<S: Storage> Session<S> {
                         let directory = context
                             .open_directory(parent, &r)
                             .map_err(io::Error::other)?;
-                        context.plan_delete(&directory, name, deletion_time, &r)
+                        context.plan_delete_kind(
+                            &directory,
+                            name,
+                            deletion_time,
+                            expected_directory,
+                            &r,
+                        )
                     }
                     Operation::Extend { file, input } => {
                         let file = context
@@ -527,16 +914,80 @@ impl<S: Storage> Session<S> {
                             .map_err(io::Error::other)?;
                         context.plan_extend(&file, input, &r)
                     }
+                    Operation::Overwrite {
+                        file,
+                        offset,
+                        input,
+                        input_length,
+                    } => {
+                        if !ordered {
+                            return Err(unsupported("overwrite requires ordered controller"));
+                        }
+                        if input.len() != input_length {
+                            return Err(io::Error::other(Error::new(
+                                ErrorKind::StalePlan,
+                                "overwrite input length changed before planning",
+                            )));
+                        }
+                        let file = context
+                            .file_handle(file.inode.number(), &r)
+                            .map_err(io::Error::other)?;
+                        let input = OverwriteInput {
+                            input,
+                            length: input_length,
+                        };
+                        context.plan_overwrite_ordered(&file, offset, &input, &r)
+                    }
+                    Operation::SparseExtend { file, length } => {
+                        if !ordered {
+                            return Err(unsupported(
+                                "sparse extension requires ordered controller",
+                            ));
+                        }
+                        let file = context
+                            .file_handle(file.inode.number(), &r)
+                            .map_err(io::Error::other)?;
+                        context.plan_extend_sparse_ordered(&file, length, &r)
+                    }
                     Operation::Truncate { file, length } => {
                         let file = context
                             .file_handle(file.inode.number(), &r)
                             .map_err(io::Error::other)?;
-                        context.plan_truncate(&file, length, &r)
+                        if ordered {
+                            context.plan_truncate_ordered(&file, length, &r)
+                        } else {
+                            context.plan_truncate(&file, length, &r)
+                        }
                     }
                 }
                 .map_err(io::Error::other)?;
-                OperationPlan::Classic(batch)
+                if namespace {
+                    OperationPlan::Namespace(
+                        batch
+                            .into_namespace_patches(self.scope, self.generation, planning.work, &r)
+                            .map_err(io::Error::other)?,
+                    )
+                } else if ordered {
+                    OperationPlan::Ordered(
+                        batch
+                            .into_ordered_patches(self.scope, self.generation, planning.work, &r)
+                            .map_err(io::Error::other)?,
+                    )
+                } else {
+                    OperationPlan::classic(batch)
+                }
             };
+        if let OperationPlan::Modern(plan) = &mut batch {
+            plan.bind_source_guards(self.scope, self.generation)?;
+        }
+        if reservation_operation && batch.patches().is_empty() {
+            if let OperationPlan::Modern(plan) = &batch {
+                plan.check_source_guards(&self.storage, &r)?;
+            }
+            self.ready(cancellation)?;
+            cancellation.check().map_err(io::Error::other)?;
+            return Ok(());
+        }
         let block_bytes = proof.geometry.block_bytes;
         // Charge and allocate the maximum bounded full-block projection before reading it.
         let charge = self
@@ -613,25 +1064,104 @@ impl<S: Storage> Session<S> {
                     .copy_from_slice(&checksum.to_le_bytes());
             }
         }
+        if matches!(&batch, OperationPlan::Ordered(plan) if plan.is_truncate() || plan.is_overwrite() || plan.is_sparse_extend())
+            || matches!(&batch, OperationPlan::Namespace(_))
+        {
+            if matches!(&batch, OperationPlan::Namespace(plan) if plan.binding() != (self.scope, self.generation))
+            {
+                return Err(io::Error::other(Error::new(
+                    ErrorKind::StalePlan,
+                    "native namespace operation binding changed",
+                )));
+            }
+            transaction::validate_namespace_destinations(
+                &decoder,
+                &records,
+                self.limits.file_blocks,
+                planning.work,
+                &r,
+            )?;
+        }
         self.ready(cancellation)?;
-        drop(batch);
         drop((decoder, proof, audit));
+        let plan_generation = self.generation;
         self.generation = next_generation;
         self.state = State::NeedsRecovery;
-        transaction::commit(
-            &mut self.storage,
-            self.scope,
-            self.limits.audit,
-            self.limits.affected_blocks,
-            self.limits.affected_bytes,
-            &records,
-            &r,
-        )?;
+        match batch {
+            OperationPlan::Ordered(plan) => {
+                transaction::commit_ordered(
+                    &mut self.storage,
+                    self.scope,
+                    plan_generation,
+                    self.limits.audit,
+                    self.limits.affected_blocks,
+                    self.limits.affected_bytes,
+                    &records,
+                    &plan,
+                    &r,
+                )?;
+            }
+            OperationPlan::Namespace(plan) => {
+                transaction::commit_namespace(
+                    &mut self.storage,
+                    self.scope,
+                    plan_generation,
+                    self.limits.audit,
+                    self.limits.affected_blocks,
+                    self.limits.affected_bytes,
+                    &records,
+                    &plan,
+                    &r,
+                )?;
+            }
+            OperationPlan::Modern(plan) => {
+                transaction::commit_modern(
+                    &mut self.storage,
+                    self.scope,
+                    plan_generation,
+                    self.limits.audit,
+                    self.limits.affected_blocks,
+                    self.limits.affected_bytes,
+                    &records,
+                    &plan,
+                    &r,
+                )?;
+            }
+            plan => {
+                drop(plan);
+                transaction::commit(
+                    &mut self.storage,
+                    self.scope,
+                    self.limits.audit,
+                    self.limits.affected_blocks,
+                    self.limits.affected_bytes,
+                    &records,
+                    &r,
+                )?;
+            }
+        }
         drop((records, reservation));
+        // Backend callbacks can cancel during the transaction's last length
+        // observation. Keep recovery sticky through fresh session guards.
+        if self.storage.len()? != self.length {
+            return Err(io::Error::other(Error::new(
+                ErrorKind::StalePlan,
+                "native ext committed session source length changed",
+            )));
+        }
+        cancellation.check().map_err(io::Error::other)?;
         self.state = State::Ready;
         Ok(())
     }
+    #[cfg(test)]
     pub(crate) fn recover(&mut self, cancellation: &Cancellation) -> io::Result<()> {
+        self.recover_mode(cancellation, false)
+    }
+    pub(super) fn recover_ordered(&mut self, cancellation: &Cancellation) -> io::Result<()> {
+        self.recover_mode(cancellation, true)
+    }
+    fn recover_mode(&mut self, cancellation: &Cancellation, ordered: bool) -> io::Result<()> {
+        self.state = State::NeedsRecovery;
         cancellation.check().map_err(io::Error::other)?;
         if self.storage.len()? != self.length {
             return Err(io::Error::other(Error::new(
@@ -645,7 +1175,12 @@ impl<S: Storage> Session<S> {
             .ok_or_else(|| budget("native ext recovery generation exhausted"))?;
         let r = self.resources(cancellation);
         self.state = State::NeedsRecovery;
-        recovery::recover(
+        let recover = if ordered {
+            recovery::recover_ordered
+        } else {
+            recovery::recover
+        };
+        recover(
             &mut self.storage,
             self.scope,
             self.limits.audit,
@@ -655,6 +1190,27 @@ impl<S: Storage> Session<S> {
                 .ok_or_else(|| budget("native ext recovery record ceiling overflow"))?,
             &r,
         )?;
+        // Recovery completion alone is not a fresh usable-session observation.
+        // Keep the fence sticky through decoder, ownership and source guards.
+        let (decoder, proof) =
+            super::super::ExtDecoder::open_native_clean(&self.storage, self.scope, &r)?;
+        let audit = crate::fs_ext_audit::audit_decoder(&decoder, self.limits.audit, &r)
+            .map_err(io::Error::other)?;
+        if !audit.is_clean() {
+            return Err(invalid("native ext recovered session ownership audit"));
+        }
+        let volume_length = u64::from(decoder.geometry.blocks)
+            .checked_mul(u64::from(decoder.geometry.block_size))
+            .ok_or_else(|| invalid("native ext recovered volume length overflow"))?;
+        drop((decoder, proof, audit));
+        if self.storage.len()? != self.length {
+            return Err(io::Error::other(Error::new(
+                ErrorKind::StalePlan,
+                "native ext recovered session source length changed",
+            )));
+        }
+        cancellation.check().map_err(io::Error::other)?;
+        self.volume_length = volume_length;
         self.generation = next_generation;
         self.state = State::Ready;
         Ok(())
@@ -858,7 +1414,8 @@ mod tests {
             file_blocks: 256,
             directory_entries: 32,
             affected_bytes: 1 << 20,
-            work: 100000,
+            // Include bounded overlay lookups while validating the native journal map.
+            work: 250000,
             undo: UndoLimits {
                 patches: 1024,
                 body_bytes: 4 << 20,
@@ -1073,7 +1630,8 @@ mod tests {
             file_blocks: 64,
             directory_entries: 32,
             affected_bytes: 1 << 20,
-            work: 100000,
+            // Include bounded overlay lookups while validating the native journal map.
+            work: 250000,
             undo: UndoLimits {
                 patches: 1024,
                 body_bytes: 4 << 20,
@@ -1183,7 +1741,8 @@ mod tests {
             file_blocks: 64,
             directory_entries: 32,
             affected_bytes: 1 << 20,
-            work: 100000,
+            // Include bounded overlay lookups while validating the native journal map.
+            work: 250000,
             undo: UndoLimits {
                 patches: 1024,
                 body_bytes: 4 << 20,
@@ -1451,6 +2010,9 @@ mod tests {
         assert!(session.recover(&r.cancellation).is_err());
         assert_eq!(session.storage.writes, writes);
         session.storage.bytes.pop();
+        assert_eq!(session.state, State::NeedsRecovery);
+        session.recover(&r.cancellation).unwrap();
+        assert_eq!(session.state, State::Ready);
         session.generation = u64::MAX;
         let exhausted = session.file(11, &r.cancellation).unwrap();
         assert!(
@@ -1483,5 +2045,299 @@ mod tests {
         assert_eq!(state, State::Ready);
         drop((file, storage));
         assert_eq!(r.memory.used(), 0);
+    }
+    struct ColdSource {
+        inner: Owned,
+        fail_read: Option<usize>,
+        cancel_read: Option<(usize, Cancellation)>,
+        changed_length_after: Option<usize>,
+    }
+    impl Storage for ColdSource {
+        fn len(&self) -> io::Result<u64> {
+            Ok(self.inner.bytes.len() as u64
+                + u64::from(
+                    self.changed_length_after
+                        .is_some_and(|n| self.inner.reads.get() >= n),
+                ))
+        }
+        fn read_exact_at(&self, at: u64, bytes: &mut [u8]) -> io::Result<()> {
+            let next = self.inner.reads.get() + 1;
+            if self.fail_read == Some(next) {
+                return Err(io::Error::other("cold session final backend read failure"));
+            }
+            self.inner.read_exact_at(at, bytes)?;
+            if let Some((read, token)) = &self.cancel_read
+                && *read == next
+            {
+                token.cancel();
+            }
+            Ok(())
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            self.inner.write_at(at, bytes)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.inner.flush()
+        }
+    }
+    fn cold_source() -> ColdSource {
+        ColdSource {
+            inner: fixture(),
+            fail_read: None,
+            cancel_read: None,
+            changed_length_after: None,
+        }
+    }
+    fn cold_resources() -> Resources {
+        Resources {
+            memory: Budget::new(8 << 20),
+            cancellation: Cancellation::default(),
+        }
+    }
+    #[test]
+    fn cold_clean_admission_is_read_only_and_requires_explicit_recovery_before_handles() {
+        let r = cold_resources();
+        let mut session = Session::open_for_recovery(cold_source(), limits(), &r).unwrap();
+        assert_eq!(session.state, State::NeedsRecovery);
+        assert_eq!(session.storage.inner.writes, 0);
+        assert!(session.file(11, &r.cancellation).is_err());
+        session.recover(&r.cancellation).unwrap();
+        assert_eq!(session.state, State::Ready);
+        assert_eq!(session.generation, 1);
+        assert_eq!(session.storage.inner.writes, 0);
+        let file = session.file(11, &r.cancellation).unwrap();
+        assert_eq!(file.inode_number(), 11);
+        drop((file, session));
+        assert_eq!(r.memory.used(), 0);
+    }
+    fn cold_cause_has_text(error: &(dyn std::error::Error + 'static), text: &str) -> bool {
+        if error.to_string() == text {
+            return true;
+        }
+        if let Some(error) = error.downcast_ref::<io::Error>()
+            && error
+                .get_ref()
+                .is_some_and(|cause| cold_cause_has_text(cause, text))
+        {
+            return true;
+        }
+        error
+            .source()
+            .is_some_and(|cause| cold_cause_has_text(cause, text))
+    }
+    #[test]
+    fn cold_recovery_final_backend_cancel_and_length_failures_never_publish_ready() {
+        let r = cold_resources();
+        let mut reference = Session::open_for_recovery(cold_source(), limits(), &r).unwrap();
+        reference.recover(&r.cancellation).unwrap();
+        let final_read = reference.storage.inner.reads.get();
+        drop(reference);
+        assert_eq!(r.memory.used(), 0);
+        for mode in 0..3 {
+            let r = cold_resources();
+            let mut source = cold_source();
+            match mode {
+                0 => source.fail_read = Some(final_read),
+                1 => source.cancel_read = Some((final_read, r.cancellation.clone())),
+                _ => source.changed_length_after = Some(final_read),
+            }
+            let mut session = Session::open_for_recovery(source, limits(), &r).unwrap();
+            let error = session.recover(&r.cancellation).unwrap_err();
+            if mode == 0 {
+                assert!(cold_cause_has_text(
+                    &error,
+                    "cold session final backend read failure",
+                ));
+            }
+            assert_eq!(session.state, State::NeedsRecovery);
+            assert_eq!(session.generation, 0);
+            assert_eq!(session.storage.inner.writes, 0);
+            assert!(session.file(11, &Cancellation::default()).is_err());
+            drop(session);
+            assert_eq!(r.memory.used(), 0);
+        }
+    }
+    #[test]
+    fn cold_admission_resource_failure_and_foreign_dirty_log_never_gain_write_authority() {
+        let r = Resources {
+            memory: Budget::new(1),
+            cancellation: Cancellation::default(),
+        };
+        assert!(Session::open_for_recovery(cold_source(), limits(), &r).is_err());
+        assert_eq!(r.memory.used(), 0);
+        let r = cold_resources();
+        let mut source = cold_source();
+        source.inner.bytes[1120] |= 4;
+        put32(&mut source.inner.bytes[100 * 1024..101 * 1024], 28, 1);
+        // Keep the native header CRC valid; the owned preparation is absent.
+        let geometry = bootstrap::Bootstrap::read(&source, 65536, limits().audit.work, &r)
+            .unwrap()
+            .geometry;
+        let mut header: [u8; 1024] = source.inner.bytes[100 * 1024..101 * 1024]
+            .try_into()
+            .unwrap();
+        journal_checksum(&geometry, &mut header);
+        source.inner.bytes[100 * 1024..101 * 1024].copy_from_slice(&header);
+        let mut session = Session::open_for_recovery(source, limits(), &r).unwrap();
+        assert!(session.recover(&r.cancellation).is_err());
+        assert_eq!(session.state, State::NeedsRecovery);
+        assert_eq!(session.storage.inner.writes, 0);
+        drop(session);
+        assert_eq!(r.memory.used(), 0);
+    }
+    // Proposed addition INSIDE session::tests; uses its raw fixture/Owned/limits.
+    #[derive(Clone, Copy)]
+    enum FinalLenFault {
+        Cancel,
+        Backend,
+        ChangedLength,
+    }
+    struct CancelInLen {
+        inner: Owned,
+        calls: Cell<usize>,
+        fault_at: Option<(usize, FinalLenFault)>,
+        token: Cancellation,
+    }
+    impl Storage for CancelInLen {
+        fn len(&self) -> io::Result<u64> {
+            let call = self.calls.get() + 1;
+            self.calls.set(call);
+            if let Some((at, fault)) = self.fault_at
+                && at == call
+            {
+                match fault {
+                    FinalLenFault::Cancel => self.token.cancel(),
+                    FinalLenFault::Backend => {
+                        return Err(io::Error::other("final session length backend failure"));
+                    }
+                    FinalLenFault::ChangedLength => return Ok(self.inner.bytes.len() as u64 + 1),
+                }
+            }
+            self.inner.len()
+        }
+        fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+            self.inner.read_exact_at(at, out)
+        }
+        fn write_at(&mut self, at: u64, bytes: &[u8]) -> io::Result<usize> {
+            self.inner.write_at(at, bytes)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.inner.flush()
+        }
+    }
+    fn guarded_operation(
+        session: &mut Session<CancelInLen>,
+        truncate: bool,
+        r: &Resources,
+    ) -> io::Result<()> {
+        let file = session.file(11, &r.cancellation)?;
+        if truncate {
+            session.operate(
+                Operation::Truncate {
+                    file: &file,
+                    length: 64,
+                },
+                crate::fs_ext_edit::ExtEditLimits {
+                    audit: limits().audit,
+                    file_blocks: 8,
+                    directory_entries: 32,
+                    affected_bytes: 32768,
+                    work: 150000,
+                    undo: crate::fs_undo::UndoLimits {
+                        patches: 64,
+                        body_bytes: 65536,
+                    },
+                },
+                &r.cancellation,
+            )
+        } else {
+            session.replace(&file, 0, &[0x73; 16], &r.cancellation)
+        }
+    }
+    #[test]
+    fn replace_and_operate_final_length_cancellation_keep_recovery_sticky() {
+        for truncate in [false, true] {
+            // The truncate planner also budgets native journal-map projection lookups.
+            let r = Resources {
+                memory: Budget::new(16 << 20),
+                cancellation: Cancellation::default(),
+            };
+            let source = CancelInLen {
+                inner: fixture(),
+                calls: Cell::new(0),
+                fault_at: None,
+                token: r.cancellation.clone(),
+            };
+            let mut reference = Session::open(source, limits(), &r).unwrap();
+            guarded_operation(&mut reference, truncate, &r).unwrap();
+            // Trigger inside the final observed len call. With the old methods
+            // this was recovery's final len and cancellation still returned Ready;
+            // with the proposed methods it is the session's final len, followed
+            // by the cancellation guard. The regression fails on the old code.
+            let final_callback_len = reference.storage.calls.get();
+            let expected = reference.storage.inner.bytes.clone();
+            let expected_writes = reference.storage.inner.writes;
+            drop(reference);
+            assert_eq!(r.memory.used(), 0);
+
+            for fault in [
+                FinalLenFault::Cancel,
+                FinalLenFault::Backend,
+                FinalLenFault::ChangedLength,
+            ] {
+                let r = Resources {
+                    memory: Budget::new(16 << 20),
+                    cancellation: Cancellation::default(),
+                };
+                let source = CancelInLen {
+                    inner: fixture(),
+                    calls: Cell::new(0),
+                    fault_at: Some((final_callback_len, fault)),
+                    token: r.cancellation.clone(),
+                };
+                let mut session = Session::open(source, limits(), &r).unwrap();
+                let error = guarded_operation(&mut session, truncate, &r).unwrap_err();
+                if matches!(fault, FinalLenFault::Cancel) {
+                    assert!(r.cancellation.check().is_err(), "callback actually fired");
+                }
+                assert_eq!(session.state, State::NeedsRecovery);
+                assert_eq!(
+                    session.storage.inner.bytes, expected,
+                    "whole committed image reached reference before late failure"
+                );
+                assert_eq!(session.storage.inner.writes, expected_writes);
+                assert!(session.file(11, &Cancellation::default()).is_err());
+                match fault {
+                    FinalLenFault::Backend => assert!(cold_cause_has_text(
+                        &error,
+                        "final session length backend failure"
+                    )),
+                    _ => {
+                        let cause = error
+                            .get_ref()
+                            .and_then(|cause| cause.downcast_ref::<Error>())
+                            .unwrap();
+                        assert_eq!(
+                            cause.kind,
+                            if matches!(fault, FinalLenFault::Cancel) {
+                                ErrorKind::Cancelled
+                            } else {
+                                ErrorKind::StalePlan
+                            }
+                        );
+                    }
+                }
+                session.storage.fault_at = None;
+                session.recover(&Cancellation::default()).unwrap();
+                assert_eq!(session.state, State::Ready);
+                assert_eq!(session.storage.inner.bytes, expected);
+                assert_eq!(
+                    session.storage.inner.writes, expected_writes,
+                    "clean retry adds no writes"
+                );
+                drop(session);
+                assert_eq!(r.memory.used(), 0);
+            }
+        }
     }
 }

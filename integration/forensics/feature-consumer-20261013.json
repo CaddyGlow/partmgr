@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "profile": "compiled-consumer-api-feature-matrix",
+  "script_sha256": "8d03adbe70f5b5d1cda351b1d2bc4cc35be7e9a0e8b4c1640585b3b66f18ab2b",
+  "cargo_toml_sha256": "649acef8ef84a86eefcb4ddb27d16e589a3b688f1801bc4ea6394038743b3ccd",
+  "lib_rs_sha256": "e0d70f66471101c8548bfb6ef07d02ec1acd974717af1bca88ecffa187a6c04c",
+  "checks": [
+    {
+      "name": "default-excludes",
+      "command": [
+        "cargo",
+        "check",
+        "--offline",
+        "--manifest-path",
+        "/data/cache/partmgr-forensics-feature-consumer-20261013-a/consumer/Cargo.toml"
+      ],
+      "exit_code": 101,
+      "manifest": "[package]\nname=\"partmgr-forensic-feature-consumer\"\nversion=\"0.0.0\"\nedition=\"2024\"\n[workspace]\n[dependencies]\npartmgr={path=\"/home/rick/projects-caddy/partmgr\",default-features=true,features=[]}\n",
+      "expected_api_available": false,
+      "stderr_sha256": "102faa9e61fd7608e5994160330b7b78800308e810e8ba0dcb0023f975635760",
+      "passed": true
+    },
+    {
+      "name": "portable-excludes",
+      "command": [
+        "cargo",
+        "check",
+        "--offline",
+        "--manifest-path",
+        "/data/cache/partmgr-forensics-feature-consumer-20261013-a/consumer/Cargo.toml"
+      ],
+      "exit_code": 101,
+      "manifest": "[package]\nname=\"partmgr-forensic-feature-consumer\"\nversion=\"0.0.0\"\nedition=\"2024\"\n[workspace]\n[dependencies]\npartmgr={path=\"/home/rick/projects-caddy/partmgr\",default-features=false,features=[]}\n",
+      "expected_api_available": false,
+      "stderr_sha256": "7f8e10c39f165e6ff698301db4b172a1e89e672d245df96da0e3296811c58025",
+      "passed": true
+    },
+    {
+      "name": "portable-includes",
+      "command": [
+        "cargo",
+        "check",
+        "--offline",
+        "--manifest-path",
+        "/data/cache/partmgr-forensics-feature-consumer-20261013-a/consumer/Cargo.toml"
+      ],
+      "exit_code": 0,
+      "manifest": "[package]\nname=\"partmgr-forensic-feature-consumer\"\nversion=\"0.0.0\"\nedition=\"2024\"\n[workspace]\n[dependencies]\npartmgr={path=\"/home/rick/projects-caddy/partmgr\",default-features=false,features=[\"forensics\"]}\n",
+      "expected_api_available": true,
+      "stderr_sha256": "8ea200ff6041d67a2948f663617bc4f9c15b4f752a2fb7a64ff534cab9d036d0",
+      "passed": true
+    },
+    {
+      "name": "std-includes",
+      "command": [
+        "cargo",
+        "check",
+        "--offline",
+        "--manifest-path",
+        "/data/cache/partmgr-forensics-feature-consumer-20261013-a/consumer/Cargo.toml"
+      ],
+      "exit_code": 0,
+      "manifest": "[package]\nname=\"partmgr-forensic-feature-consumer\"\nversion=\"0.0.0\"\nedition=\"2024\"\n[workspace]\n[dependencies]\npartmgr={path=\"/home/rick/projects-caddy/partmgr\",default-features=true,features=[\"forensics\"]}\n",
+      "expected_api_available": true,
+      "stderr_sha256": "3e29c90e9c5e1cd8e3ae26b5c54de02f16ca8c52b0e4d3136769f1a3cce9dc32",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

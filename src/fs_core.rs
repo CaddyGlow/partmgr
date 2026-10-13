@@ -401,6 +401,15 @@ impl Budget {
     pub fn used(&self) -> u64 {
         self.used.load(Ordering::Acquire)
     }
+
+    #[cfg(feature = "forensics")]
+    pub(crate) fn remaining(&self) -> u64 {
+        self.limit.saturating_sub(self.used())
+    }
+    #[cfg(feature = "forensics")]
+    pub(crate) fn capacity(&self) -> u64 {
+        self.limit
+    }
     /// Atomically reserve bytes or fail without changing shared accounting.
     pub fn reserve(&self, bytes: u64) -> Result<Reservation> {
         self.used

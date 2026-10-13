@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "profile": "bounded-instrumented-honggfuzz-smoke",
+  "iterations": 1001,
+  "crashes": 0,
+  "timeouts": 0,
+  "source_unchanged": true,
+  "source_files": 698,
+  "source_manifest_sha256": "013db1fc1de40cd32d4e2bc90b5766faf2098a9f7d6fc59da5fbcc7f6e8b78be",
+  "tool_receipt": {
+    "upstream": "honggfuzz 0.5.62 crates.io cached source",
+    "build_command": "nix develop --no-write-lock-file path:/home/rick/projects-caddy/nix-dev-shells/default -c cargo build --bin cargo-hfuzz",
+    "working_directory": "/data/cache/partmgr-honggfuzz-config-respecting-0.5.62",
+    "utc": "2026-10-13T12:03:52.663183+00:00",
+    "cargo_wrapper": "inherited ~/.cargo/config.toml sccache",
+    "cargo_target_directory": "inherited Cargo configuration; cargo metadata resolves actual path",
+    "incremental": "no environment injection, inherited Cargo profile defaults",
+    "global_rustflags": "unchanged",
+    "hashes": {
+      "src/bin/cargo-hfuzz.rs": "534a987cf423ff3130c8881ee63fdfab399e66fbe34025ba1948b89c9432416a",
+      "Cargo.toml": "140083fabdefb01045817d08600dadc808b523519f4e16d148e45d3f36bcb2c4",
+      "Cargo.lock": "09f57c58ea15d3c4a6198c9fa541868a0ec9a4bc7f1f38990ced916055210dde",
+      "config-respecting.patch": "48a80cf018c5d2c7e77c22dd373fa6d99b1c605c8c66571ff31e7bc052691dc0",
+      "cargo-hfuzz-config-respecting": "78d7c33c6c25a18b43de3ee24bd04fe88a853d21a0f6a607eaa80696c339d3c7"
+    }
+  },
+  "log_sha256": "1f66dfc0689d5eaa2462230365d6752c5f9d328e0cba6f737e92ca23f9722394",
+  "artifact_directory": "/data/cache/partmgr-forensics-mutation-20261013-a",
+  "scope": "snapshot mutation smoke; excludes later audit fixes",
+  "summary": "Summary iterations:1001 time:1 speed:1001 crashes_count:0 timeout_count:0"
+}

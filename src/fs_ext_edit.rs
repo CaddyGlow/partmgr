@@ -15,6 +15,9 @@ use crate::{
 };
 #[path = "fs_ext_edit_allocation.rs"]
 pub(crate) mod allocation;
+#[path = "fs_ext_edit_geometry.rs"]
+mod geometry;
+pub use geometry::ExtFilesystemGrowReport;
 #[path = "fs_ext_edit_namespace.rs"]
 mod namespace;
 pub use namespace::{
@@ -24,6 +27,11 @@ pub use namespace::{
 mod transaction;
 pub use allocation::{ExtRangeAllocationReport, ExtResizeReport};
 pub use transaction::{ExtEditBatch, ExtReplacement};
+#[cfg(feature = "std")]
+pub(crate) use transaction::{NativeNamespacePatches, NativeOrderedPatches};
+#[cfg(all(test, feature = "std"))]
+#[path = "fs_ext_edit_ordered_tests.rs"]
+mod ordered_tests;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 /// Selected filesystem region inside the exclusively owned target.
 #[derive(Clone, Copy, Debug)]

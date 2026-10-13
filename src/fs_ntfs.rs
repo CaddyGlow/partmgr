@@ -1,4 +1,4 @@
-//! Strict NTFS 3.1 positional reads: fixed-up base FILE records and unnamed data.
+//! NTFS 3.1 positional reads with separate strict, resolved-stream and LZNT1 profiles.
 //! Immutable caller-controlled sources only; no journal replay or ownership audit.
 use crate::io::{DiskView, ReadAt};
 #[cfg(not(feature = "std"))]
@@ -14,8 +14,11 @@ use crate::{
 };
 #[path = "fs_ntfs_bootstrap.rs"]
 mod bootstrap;
+#[path = "fs_ntfs_compressed.rs"]
+mod compressed;
 #[path = "fs_ntfs_stream.rs"]
-mod stream;
+pub(crate) mod stream;
+pub use compressed::NtfsCompressionLimits;
 pub use stream::{
     NtfsDataStream, NtfsNativeAttribute, NtfsNativeFileName, NtfsNativeStandardInformation,
     NtfsStreamLimits,
@@ -114,6 +117,8 @@ pub struct NtfsVolume {
     mft: ExtentFile,
     _reservation: Reservation,
     volume_flags: u16,
+    #[cfg(feature = "forensics")]
+    forensic_sparse_units: bool,
 }
 /// Exact native name occurrence and parent FILE reference; no directory index claim.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -128,13 +133,13 @@ pub struct NtfsName {
     pub name: NativeName,
 }
 #[derive(Clone, Copy)]
-struct Attribute {
-    kind: u32,
-    start: usize,
-    length: usize,
-    named: bool,
-    nonresident: bool,
-    flags: u16,
+pub(crate) struct Attribute {
+    pub(crate) kind: u32,
+    pub(crate) start: usize,
+    pub(crate) length: usize,
+    pub(crate) named: bool,
+    pub(crate) nonresident: bool,
+    pub(crate) flags: u16,
 }
 /// Validated allocated base FILE record with exact names and retained fixed-up bytes.
 pub struct NtfsRecord {
@@ -286,6 +291,14 @@ impl NtfsVolume {
     ) -> Result<Self> {
         Self::open_inner(source, limits, r, true, None)
     }
+    pub(crate) fn open_for_resolved_audit(
+        source: Arc<dyn ReadAt>,
+        read: NtfsReadLimits,
+        streams: NtfsStreamLimits,
+        r: &Resources,
+    ) -> Result<Self> {
+        Self::open_inner(source, read, r, true, Some(streams))
+    }
     fn open_inner(
         source: Arc<dyn ReadAt>,
         limits: NtfsReadLimits,
@@ -424,18 +437,41 @@ impl NtfsVolume {
             mft,
             _reservation: reservation,
             volume_flags: 0,
+            #[cfg(feature = "forensics")]
+            forensic_sparse_units: false,
         };
-        let info = volume.record(3, r)?;
-        let values = info
-            .attributes
-            .iter()
-            .filter(|a| a.kind == 0x70 && !a.named)
-            .copied()
-            .collect::<Vec<_>>();
+        let info = if expanded.is_some() {
+            volume.complete_record(3, RecordProfile::CompleteBase, r)?
+        } else {
+            volume.record(3, r)?
+        };
+        let resolved_info = expanded
+            .map(|streams| volume.resolve_stream_record(info.identity(), streams, r))
+            .transpose()?;
+        let mut values = vector(1)?;
+        if let Some(resolved) = &resolved_info {
+            for located in &resolved.attributes {
+                if located.attribute.kind == 0x70 && !located.attribute.named {
+                    if !values.is_empty() {
+                        return Err(bad("NTFS duplicate VOLUME_INFORMATION"));
+                    }
+                    values.push(resolved.records[located.record].value(located.attribute)?);
+                }
+            }
+        } else {
+            for a in &info.attributes {
+                if a.kind == 0x70 && !a.named {
+                    if !values.is_empty() {
+                        return Err(bad("NTFS duplicate VOLUME_INFORMATION"));
+                    }
+                    values.push(info.value(*a)?);
+                }
+            }
+        }
         if values.len() != 1 {
             return Err(bad("NTFS missing/duplicate VOLUME_INFORMATION"));
         }
-        let value = info.value(values[0])?;
+        let value = values[0];
         if value.len() != 12 {
             return Err(bad("NTFS volume-info size"));
         }
@@ -458,7 +494,13 @@ impl NtfsVolume {
     pub fn geometry(&self) -> &NtfsGeometry {
         &self.geometry
     }
-    /// Number of complete base-record slots in the mapped MFT logical data.
+    // Native FILE preparation may consume this source-owned map only within its
+    // logical bound; beyond-EOF native run loading remains a separate branch.
+    pub(crate) fn native_mft_map(&self) -> (&[crate::fs_file::FileExtent], u64) {
+        (self.mft.extents(), self.mft.len())
+    }
+    /// Number of complete physical FILE slots in the mapped MFT logical data.
+    /// Live slots may carry base objects or ATTRIBUTE_LIST extensions.
     pub fn record_count(&self) -> u64 {
         self.mft.len() / self.geometry.record_bytes as u64
     }
@@ -594,7 +636,7 @@ fn parse_record(
 ) -> Result<NtfsRecord> {
     parse_record_mode(bytes, number, context, g, limits, r, RecordProfile::Strict)
 }
-enum RecordProfile {
+pub(crate) enum RecordProfile {
     Strict,
     CompleteBase,
     Extension(u64),
@@ -718,7 +760,7 @@ fn parse_record_mode(
             _ => return Err(bad("NTFS attribute residency selector")),
         };
         let flags = u16le(b, 12);
-        if flags & !0x8000 != 0 {
+        if flags & !0x8000 != 0 && (!allow_list || flags & !0x8001 != 0 || kind != 0x80) {
             return Err(unsupported(
                 "NTFS compressed/encrypted/unknown attribute flags",
             ));
@@ -743,7 +785,13 @@ fn parse_record_mode(
             return Err(unsupported("NTFS resident attribute flags"));
         }
         let header = if nonresident {
-            if flags & 0x8000 != 0 { 72 } else { 64 }
+            if flags & 1 != 0 {
+                if u64le(b, 16) == 0 { 72 } else { 64 }
+            } else if flags & 0x8000 != 0 {
+                72
+            } else {
+                64
+            }
         } else {
             24
         };
@@ -1008,11 +1056,12 @@ fn decode_runs(
         runs: count,
     })
 }
-enum Content {
+pub(crate) enum Content {
     Resident(Vec<u8>),
     Mapped(ExtentFile),
+    Compressed(compressed::CompressedContent),
 }
-/// Immutable resident bytes or indexed nonresident unnamed data with retained budget.
+/// Immutable resident, mapped or explicitly admitted LZNT1 stream with retained budget.
 pub struct NtfsFile {
     identity: ObjectId,
     context: Context,
@@ -1027,6 +1076,7 @@ impl FileRead for NtfsFile {
         match &self.content {
             Content::Resident(b) => b.len() as u64,
             Content::Mapped(f) => f.len(),
+            Content::Compressed(f) => f.len(),
         }
     }
     fn read_at(&self, offset: u64, buffer: &mut [u8], r: &Resources) -> Result<usize> {
@@ -1043,6 +1093,7 @@ impl FileRead for NtfsFile {
             Content::Mapped(file) => file
                 .read_at(offset, buffer)
                 .map_err(|e| Error::io("NTFS payload read", e)),
+            Content::Compressed(file) => file.read_at(offset, buffer, r),
         }
     }
     fn visit_extents(
@@ -1075,6 +1126,7 @@ impl FileRead for NtfsFile {
                     })?;
                 }
             }
+            Content::Compressed(file) => file.visit_extents(r, visitor)?,
         }
         Ok(())
     }
@@ -1147,14 +1199,50 @@ impl NtfsVolume {
         limits: NtfsDirectoryLimits,
         r: &Resources,
     ) -> Result<NtfsDirectory> {
+        self.directory_inner(object, limits, None, r)
+    }
+    /// Traverse resolved `$I30` attributes, including segmented allocation and
+    /// initialized nonresident index bitmaps. This does not establish write safety.
+    pub fn directory_resolved(
+        &self,
+        object: &ObjectId,
+        limits: NtfsDirectoryLimits,
+        streams: NtfsStreamLimits,
+        r: &Resources,
+    ) -> Result<NtfsDirectory> {
+        self.directory_inner(object, limits, Some(streams), r)
+    }
+    fn directory_inner(
+        &self,
+        object: &ObjectId,
+        limits: NtfsDirectoryLimits,
+        streams: Option<NtfsStreamLimits>,
+        r: &Resources,
+    ) -> Result<NtfsDirectory> {
         self.context.check(r)?;
         let charge = (limits.entries as u64)
             .checked_mul(4096)
             .and_then(|n| n.checked_add((limits.blocks as u64).checked_mul(128)?))
             .and_then(|n| n.checked_add(131072 + 2 * self.geometry.index_bytes as u64))
+            // A resolved resident INDEX_ROOT copy survives its temporary file lease.
+            .and_then(|n| n.checked_add(self.geometry.record_bytes as u64))
             .ok_or_else(|| budget("NTFS directory envelope"))?;
         let reservation = r.memory.reserve(charge)?;
-        let record = self.scoped_record(object, r)?;
+        let resolved = streams
+            .map(|streams| self.resolve_stream_record(object, streams, r))
+            .transpose()?;
+        let strict = if resolved.is_none() {
+            Some(self.scoped_record(object, r)?)
+        } else {
+            None
+        };
+        let record = if let Some(resolved) = &resolved {
+            &resolved.records[0]
+        } else {
+            strict
+                .as_ref()
+                .ok_or_else(|| bad("NTFS directory record"))?
+        };
         if !record.is_directory() {
             return Err(Error::new(
                 ErrorKind::InvalidOperation,
@@ -1184,8 +1272,56 @@ impl NtfsVolume {
             }
             Ok(found)
         };
-        let root_attr = named(0x90)?.ok_or_else(|| bad("NTFS missing INDEX_ROOT"))?;
-        let root = record.value(root_attr)?;
+        let mut root_bytes = Vec::new();
+        let mut resolved_alloc = None;
+        let mut resolved_bitmap = None;
+        if let (Some(resolved), Some(streams)) = (&resolved, streams) {
+            for located in &resolved.attributes {
+                let a = located.attribute;
+                if matches!(a.kind, 0x90 | 0xa0 | 0xb0) {
+                    if a.flags != 0 {
+                        return Err(unsupported("NTFS special directory index flags"));
+                    }
+                    let carrier = &resolved.records[located.record];
+                    let b = &carrier.bytes[a.start..a.start + a.length];
+                    let at = usize::from(u16le(b, 10));
+                    if b[9] != 4 || b[at..at + 8] != [36, 0, 73, 0, 51, 0, 48, 0] {
+                        return Err(unsupported("NTFS non-$I30 directory index"));
+                    }
+                }
+            }
+            let open = |kind| -> Result<NtfsFile> {
+                let (content, _, _, _, reservation) =
+                    self.stream_content(resolved, kind, &[36, 73, 51, 48], streams, None, r)?;
+                Ok(NtfsFile {
+                    identity: object.clone(),
+                    context: self.context.clone(),
+                    content,
+                    _reservation: reservation,
+                })
+            };
+            let root = open(0x90)?;
+            if !matches!(root.content, Content::Resident(_)) {
+                return Err(bad("NTFS nonresident INDEX_ROOT"));
+            }
+            root_bytes = vector(root.len() as usize)?;
+            root_bytes.resize(root.len() as usize, 0);
+            if root.read_at(0, &mut root_bytes, r)? != root_bytes.len() {
+                return Err(bad("NTFS truncated INDEX_ROOT"));
+            }
+            if resolved.attributes.iter().any(|a| a.attribute.kind == 0xa0) {
+                resolved_alloc = Some(open(0xa0)?);
+            }
+            if resolved.attributes.iter().any(|a| a.attribute.kind == 0xb0) {
+                resolved_bitmap = Some(open(0xb0)?);
+            }
+        }
+        let root = if resolved.is_some() {
+            &root_bytes[..]
+        } else {
+            let root_attr = named(0x90)?.ok_or_else(|| bad("NTFS missing INDEX_ROOT"))?;
+            record.value(root_attr)?
+        };
         if root.len() < 32
             || u32le(root, 0) != 0x30
             || u32le(root, 4) != 1
@@ -1202,13 +1338,64 @@ impl NtfsVolume {
         if u64::from(root[12]) != self.geometry.index_bytes as u64 / unit {
             return Err(bad("NTFS index VCN geometry"));
         }
-        let alloc = named(0xa0)?;
-        let bitmap = named(0xb0)?;
+        let alloc = if resolved.is_none() {
+            named(0xa0)?
+        } else {
+            None
+        };
+        let bitmap = if resolved.is_none() {
+            named(0xb0)?
+        } else {
+            None
+        };
         let mut blocks = 0usize;
         let mut bitmap_bytes = Vec::new();
         let mut mapped = None;
         let mut map_lease = None;
-        if let Some(a) = alloc {
+        if let Some(file) = resolved_alloc {
+            if !matches!(file.content, Content::Mapped(_))
+                || !file.len().is_multiple_of(self.geometry.index_bytes as u64)
+            {
+                return Err(bad("NTFS index allocation residency/length"));
+            }
+            file.visit_extents(r, &mut |extent| {
+                if extent.kind != ExtentKind::Data {
+                    return Err(bad("NTFS index allocation initialization"));
+                }
+                Ok(())
+            })?;
+            blocks = usize::try_from(file.len() / self.geometry.index_bytes as u64)
+                .map_err(|_| budget("NTFS index block address space"))?;
+            if blocks > limits.blocks {
+                return Err(budget("NTFS directory block limit"));
+            }
+            let bm = resolved_bitmap
+                .take()
+                .ok_or_else(|| bad("NTFS index allocation missing bitmap"))?;
+            let max = blocks.div_ceil(8).next_multiple_of(8);
+            if bm.len() < blocks.div_ceil(8) as u64 || bm.len() > max as u64 {
+                return Err(bad("NTFS index bitmap length"));
+            }
+            bm.visit_extents(r, &mut |extent| {
+                if extent.kind != ExtentKind::Data {
+                    return Err(bad("NTFS index bitmap initialization"));
+                }
+                Ok(())
+            })?;
+            bitmap_bytes = vector(bm.len() as usize)?;
+            bitmap_bytes.resize(bm.len() as usize, 0);
+            if bm.read_at(0, &mut bitmap_bytes, r)? != bitmap_bytes.len() {
+                return Err(bad("NTFS index bitmap truncated"));
+            }
+            if (blocks..bitmap_bytes.len() * 8)
+                .any(|bit| bitmap_bytes[bit / 8] & (1 << (bit % 8)) != 0)
+            {
+                return Err(bad("NTFS index bitmap tail allocation"));
+            }
+            mapped = Some(file);
+        } else if resolved_bitmap.is_some() {
+            return Err(bad("NTFS index bitmap without allocation"));
+        } else if let Some(a) = alloc {
             if !a.nonresident || a.flags != 0 {
                 return Err(unsupported("NTFS index allocation residency/flags"));
             }
@@ -1229,15 +1416,19 @@ impl NtfsVolume {
             if blocks > limits.blocks {
                 return Err(budget("NTFS directory block limit"));
             }
-            mapped = Some(
-                ExtentFile::new(
-                    self.context.source.clone(),
-                    length,
-                    extents,
-                    self.limits.runs.saturating_mul(2),
-                )
-                .map_err(|e| Error::io("NTFS index map", e))?,
-            );
+            let map = ExtentFile::new(
+                self.context.source.clone(),
+                length,
+                extents,
+                self.limits.runs.saturating_mul(2),
+            )
+            .map_err(|e| Error::io("NTFS index map", e))?;
+            mapped = Some(NtfsFile {
+                identity: object.clone(),
+                context: self.context.clone(),
+                content: Content::Mapped(map),
+                _reservation: r.memory.reserve(0)?,
+            });
             let bm = bitmap.ok_or_else(|| bad("NTFS index allocation missing bitmap"))?;
             let max = blocks.div_ceil(8).next_multiple_of(8);
             if bm.nonresident {
@@ -1257,7 +1448,12 @@ impl NtfsVolume {
         } else if bitmap.is_some() {
             return Err(bad("NTFS index bitmap without allocation"));
         }
-        let upcase = self.open_record_for(self.record(10, r)?, r, true)?;
+        let upcase = if let Some(streams) = streams {
+            let owner = self.stream_identity(10, r)?;
+            self.open_native_attribute_stream(&owner, 0x80, &[], streams, r)?
+        } else {
+            self.open_record_for(self.record(10, r)?, r, true)?
+        };
         if upcase.len() != 131072 {
             return Err(unsupported("NTFS $UpCase size"));
         }
@@ -1291,7 +1487,17 @@ impl NtfsVolume {
         let mut seen = vector(blocks)?;
         seen.resize(blocks, false);
         let mut counted = 0usize;
-        self.index_tasks(root, 16, object, 0, limits, &mut counted, &mut tasks, r)?;
+        self.index_tasks(
+            root,
+            16,
+            object,
+            0,
+            limits,
+            streams,
+            &mut counted,
+            &mut tasks,
+            r,
+        )?;
         let mut previous: Option<Vec<u16>> = None;
         while let Some(task) = tasks.pop() {
             self.context.check(r)?;
@@ -1331,11 +1537,14 @@ impl NtfsVolume {
                     seen[block] = true;
                     let mut bytes = vector(self.geometry.index_bytes)?;
                     bytes.resize(self.geometry.index_bytes, 0);
-                    mapped
+                    if mapped
                         .as_ref()
                         .ok_or_else(|| bad("NTFS child without allocation"))?
-                        .read_at(offset, &mut bytes)
-                        .map_err(|e| Error::io("NTFS index block read", e))?;
+                        .read_at(offset, &mut bytes, r)?
+                        != bytes.len()
+                    {
+                        return Err(bad("NTFS truncated index block"));
+                    }
                     if &bytes[..4] != b"INDX" || u64le(&bytes, 16) != vcn {
                         return Err(bad("NTFS INDX signature/VCN"));
                     }
@@ -1371,6 +1580,7 @@ impl NtfsVolume {
                         object,
                         depth,
                         limits,
+                        streams,
                         &mut counted,
                         &mut tasks,
                         r,
@@ -1398,6 +1608,7 @@ impl NtfsVolume {
         parent: &ObjectId,
         depth: usize,
         limits: NtfsDirectoryLimits,
+        streams: Option<NtfsStreamLimits>,
         counted: &mut usize,
         tasks: &mut Vec<IndexTask>,
         r: &Resources,
@@ -1470,7 +1681,24 @@ impl NtfsVolume {
                 if u64le(value, 0) != u64le(&parent.native, 0) | (parent.generation << 48) {
                     return Err(bad("NTFS index FILE_NAME parent reference"));
                 }
-                let target = self.record(number, r)?;
+                let resolved_target = if let Some(streams) = streams {
+                    let identity = self.stream_identity(number, r)?;
+                    Some(self.resolve_stream_record(&identity, streams, r)?)
+                } else {
+                    None
+                };
+                let strict_target = if resolved_target.is_none() {
+                    Some(self.record(number, r)?)
+                } else {
+                    None
+                };
+                let target = if let Some(resolved) = &resolved_target {
+                    &resolved.records[0]
+                } else {
+                    strict_target
+                        .as_ref()
+                        .ok_or_else(|| bad("NTFS index target"))?
+                };
                 if target.identity.generation != u64::from(sequence) {
                     return Err(bad("NTFS index target sequence"));
                 }
@@ -1489,7 +1717,12 @@ impl NtfsVolume {
                 {
                     return Err(bad("NTFS unsupported dot namespace entry"));
                 }
-                if !target.names.iter().any(|n| {
+                let targets = if let Some(resolved) = &resolved_target {
+                    &resolved.records[..]
+                } else {
+                    core::slice::from_ref(target)
+                };
+                if !targets.iter().flat_map(|target| &target.names).any(|n| {
                     n.parent_record == u64le(&parent.native, 0)
                         && u64::from(n.parent_sequence) == parent.generation
                         && n.namespace == value[65]
@@ -1541,6 +1774,7 @@ impl NtfsVolume {
 #[derive(Clone, Copy)]
 pub(crate) struct NtfsAuditAttribute<'a> {
     pub(crate) record: u64,
+    pub(crate) offset: usize,
     pub(crate) kind: u32,
     pub(crate) instance: u16,
     pub(crate) name: &'a [u8],
@@ -1556,6 +1790,7 @@ impl NtfsRecord {
             let len = usize::from(raw[9]) * 2;
             NtfsAuditAttribute {
                 record: u64le(&self.identity.native, 0),
+                offset: a.start,
                 kind: a.kind,
                 instance: u16le(raw, 14),
                 name: if len == 0 { &[] } else { &raw[at..at + len] },
@@ -1664,6 +1899,40 @@ impl NtfsVolume {
             Err(bad("NTFS MFT slot signature"))
         }
     }
+    pub(crate) fn audit_slot_reference(
+        &self,
+        number: u64,
+        r: &Resources,
+    ) -> Result<(bool, u16, u64)> {
+        let bytes = self.audit_record_bytes(number, r)?;
+        if bytes.iter().all(|b| *b == 0) {
+            return Ok((false, 0, 0));
+        }
+        let flags = u16le(&bytes, 22);
+        let start = usize::from(u16le(&bytes, 20));
+        let used = u32le(&bytes, 24) as usize;
+        if flags & !15 != 0
+            || start < 48
+            || !start.is_multiple_of(8)
+            || used < start + 4
+            || used > bytes.len()
+            || u32le(&bytes, 28) as usize != bytes.len()
+            // Free native slots may retain a zero or stale record number.
+            // Only a live FILE slot establishes identity or a base reference.
+            || (flags & 1 != 0 && u32le(&bytes, 44) as u64 != number)
+        {
+            return Err(bad("NTFS audit FILE slot framing"));
+        }
+        let sequence = u16le(&bytes, 16);
+        if flags & 1 != 0 && sequence == 0 {
+            return Err(bad("NTFS audit live slot sequence"));
+        }
+        Ok((
+            flags & 1 != 0,
+            sequence,
+            if flags & 1 != 0 { u64le(&bytes, 32) } else { 0 },
+        ))
+    }
     pub(crate) fn audit_record_bytes(
         &self,
         number: u64,
@@ -1731,7 +2000,7 @@ impl NtfsVolume {
     }
 }
 
-fn audit_fixup(bytes: &mut [u8], r: &Resources) -> Result<()> {
+pub(crate) fn audit_fixup(bytes: &mut [u8], r: &Resources) -> Result<()> {
     if bytes.iter().all(|b| *b == 0) {
         return Ok(());
     }
@@ -1762,4 +2031,68 @@ fn audit_fixup(bytes: &mut [u8], r: &Resources) -> Result<()> {
         bytes[i * 512 - 2..i * 512].copy_from_slice(&replacement.to_le_bytes());
     }
     Ok(())
+}
+
+#[cfg(feature = "forensics")]
+impl NtfsVolume {
+    pub(crate) fn open_for_forensics(
+        source: Arc<dyn ReadAt>,
+        read: NtfsReadLimits,
+        streams: NtfsStreamLimits,
+        r: &Resources,
+    ) -> Result<Self> {
+        let mut volume = Self::open_for_resolved_audit(source, read, streams, r)?;
+        volume.forensic_sparse_units = true;
+        Ok(volume)
+    }
+    pub(crate) fn normalize_forensic_sparse_unit(&self, raw: &[u8], normalized: &mut [u8]) {
+        if self.forensic_sparse_units
+            && raw.len() >= 72
+            && u32le(raw, 0) == 0x80
+            && raw[8] == 1
+            && u16le(raw, 12) == 0x8000
+            && u16le(raw, 34) == 4
+            && raw[36..40].iter().all(|byte| *byte == 0)
+        {
+            // Native Windows sparse-only DATA uses allocation granularity 2^4.
+            // It is not LZNT1: physical runs retain ordinary byte semantics.
+            normalized[34..36].fill(0);
+        }
+    }
+    pub(crate) fn forensic_mapping(
+        &self,
+        raw: &[u8],
+        r: &Resources,
+    ) -> Result<Budgeted<NtfsRawMap>> {
+        Budgeted::try_new(&r.memory, map_charge(self.limits.runs)?, || {
+            let _scratch = r.memory.reserve(raw.len() as u64)?;
+            let mut normalized = vector(raw.len())?;
+            normalized.extend_from_slice(raw);
+            self.normalize_forensic_sparse_unit(raw, &mut normalized);
+            decode_runs(&normalized, &self.geometry, self.limits, r, false)
+        })
+    }
+    pub(crate) fn forensic_raw_record(
+        &self,
+        number: u64,
+        r: &Resources,
+    ) -> Result<Budgeted<Vec<u8>>> {
+        self.context.check(r)?;
+        if number >= self.record_count() {
+            return Err(bad("NTFS forensic slot bounds"));
+        }
+        Budgeted::try_new(&r.memory, self.geometry.record_bytes as u64, || {
+            let mut bytes = vector(self.geometry.record_bytes)?;
+            bytes.resize(self.geometry.record_bytes, 0);
+            if self
+                .mft
+                .read_at(number * self.geometry.record_bytes as u64, &mut bytes)
+                .map_err(|e| Error::io("NTFS forensic raw FILE read", e))?
+                != bytes.len()
+            {
+                return Err(bad("NTFS forensic truncated FILE slot"));
+            }
+            Ok(bytes)
+        })
+    }
 }

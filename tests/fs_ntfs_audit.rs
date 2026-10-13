@@ -7,7 +7,7 @@ use partmgr::io;
 use partmgr::{
     fs_core::{Budget, Cancellation, ErrorKind, Resources},
     fs_ntfs::NtfsReadLimits,
-    fs_ntfs_audit::{NtfsAuditFinding, NtfsAuditLimits, audit_ntfs},
+    fs_ntfs_audit::{NtfsAuditFinding, NtfsAuditLimits, audit_ntfs, audit_ntfs_detailed},
 };
 use std::sync::{
     Arc,
@@ -672,4 +672,116 @@ fn short_name_policy_remains_visible_in_audit_without_becoming_dirty() {
             .iter()
             .any(|finding| matches!(finding, NtfsAuditFinding::Dirty))
     );
+}
+
+fn dirty_seed() -> Vec<u8> {
+    let mut bytes = ntfs_audit_seed();
+    let flags_at =
+        2048 + 3 * 1024 + 56 + resident(0x30, &name_value("$Volume", 5), 2).len() + 24 + 10;
+    w(&mut bytes, flags_at, 1);
+    bytes
+}
+
+#[test]
+fn detailed_audit_retains_findings_and_lease_after_later_failures() {
+    for kind in 0..4 {
+        let resources = r();
+        let mut bytes = dirty_seed();
+        let mut cap = audit_limits();
+        let expected = match kind {
+            0 => {
+                cap.work = 0;
+                ErrorKind::BudgetExhausted
+            }
+            1 => {
+                cap.findings = 1;
+                bytes[512 * 1024] ^= 1;
+                ErrorKind::BudgetExhausted
+            }
+            2 => ErrorKind::Io,
+            _ => {
+                put(
+                    &mut bytes,
+                    25,
+                    &[
+                        resident(0x20, &[], 1),
+                        resident(0x30, &name_value("gamma", 5), 2),
+                    ],
+                    false,
+                    1,
+                );
+                ErrorKind::Unsupported
+            }
+        };
+        let image = Arc::new(Image::new(bytes));
+        if kind == 2 {
+            image.fail.store(400 * 512, Ordering::Relaxed);
+        }
+        let failure = audit_ntfs_detailed(image, limits(), cap, &resources)
+            .err()
+            .unwrap();
+        assert_eq!(failure.error().kind, expected);
+        let report = failure.report().expect("scan started");
+        assert_eq!(report.findings().first(), Some(&NtfsAuditFinding::Dirty));
+        assert!(!report.is_complete());
+        assert!(!report.is_clean());
+        assert!(report.free_ranges().is_empty());
+        assert!(resources.memory.used() > 0);
+        let (_, report) = failure.into_parts();
+        assert!(resources.memory.used() > 0);
+        drop(report);
+        assert_eq!(resources.memory.used(), 0);
+    }
+}
+
+struct CancelDuringScan {
+    image: Image,
+    cancellation: Cancellation,
+}
+impl ReadAt for CancelDuringScan {
+    fn len(&self) -> u64 {
+        self.image.len()
+    }
+    fn read_exact_at(&self, offset: u64, bytes: &mut [u8]) -> io::Result<()> {
+        self.image.read_exact_at(offset, bytes)?;
+        if offset == 2048 + 24 * 1024 {
+            self.cancellation.cancel();
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn detailed_audit_retains_evidence_on_mid_scan_cancellation() {
+    let resources = r();
+    let source = Arc::new(CancelDuringScan {
+        image: Image::new(dirty_seed()),
+        cancellation: resources.cancellation.clone(),
+    });
+    let failure = audit_ntfs_detailed(source, limits(), audit_limits(), &resources)
+        .err()
+        .unwrap();
+    assert_eq!(failure.error().kind, ErrorKind::Cancelled);
+    let report = failure.report().unwrap();
+    assert_eq!(report.findings().first(), Some(&NtfsAuditFinding::Dirty));
+    assert!(!report.is_clean());
+    assert!(!report.is_complete());
+    assert!(report.free_ranges().is_empty());
+    assert!(resources.memory.used() > 0);
+    drop(failure);
+    assert_eq!(resources.memory.used(), 0);
+}
+
+#[test]
+fn detailed_audit_setup_failure_has_no_report_or_lease() {
+    let resources = r();
+    resources.cancellation.cancel();
+    let image = Arc::new(Image::new(ntfs_audit_seed()));
+    let failure = audit_ntfs_detailed(image.clone(), limits(), audit_limits(), &resources)
+        .err()
+        .unwrap();
+    assert_eq!(failure.error().kind, ErrorKind::Cancelled);
+    assert!(failure.report().is_none());
+    assert_eq!(image.reads.load(Ordering::Relaxed), 0);
+    assert_eq!(resources.memory.used(), 0);
 }

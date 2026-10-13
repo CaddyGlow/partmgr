@@ -1,0 +1,309 @@
+{
+  "version": 1,
+  "profile": "native-fat12-mtools-tsk-cli",
+  "platform": "Linux-6.12.107+deb13-amd64-x86_64-with-glibc2.41",
+  "binary_sha256": "64dbfcd0b0875cd6eba6d76d8940f43ca1ca9e5467b386a8a8be14dcef1fd413",
+  "runner_sha256": "40186bf1150ae1e48cab5c396792af42dbc005197ffe63727856f06e8528ef2d",
+  "commands": [
+    {
+      "argv": [
+        "fls",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "7f348d41b7d041c84e1fdc65967ccb4cb8d7d82ea329294d24213c8f97e8a373",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "icat",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "7f348d41b7d041c84e1fdc65967ccb4cb8d7d82ea329294d24213c8f97e8a373",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "fsstat",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "7f348d41b7d041c84e1fdc65967ccb4cb8d7d82ea329294d24213c8f97e8a373",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mkfs.fat",
+        "--help"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "f522bf46cc2cfa3bf6c540db3d8ef9b4bc325392ddd52adf477f54eaa13906e6",
+      "stderr_sha256": "e40f2b1af5302ece63a425d0d4a29f13058148fd3d8bfea506e7373f3e55bd32"
+    },
+    {
+      "argv": [
+        "mcopy",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "25fdf5a7ca6028c626685060e346800b043240a0410d59a7ddab2b6310b54a45",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mkfs.fat",
+        "-F",
+        "12",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-working.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "f522bf46cc2cfa3bf6c540db3d8ef9b4bc325392ddd52adf477f54eaa13906e6",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mcopy",
+        "-i",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-working.dd",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/live-content.bin",
+        "::LIVE.BIN"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mcopy",
+        "-i",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-working.dd",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/deleted-content.bin",
+        "::deleted long file.txt"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mdel",
+        "-i",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-working.dd",
+        "::deleted long file.txt"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mcopy",
+        "-i",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-working.dd",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/reused-content.bin",
+        "::REUSE.BIN"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/tmp/partmgr-forensics-native-20261013/filesystem-forensics-linux",
+        "slots-fat",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-deleted.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-deleted.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "9728",
+        "--directory-length",
+        "7168"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "ae644504189ffdbd7ce4e64649da3e51b84c10b7479c312d320b48136be9d109",
+      "stderr_sha256": "afd32e1deea6e744ba4f6c3c7c2d9f8257baea623a87054e715fca042a050471"
+    },
+    {
+      "argv": [
+        "fls",
+        "-f",
+        "fat",
+        "-r",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-deleted.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "b6b7fe14a2feb98525c72dbd35a4f632002d111731d0a936f7a165863f18b69e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "icat",
+        "-f",
+        "fat",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-deleted.dd",
+        "3"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "fsstat",
+        "-f",
+        "fat",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-deleted.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "d3a01ea54ca9d1462280e5bbfca234f872fe89244c71d97b26a3a7696a0a2b29",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/tmp/partmgr-forensics-native-20261013/filesystem-forensics-linux",
+        "extract-fat",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-deleted.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-deleted.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "9728",
+        "--directory-length",
+        "7168",
+        "--slot-offset",
+        "9728",
+        "--output-dir",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/exports-0"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "4842772a52f519dd75ddfb1d59d3bf19ba69e78c55714753f7107e63aa57a593",
+      "stderr_sha256": "09c24a5a1f2736541c3968c09871ebf519d048cefc855caa3ea32efb5ec7b3c1"
+    },
+    {
+      "argv": [
+        "/tmp/partmgr-forensics-native-20261013/filesystem-forensics-linux",
+        "slots-fat",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-reused.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-reused.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "9728",
+        "--directory-length",
+        "7168"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "a2714ee71971a67dead035f6fe186dd14cdd41335787a2d2fa1c1b8c88edb798",
+      "stderr_sha256": "afd32e1deea6e744ba4f6c3c7c2d9f8257baea623a87054e715fca042a050471"
+    },
+    {
+      "argv": [
+        "fls",
+        "-f",
+        "fat",
+        "-r",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-reused.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "bb9346d822897d66b7e01dc45d900ff39fc5aea7474b6f6b9b75a1a031a7e0e4",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "icat",
+        "-f",
+        "fat",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-reused.dd",
+        "3"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "fsstat",
+        "-f",
+        "fat",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-reused.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "08dc9c05e02ef4401c44f11a59a754d25cde2d1a112a1a8e8769052aba42b55c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/tmp/partmgr-forensics-native-20261013/filesystem-forensics-linux",
+        "extract-fat",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/native-reused.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-reused.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "9728",
+        "--directory-length",
+        "7168",
+        "--slot-offset",
+        "9728",
+        "--output-dir",
+        "/tmp/partmgr-forensics-native-20261013/fat-tool-oracle/exports-1"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "7becc64b1163753d80c59e5525018914b3df53c6ef8be107af7db6e3419fa122",
+      "stderr_sha256": "09c24a5a1f2736541c3968c09871ebf519d048cefc855caa3ea32efb5ec7b3c1"
+    }
+  ],
+  "results": [
+    {
+      "fixture": "native-deleted.dd",
+      "fixture_sha256_before": "4c0a9614ca45804b7139e29c5850712af5d0063ff07d9b3d864e04e49d3b146e",
+      "fixture_sha256_after": "4c0a9614ca45804b7139e29c5850712af5d0063ff07d9b3d864e04e49d3b146e",
+      "immutable_fixture_verified": true,
+      "native_deleted_slots_present": true,
+      "live_tsk_inode": "3",
+      "output_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "native_expected_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "partmgr_output_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "passed": true
+    },
+    {
+      "fixture": "native-reused.dd",
+      "fixture_sha256_before": "e52b9d23903a2566ffb63032590940dddb6b3b19be487b2dd9e2431eaab280ca",
+      "fixture_sha256_after": "e52b9d23903a2566ffb63032590940dddb6b3b19be487b2dd9e2431eaab280ca",
+      "immutable_fixture_verified": true,
+      "native_deleted_slots_present": false,
+      "live_tsk_inode": "3",
+      "output_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "native_expected_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "partmgr_output_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

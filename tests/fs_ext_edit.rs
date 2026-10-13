@@ -1874,3 +1874,88 @@ fn deletion_time_orphan_domain_boundary_rejects_before_publication() {
         assert_eq!(r.memory.used(), 0);
     }
 }
+
+#[test]
+fn hardlink_external_undo_commit_preserves_inode_payload_and_refuses_stale_collision() {
+    use partmgr::fs_ext_edit::ExtNamespaceOperation;
+    let r = big_r();
+    let mut editor = ExtEditor::open(
+        Memory {
+            bytes: container(),
+            writes: 0,
+        },
+        Memory {
+            bytes: vec![0; 131072],
+            writes: 0,
+        },
+        region(),
+        binding(),
+        larger_limits(),
+        &r,
+    )
+    .unwrap();
+    let source = editor
+        .open_file(&[NativeName::Bytes(b"alias".to_vec())], &r)
+        .unwrap();
+    let number = source.inode().number();
+    let mut expected_inode = source.inode().raw_metadata().to_vec();
+    let links = u16::from_le_bytes(expected_inode[26..28].try_into().unwrap());
+    expected_inode[26..28].copy_from_slice(&(links + 1).to_le_bytes());
+    drop(source);
+    let stale_root = editor.open_directory(&[], &r).unwrap();
+    let batch = editor
+        .plan_hardlink(&stale_root, b"alias", &stale_root, b"new-link", &r)
+        .unwrap();
+    assert_eq!(
+        batch.namespace_report().unwrap().operation,
+        ExtNamespaceOperation::CreateHardlink
+    );
+    editor.commit(batch, [79; 16], &r).unwrap();
+    // Start a fresh write counter epoch while retaining the actual committed stores.
+    let (mut target, mut journal, state) = editor.into_stores();
+    assert_eq!(state, ExtEditState::Ready);
+    target.writes = 0;
+    journal.writes = 0;
+    let editor =
+        ExtEditor::open(target, journal, region(), binding(), larger_limits(), &r).unwrap();
+    assert_eq!(
+        editor
+            .plan_hardlink(&stale_root, b"alias", &stale_root, b"stale", &r)
+            .err()
+            .unwrap()
+            .kind,
+        ErrorKind::StalePlan
+    );
+    drop(stale_root);
+    for name in [b"alias".as_slice(), b"new-link".as_slice()] {
+        let file = editor
+            .open_file(&[NativeName::Bytes(name.to_vec())], &r)
+            .unwrap();
+        assert_eq!(file.inode().number(), number);
+        assert_eq!(
+            file.inode().raw_metadata().as_slice(),
+            expected_inode.as_slice()
+        );
+        let mut payload = [0; 1024];
+        assert_eq!(
+            editor.read_at(&file, 0, &mut payload, &r).unwrap(),
+            payload.len()
+        );
+        assert_eq!(payload, [73; 1024]);
+    }
+    let root = editor.open_directory(&[], &r).unwrap();
+    assert_eq!(
+        editor
+            .plan_hardlink(&root, b"alias", &root, b"new-link", &r)
+            .err()
+            .unwrap()
+            .kind,
+        ErrorKind::InvalidOperation
+    );
+    drop(root);
+    let (target, journal, state) = editor.into_stores();
+    assert_eq!(state, ExtEditState::Ready);
+    assert_eq!(target.writes + journal.writes, 0);
+    assert_eq!(&target.bytes[BASE + 8192..BASE + 9216], &[73; 1024]);
+    assert_eq!(r.memory.used(), 0);
+}

@@ -12,6 +12,7 @@ pub(crate) struct Bootstrap {
     pub(crate) primary: [u8; 1024],
     pub(crate) journal: [u8; 1024],
     pub(crate) inode: [u8; 256],
+    #[cfg(test)]
     pub(crate) inode_bytes: usize,
     pub(crate) physical_blocks: Vec<u32>,
     pub(crate) metadata_blocks: Vec<u32>,
@@ -386,6 +387,11 @@ impl Bootstrap {
         let mut journal = [0; 1024];
         walk.block(walk.map[0], &mut journal)?;
         let features = be32(&journal, 40);
+        if features & !0x19 != 0 || be32(&journal, 36) != 0 || be32(&journal, 44) != 0 {
+            return Err(unsupported(
+                "JBD2 bootstrap unsupported native feature profile",
+            ));
+        }
         let checksums = match features & 0x18 {
             8 => Checksums::V2,
             16 => Checksums::V3,
@@ -397,9 +403,6 @@ impl Bootstrap {
             || be32(&journal, 8) != 0
             || be32(&journal, 12) as usize != block_bytes
             || be32(&journal, 16) as usize != blocks
-            || features & !0x19 != 0
-            || be32(&journal, 36) != 0
-            || be32(&journal, 44) != 0
             || journal[48..64] != primary[104..120]
             || be32(&journal, 64) != 1
             || be32(&journal, 68) != 0
@@ -433,6 +436,7 @@ impl Bootstrap {
             primary,
             journal,
             inode,
+            #[cfg(test)]
             inode_bytes,
             physical_blocks: walk.map,
             metadata_blocks: walk.metadata,

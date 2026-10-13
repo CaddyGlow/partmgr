@@ -1,5 +1,6 @@
 //! Exact-byte classic ext2 namespace planning on an audited owned session.
 use super::allocation::{Phase, Planner, data_blocks, mapped_inode, publish_map};
+use super::transaction::{OrderedOperation, SymlinkAction, SymlinkEvidence};
 use super::*;
 use crate::fs_ext::{ExtDirectory, ExtEntry};
 use crate::fs_file::ExtentKind;
@@ -21,7 +22,7 @@ fn u16le(b: &[u8], p: usize) -> u16 {
 fn u32le(b: &[u8], p: usize) -> u32 {
     u32::from_le_bytes(b[p..p + 4].try_into().unwrap())
 }
-fn zeros(n: usize) -> Result<Vec<u8>> {
+pub(super) fn zeros(n: usize) -> Result<Vec<u8>> {
     let mut v = Vec::new();
     v.try_reserve_exact(n)
         .map_err(|_| budget("ext2 namespace allocation"))?;
@@ -67,8 +68,18 @@ impl ExtCreateMetadata {
 pub enum ExtNamespaceOperation {
     /// Create a regular file.
     CreateFile,
+    /// Create a canonical unfollowed symlink.
+    CreateSymlink,
+    /// Replace an unfollowed symlink target.
+    ReplaceSymlinkTarget,
+    /// Rename a symlink without following its target.
+    RenameSymlink,
+    /// Unlink a symlink name; release only after its last alias.
+    DeleteSymlink,
     /// Create a directory with native dot entries.
     CreateDirectory,
+    /// Add one regular-file name referencing an existing inode.
+    CreateHardlink,
     /// Rename or move without replacing an existing destination.
     Rename,
     /// Unlink a regular file name; allocation releases only after its last name.
@@ -497,6 +508,13 @@ impl allocation::PlanningContext<'_> {
                 ));
             }
         }
+        if !directory {
+            p.begin_ordered(OrderedOperation::Create {
+                inode: number,
+                inode_generation: generation,
+                length,
+            })?;
+        }
         let count = length.div_ceil(bs) as usize;
         if count > self.limits.file_blocks {
             return Err(budget("ext2 create block ceiling"));
@@ -507,7 +525,16 @@ impl allocation::PlanningContext<'_> {
             .map_err(|_| budget("ext2 create data map"))?;
         for logical in 0..count {
             p.tick(1)?;
-            let block = p.allocate()?;
+            let fresh = if directory {
+                None
+            } else {
+                Some(p.allocate_regular(logical as u64)?)
+            };
+            let block = if let Some(token) = &fresh {
+                Planner::regular_block(token)
+            } else {
+                p.allocate()?
+            };
             data.push(block);
             let _scratch = r.memory.reserve(bs)?;
             let mut body = zeros(bs as usize)?;
@@ -522,7 +549,11 @@ impl allocation::PlanningContext<'_> {
                     record_header(p.g, parent.inode.number(), bs as usize - 12, b"..", 2)?;
                 body[12..12 + parent_dot.len()].copy_from_slice(&parent_dot);
             }
-            p.patch(u64::from(block) * bs, body, Phase::Initialize)?;
+            if let Some(token) = fresh {
+                p.patch_regular_fresh(token, body)?;
+            } else {
+                p.patch(u64::from(block) * bs, body, Phase::Initialize)?;
+            }
         }
         let (raw, _, _) = mapped_inode(&mut p, &inode, &data, length)?;
         let inode_at = p.inode_offset(number)?;
@@ -551,6 +582,72 @@ impl allocation::PlanningContext<'_> {
             inode: number,
             assigned_inode_generation: Some(generation),
             new_name: Some(copied(bytes)?),
+            released_inode: false,
+            deletion_time: None,
+            native_times_preserved: true,
+        };
+        let mut batch = p.finish(self.scope, self.generation, None)?;
+        batch.namespace = Some(report);
+        Ok(batch)
+    }
+    /// Add an exact regular-file name without replacing any destination.
+    ///
+    /// The source inode retains mapping, payload, ownership and timestamps.
+    /// The classic compatibility profile permits at most 32000 links.
+    pub fn plan_hardlink(
+        &self,
+        source: &ExtEditDirectory,
+        source_name: &[u8],
+        destination: &ExtEditDirectory,
+        destination_name: &[u8],
+        r: &Resources,
+    ) -> Result<ExtEditBatch> {
+        self.check_directory(source, r)?;
+        self.check_directory(destination, r)?;
+        name(source_name)?;
+        name(destination_name)?;
+        let mut p = Planner::new(self, r)?;
+        let mut source_number = None;
+        for entry in source.entries() {
+            p.tick(1)?;
+            if matches!(&entry.name, NativeName::Bytes(n) if n == source_name) {
+                source_number = Some(entry.inode);
+                break;
+            }
+        }
+        for entry in destination.entries() {
+            p.tick(1)?;
+            if matches!(&entry.name, NativeName::Bytes(n) if n == destination_name) {
+                return Err(bad("ext2 hardlink destination already exists"));
+            }
+        }
+        let number = source_number.ok_or_else(|| bad("ext2 hardlink source not found"))?;
+        let decoder = self.decoder(r)?;
+        let inode = decoder.inode(number, r).map_err(native)?;
+        if inode.mode() & 0xf000 != 0x8000 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "ext2 hardlink requires a regular source inode",
+            ));
+        }
+        let links = u16le(inode.raw_metadata(), 26);
+        if links == 0 {
+            return Err(invalid("ext2 hardlink source has zero links"));
+        }
+        // Linux EXT2_LINK_MAX, deliberately narrower than u16/e2fsprogs limits.
+        if links >= 32000 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "ext2 hardlink classic link limit reached",
+            ));
+        }
+        insert(destination, destination_name, number, 1, &mut p)?;
+        p.link_count(number, 1)?;
+        let report = ExtNamespaceReport {
+            operation: ExtNamespaceOperation::CreateHardlink,
+            inode: number,
+            assigned_inode_generation: None,
+            new_name: Some(copied(destination_name)?),
             released_inode: false,
             deletion_time: None,
             native_times_preserved: true,
@@ -591,7 +688,7 @@ impl allocation::PlanningContext<'_> {
             .ok_or_else(|| bad("ext2 rename source not found"))?;
         let inode = decoder.inode(entry.inode, r).map_err(native)?;
         let directory = inode.mode() & 0xf000 == 0x4000;
-        if !directory && inode.mode() & 0xf000 != 0x8000 {
+        if !directory && !matches!(inode.mode() & 0xf000, 0x8000 | 0xa000) {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "ext2 rename kind unsupported",
@@ -600,7 +697,14 @@ impl allocation::PlanningContext<'_> {
         if directory && destination.ancestors.contains(&inode.number()) {
             return Err(bad("ext2 directory move would create a cycle"));
         }
+        let symlink = inode.mode() & 0xf000 == 0xa000;
         let mut p = Planner::new(self, r)?;
+        let proof = if symlink {
+            p.begin_symlink_metadata()?;
+            Some(capture_symlink(&mut p, &inode, SymlinkAction::Rename)?)
+        } else {
+            None
+        };
         let l = layout(source, &mut p)?;
         let old = row(&l, old_name)?;
         if same && old.record >= 8 + new_name.len() {
@@ -609,7 +713,13 @@ impl allocation::PlanningContext<'_> {
                 inode.number(),
                 old.record,
                 new_name,
-                if directory { 2 } else { 1 },
+                if directory {
+                    2
+                } else if symlink {
+                    7
+                } else {
+                    1
+                },
             )?;
             p.edit(old.at, &header, Phase::Publish)?;
         } else {
@@ -618,7 +728,13 @@ impl allocation::PlanningContext<'_> {
                 destination,
                 new_name,
                 inode.number(),
-                if directory { 2 } else { 1 },
+                if directory {
+                    2
+                } else if symlink {
+                    7
+                } else {
+                    1
+                },
                 &mut p,
             )?;
         }
@@ -638,7 +754,11 @@ impl allocation::PlanningContext<'_> {
             p.link_count(destination.inode.number(), 1)?;
         }
         let report = ExtNamespaceReport {
-            operation: ExtNamespaceOperation::Rename,
+            operation: if symlink {
+                ExtNamespaceOperation::RenameSymlink
+            } else {
+                ExtNamespaceOperation::Rename
+            },
             inode: inode.number(),
             assigned_inode_generation: None,
             new_name: Some(copied(new_name)?),
@@ -646,6 +766,9 @@ impl allocation::PlanningContext<'_> {
             deletion_time: None,
             native_times_preserved: true,
         };
+        if let Some(proof) = proof {
+            p.set_symlink_evidence(proof)?;
+        }
         let mut batch = p.finish(self.scope, self.generation, None)?;
         batch.namespace = Some(report);
         Ok(batch)
@@ -657,6 +780,39 @@ impl allocation::PlanningContext<'_> {
         parent: &ExtEditDirectory,
         bytes: &[u8],
         deletion_time: u32,
+        r: &Resources,
+    ) -> Result<ExtEditBatch> {
+        self.plan_delete_kind(parent, bytes, deletion_time, None, r)
+    }
+    // Check the requested kind against the same audited native observation used
+    // to construct the deletion plan, before allocating or publishing patches.
+    pub(crate) fn plan_delete_kind(
+        &self,
+        parent: &ExtEditDirectory,
+        bytes: &[u8],
+        deletion_time: u32,
+        expected_directory: Option<bool>,
+        r: &Resources,
+    ) -> Result<ExtEditBatch> {
+        self.plan_delete_inner(parent, bytes, deletion_time, expected_directory, false, r)
+    }
+    #[cfg(feature = "std")]
+    pub(crate) fn plan_unlink_symlink(
+        &self,
+        parent: &ExtEditDirectory,
+        bytes: &[u8],
+        deletion_time: u32,
+        r: &Resources,
+    ) -> Result<ExtEditBatch> {
+        self.plan_delete_inner(parent, bytes, deletion_time, None, true, r)
+    }
+    fn plan_delete_inner(
+        &self,
+        parent: &ExtEditDirectory,
+        bytes: &[u8],
+        deletion_time: u32,
+        expected_directory: Option<bool>,
+        symlink_requested: bool,
         r: &Resources,
     ) -> Result<ExtEditBatch> {
         self.check_directory(parent, r)?;
@@ -680,13 +836,30 @@ impl allocation::PlanningContext<'_> {
             .ok_or_else(|| bad("ext2 unlink source not found"))?;
         let inode = decoder.inode(entry.inode, r).map_err(native)?;
         let directory = inode.mode() & 0xf000 == 0x4000;
-        if !directory && inode.mode() & 0xf000 != 0x8000 {
+        let symlink = inode.mode() & 0xf000 == 0xa000;
+        if symlink != symlink_requested {
+            return Err(bad(
+                "unlink actual kind differs from requested symlink operation",
+            ));
+        }
+        if !directory && !matches!(inode.mode() & 0xf000, 0x8000 | 0xa000) {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "ext2 unlink kind unsupported",
             ));
         }
+        if expected_directory.is_some_and(|expected| expected != directory) {
+            return Err(bad(
+                "ext unlink target kind differs from requested operation",
+            ));
+        }
         let mut p = Planner::new(self, r)?;
+        let mut proof = if symlink {
+            p.begin_symlink_metadata()?;
+            Some(capture_symlink(&mut p, &inode, SymlinkAction::Unlink)?)
+        } else {
+            None
+        };
         let l = layout(parent, &mut p)?;
         let target = row(&l, bytes)?;
         p.edit(target.at, &[0; 4], Phase::Publish)?;
@@ -706,15 +879,25 @@ impl allocation::PlanningContext<'_> {
             p.link_count(parent.inode.number(), -1)?;
         }
         if released {
-            let map = decoder
-                .file_map(inode.number(), self.limits.file_blocks, r, false)
-                .map_err(native)?;
-            let (data, _map) = data_blocks(&map, self.geometry.block_size, r)?;
-            for block in data.iter().filter(|b| **b != 0) {
-                p.free_block(*block)?;
+            if symlink {
+                if let Some((at, _)) = proof.as_ref().and_then(|e| e.original_slow.as_ref()) {
+                    p.free_block((*at / u64::from(self.geometry.block_size)) as u32)?;
+                }
+                let at = p.inode_offset(inode.number())?;
+                p.edit(at + 4, &[0; 4], Phase::Publish)?;
+                p.edit(at + 28, &[0; 4], Phase::Publish)?;
+                p.edit(at + 40, &[0; 60], Phase::Publish)?;
+            } else {
+                let map = decoder
+                    .file_map(inode.number(), self.limits.file_blocks, r, false)
+                    .map_err(native)?;
+                let (data, _map) = data_blocks(&map, self.geometry.block_size, r)?;
+                for block in data.iter().filter(|b| **b != 0) {
+                    p.free_block(*block)?;
+                }
+                let empty = [];
+                publish_map(&mut p, &inode, &empty, 0)?;
             }
-            let empty = [];
-            publish_map(&mut p, &inode, &empty, 0)?;
             let at = p.inode_offset(inode.number())?;
             p.edit(at + 26, &[0; 2], Phase::Publish)?;
             p.edit(at + 20, &deletion_time.to_le_bytes(), Phase::Publish)?;
@@ -726,7 +909,9 @@ impl allocation::PlanningContext<'_> {
             p.link_count(inode.number(), -1)?;
         }
         let report = ExtNamespaceReport {
-            operation: if directory {
+            operation: if symlink {
+                ExtNamespaceOperation::DeleteSymlink
+            } else if directory {
                 ExtNamespaceOperation::DeleteDirectory
             } else {
                 ExtNamespaceOperation::DeleteFile
@@ -738,6 +923,15 @@ impl allocation::PlanningContext<'_> {
             deletion_time: released.then_some(deletion_time),
             native_times_preserved: true,
         };
+        if let Some(mut evidence) = proof.take() {
+            let at = p.inode_offset(inode.number())?;
+            p.current(at, &mut evidence.final_inode)?;
+            evidence.final_allocated = !released;
+            if released {
+                evidence.target.clear();
+            }
+            p.set_symlink_evidence(evidence)?;
+        }
         let mut batch = p.finish(self.scope, self.generation, None)?;
         batch.namespace = Some(report);
         Ok(batch)
@@ -772,6 +966,26 @@ impl<S: Storage, J: Storage> ExtEditor<S, J> {
         self.planning_context(r)?
             .plan_create_directory(parent, name, metadata, r)
     }
+    /// Plan another exact name for a regular inode, preserving its native metadata.
+    ///
+    /// Existing destinations are refused; the classic creation limit is 32000
+    /// links. Commit the returned batch through the editor's external-undo path.
+    pub fn plan_hardlink(
+        &self,
+        source: &ExtEditDirectory,
+        source_name: &[u8],
+        destination: &ExtEditDirectory,
+        destination_name: &[u8],
+        r: &Resources,
+    ) -> Result<ExtEditBatch> {
+        self.planning_context(r)?.plan_hardlink(
+            source,
+            source_name,
+            destination,
+            destination_name,
+            r,
+        )
+    }
     /// Rename or move one exact byte name, preserving native metadata.
     pub fn plan_rename(
         &self,
@@ -794,5 +1008,392 @@ impl<S: Storage, J: Storage> ExtEditor<S, J> {
     ) -> Result<ExtEditBatch> {
         self.planning_context(r)?
             .plan_delete(parent, name, deletion_time, r)
+    }
+}
+
+pub(super) fn symlink_source_shape(raw: &[u8; 128], body: Option<&[u8]>, bs: u32) -> Result<()> {
+    let length = u32le(raw, 4) as usize;
+    if u16le(raw, 0) & 0xf000 != 0xa000
+        || length == 0
+        || length >= bs as usize
+        || u32le(raw, 32) != 0
+        || u32le(raw, 104) != 0
+        || u32le(raw, 108) != 0
+    {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "unqualified symlink source profile",
+        ));
+    }
+    if u32le(raw, 28) == 0 {
+        if length >= 60
+            || body.is_some()
+            || raw[40 + length] != 0
+            || raw[40..40 + length].contains(&0)
+        {
+            return Err(invalid("fast symlink source framing"));
+        }
+    } else {
+        if length < 60 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "short block-backed symlink unqualified",
+            ));
+        }
+        let body = body.ok_or_else(|| invalid("slow symlink body missing"))?;
+        if u32le(raw, 28) != bs / 512
+            || u32le(raw, 40) == 0
+            || raw[44..100].iter().any(|b| *b != 0)
+            || body.len() != bs as usize
+            || body[length] != 0
+            || body[..length].contains(&0)
+        {
+            return Err(invalid("slow symlink source framing"));
+        }
+    }
+    Ok(())
+}
+fn capture_symlink(
+    p: &mut Planner<'_>,
+    inode: &ExtInode,
+    action: SymlinkAction,
+) -> Result<SymlinkEvidence> {
+    let raw: [u8; 128] = *inode.raw_metadata();
+    let size = u32le(&raw, 4) as usize;
+    if size == 0 || size >= p.g.block_size as usize {
+        return Err(invalid("symlink target length"));
+    }
+    let lease = p.r.memory.reserve(
+        p.g.block_size as u64
+            + size as u64
+            + 512
+            + crate::platform::mem::size_of::<SymlinkEvidence>() as u64,
+    )?;
+    let slow = if u32le(&raw, 28) == 0 {
+        None
+    } else {
+        let at = u64::from(u32le(&raw, 40)) * u64::from(p.g.block_size);
+        let mut body = zeros(p.g.block_size as usize)?;
+        if body.capacity() > p.g.block_size as usize {
+            return Err(budget("symlink source capacity"));
+        }
+        p.tick(body.len())?;
+        p.target.read_exact_at(at, &mut body).map_err(native)?;
+        Some((at, body))
+    };
+    // Framing scan and target copy are separate from the charged block read.
+    p.tick(
+        size.checked_mul(2)
+            .and_then(|n| n.checked_add(128))
+            .ok_or_else(|| budget("symlink capture scan work overflow"))?,
+    )?;
+    symlink_source_shape(
+        &raw,
+        slow.as_ref().map(|(_, b)| b.as_slice()),
+        p.g.block_size,
+    )?;
+    let bytes = match &slow {
+        Some((_, body)) => &body[..size],
+        None => &raw[40..40 + size],
+    };
+    let target = copied(bytes)?;
+    if target.capacity() > size {
+        return Err(budget("symlink target capacity"));
+    }
+    let at = p.inode_offset(inode.number())?;
+    Ok(SymlinkEvidence {
+        action,
+        source: p.scope_for_symlink(),
+        generation: p.generation_for_symlink(),
+        inode: inode.number(),
+        inode_offset: at,
+        original_inode: raw,
+        final_inode: raw,
+        target,
+        original_slow: slow,
+        fresh_slow: None,
+        final_allocated: true,
+        _lease: lease,
+    })
+}
+
+#[cfg(feature = "std")]
+fn symlink_target_bytes(p: &mut Planner<'_>, target: &[u8], block_size: u32) -> Result<()> {
+    if target.is_empty() || target.len() >= block_size as usize {
+        return Err(bad(
+            "symlink requires1..blocksize-1 exact non-NUL target bytes",
+        ));
+    }
+    // Debit before inspecting caller bytes; include the retained evidence copy.
+    p.tick(
+        target
+            .len()
+            .checked_mul(2)
+            .ok_or_else(|| budget("symlink target scan work overflow"))?,
+    )?;
+    if target.contains(&0) {
+        return Err(bad(
+            "symlink requires1..blocksize-1 exact non-NUL target bytes",
+        ));
+    }
+    Ok(())
+}
+#[cfg(feature = "std")]
+fn symlink_profile(context: &allocation::PlanningContext<'_>) -> Result<()> {
+    if context.geometry.inode_size != 128
+        || context.geometry.modern.is_some()
+        || !matches!(context.geometry.block_size, 1024 | 2048 | 4096)
+    {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "symlink planner requires admitted classic128 profile",
+        ));
+    }
+    Ok(())
+}
+#[cfg(feature = "std")]
+fn symlink_proof_lease(r: &Resources, bs: usize, target: usize) -> Result<Reservation> {
+    let bytes = (bs as u64)
+        .checked_add(target as u64)
+        .and_then(|n| {
+            n.checked_add(512 + crate::platform::mem::size_of::<SymlinkEvidence>() as u64)
+        })
+        .ok_or_else(|| budget("symlink proof accounting"))?;
+    r.memory.reserve(bytes)
+}
+#[cfg(feature = "std")]
+fn symlink_final_raw(
+    p: &mut Planner<'_>,
+    mut raw: [u8; 128],
+    target: &[u8],
+) -> Result<([u8; 128], Option<u32>)> {
+    p.tick(target.len() + 60)?;
+    raw[4..8].copy_from_slice(&(target.len() as u32).to_le_bytes());
+    raw[28..32].fill(0);
+    raw[40..100].fill(0);
+    let slow = if target.len() < 60 {
+        raw[40..40 + target.len()].copy_from_slice(target);
+        None
+    } else {
+        // Immutable original audit.free_ranges controls this allocation. It must
+        // precede release of the original target, even in net-zero replacement.
+        let block = p.allocate()?;
+        let bs = p.g.block_size as usize;
+        let _scratch = p.r.memory.reserve(bs as u64)?;
+        let mut body = zeros(bs)?;
+        if body.capacity() > bs {
+            return Err(budget("symlink body capacity"));
+        }
+        body[..target.len()].copy_from_slice(target);
+        p.tick(bs)?;
+        p.patch(u64::from(block) * bs as u64, body, Phase::Initialize)?;
+        raw[40..44].copy_from_slice(&block.to_le_bytes());
+        raw[28..32].copy_from_slice(&(p.g.block_size / 512).to_le_bytes());
+        Some(block)
+    };
+    Ok((raw, slow))
+}
+#[cfg(feature = "std")]
+impl allocation::PlanningContext<'_> {
+    pub(crate) fn plan_create_symlink(
+        &self,
+        parent: &ExtEditDirectory,
+        bytes: &[u8],
+        target: &[u8],
+        metadata: &ExtCreateMetadata,
+        r: &Resources,
+    ) -> Result<ExtEditBatch> {
+        self.check_directory(parent, r)?;
+        symlink_profile(self)?;
+        name(bytes)?;
+        // Explicit charged scan rather than unbounded `any` over entries.
+        let mut p = Planner::new(self, r)?;
+        symlink_target_bytes(&mut p, target, self.geometry.block_size)?;
+        for entry in parent.entries() {
+            p.tick(1)?;
+            if matches!(&entry.name,NativeName::Bytes(n) if n==bytes) {
+                return Err(bad("symlink destination exists"));
+            }
+        }
+        let _proof_lease = symlink_proof_lease(r, self.geometry.block_size as usize, target.len())?;
+        let target = copied(target)?;
+        if target.capacity() > target.len() {
+            return Err(budget("symlink target proof capacity"));
+        }
+        p.begin_symlink_metadata()?;
+        let (inode, generation) = p.allocate_inode(false)?;
+        let at = p.inode_offset(inode)?;
+        let mut original_inode = [0; 128];
+        p.target
+            .read_exact_at(at, &mut original_inode)
+            .map_err(native)?;
+        let mut raw = metadata.raw;
+        if u16le(&raw, 0) & 0xf000 != 0xa000
+            || raw[4..8] != [0; 4]
+            || raw[20..24] != [0; 4]
+            || raw[26..32] != [0; 6]
+            || raw[40..104] != [0; 64]
+        {
+            return Err(bad(
+                "symlink template must select symlink and zero managed fields",
+            ));
+        }
+        raw[26..28].copy_from_slice(&1u16.to_le_bytes());
+        raw[100..104].copy_from_slice(&generation.to_le_bytes());
+        let (final_inode, fresh_slow) = symlink_final_raw(&mut p, raw, &target)?;
+        p.patch(at, copied(&final_inode)?, Phase::Initialize)?;
+        insert(parent, bytes, inode, 7, &mut p)?;
+        p.set_symlink_evidence(SymlinkEvidence {
+            action: SymlinkAction::Create,
+            source: self.scope,
+            generation: self.generation,
+            inode,
+            inode_offset: at,
+            original_inode,
+            final_inode,
+            target,
+            original_slow: None,
+            fresh_slow,
+            final_allocated: true,
+            _lease: _proof_lease,
+        })?;
+        let mut batch = p.finish(self.scope, self.generation, None)?;
+        batch.namespace = Some(ExtNamespaceReport {
+            operation: ExtNamespaceOperation::CreateSymlink,
+            inode,
+            assigned_inode_generation: Some(generation),
+            new_name: Some(copied(bytes)?),
+            released_inode: false,
+            deletion_time: None,
+            native_times_preserved: true,
+        });
+        Ok(batch)
+    }
+    pub(crate) fn plan_replace_symlink_target(
+        &self,
+        parent: &ExtEditDirectory,
+        bytes: &[u8],
+        target: &[u8],
+        r: &Resources,
+    ) -> Result<ExtEditBatch> {
+        self.check_directory(parent, r)?;
+        symlink_profile(self)?;
+        name(bytes)?;
+        let mut p = Planner::new(self, r)?;
+        symlink_target_bytes(&mut p, target, self.geometry.block_size)?;
+        let mut number = None;
+        for entry in parent.entries() {
+            p.tick(1)?;
+            if matches!(&entry.name,NativeName::Bytes(n) if n==bytes) {
+                number = Some(entry.inode);
+                break;
+            }
+        }
+        let decoder = self.decoder(r)?;
+        let inode = decoder
+            .inode(number.ok_or_else(|| bad("symlink source absent"))?, r)
+            .map_err(native)?;
+        if inode.mode() & 0xf000 != 0xa000 {
+            return Err(bad("target replacement requires actual symlink inode"));
+        }
+        let original_inode: [u8; 128] = *inode.raw_metadata();
+        if u32le(&original_inode, 32) != 0 || u32le(&original_inode, 104) != 0 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "symlink flags/xattr unsupported",
+            ));
+        }
+        let old_len = usize::try_from(inode.len()).map_err(|_| budget("symlink old length"))?;
+        if old_len == 0 || old_len >= self.geometry.block_size as usize {
+            return Err(invalid("symlink source length"));
+        }
+        let _proof_lease = symlink_proof_lease(r, self.geometry.block_size as usize, target.len())?;
+        // Charge framing and NUL scans before examining the retained source.
+        p.tick(
+            old_len
+                .checked_add(128)
+                .ok_or_else(|| budget("symlink replacement scan work overflow"))?,
+        )?;
+        let original_slow = if u32le(&original_inode, 28) == 0 {
+            if old_len >= 60
+                || original_inode[40 + old_len] != 0
+                || original_inode[40..40 + old_len].contains(&0)
+            {
+                return Err(invalid("fast source framing"));
+            }
+            None // Opaque unused inline bytes retained in exact original inode guard.
+        } else {
+            if old_len < 60 {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "short block-backed symlink unqualified",
+                ));
+            }
+            let block = u32le(&original_inode, 40);
+            if block == 0
+                || u32le(&original_inode, 28) != self.geometry.block_size / 512
+                || original_inode[44..100].iter().any(|b| *b != 0)
+            {
+                return Err(invalid("slow source mapping"));
+            }
+            let mut body = zeros(self.geometry.block_size as usize)?;
+            if body.capacity() > self.geometry.block_size as usize {
+                return Err(budget("symlink guard capacity"));
+            }
+            p.tick(body.len())?;
+            p.target
+                .read_exact_at(
+                    u64::from(block) * u64::from(self.geometry.block_size),
+                    &mut body,
+                )
+                .map_err(native)?;
+            if body[old_len] != 0 || body[..old_len].contains(&0) {
+                return Err(invalid("slow source terminator"));
+            }
+            Some((u64::from(block) * u64::from(self.geometry.block_size), body))
+        };
+        let target = copied(target)?;
+        if target.capacity() > target.len() {
+            return Err(budget("symlink proof target capacity"));
+        }
+        // Typed symlink-only metadata purpose coalesces allocation/release counters.
+        // Planner finish requires matching evidence and prospective semantic proof.
+        p.begin_symlink_metadata()?;
+        let (final_inode, fresh_slow) = symlink_final_raw(&mut p, original_inode, &target)?;
+        if let Some((at, _)) = &original_slow {
+            p.free_block((*at / u64::from(self.geometry.block_size)) as u32)?;
+        }
+        let at = p.inode_offset(inode.number())?;
+        for (index, byte) in final_inode.iter().enumerate() {
+            p.tick(1)?;
+            if *byte != original_inode[index] {
+                p.edit(at + index as u64, &[*byte], Phase::Publish)?;
+            }
+        }
+        p.set_symlink_evidence(SymlinkEvidence {
+            action: SymlinkAction::Replace,
+            source: self.scope,
+            generation: self.generation,
+            inode: inode.number(),
+            inode_offset: at,
+            original_inode,
+            final_inode,
+            target,
+            original_slow,
+            fresh_slow,
+            final_allocated: true,
+            _lease: _proof_lease,
+        })?;
+        let mut batch = p.finish(self.scope, self.generation, None)?;
+        batch.namespace = Some(ExtNamespaceReport {
+            operation: ExtNamespaceOperation::ReplaceSymlinkTarget,
+            inode: inode.number(),
+            assigned_inode_generation: None,
+            new_name: Some(copied(bytes)?),
+            released_inode: false,
+            deletion_time: None,
+            native_times_preserved: true,
+        });
+        Ok(batch)
     }
 }

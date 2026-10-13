@@ -274,9 +274,10 @@ pub(in super::super) fn recover(
     let repaired = !scanned.reconciled.is_empty();
     if ![REDO, COMMIT, SYNC].contains(&kind)
         || partial_serial && kind != REDO
-        || !active
-            && !inactive
-            && !(kind == REDO && activating || checkpointed && clearing && le32(&logs, 28) == 1)
+        || !(active
+            || inactive
+            || kind == REDO && activating
+            || checkpointed && clearing && le32(&logs, 28) == 1)
     {
         return Err(bad("JFS rename publication/activation ordering"));
     }

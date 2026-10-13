@@ -1,5 +1,18 @@
 # Independent partmgr fuzzing
 
+The `forensics` target enables the optional forensic feature and exercises
+bounded MFT inventory, raw FILE decoding, FAT allocation copies/raw slots, and
+native NTFS/FAT timestamp interpretation. It reuses the independent NTFS/FAT
+seeds and probes truncations with a 2 MiB shared pool, 16 scan boundaries and
+128 KiB read/output ceilings. The seed smoke test passes and checks reservation
+refunds. A 10,000-case deterministic mutation smoke and a 1,001-iteration
+instrumented honggfuzz smoke passed on bound snapshots; receipts are in
+`integration/forensics/mutation-smoke-20261013.json` and
+`integration/forensics/instrumented-smoke-20261013.json`. Later audit edits are
+excluded from those receipts. The ordinary-Cargo `forensics-mutate` binary
+retains positive parser-path counters, seeds, panic inputs and prefix outcomes;
+it is feedback-free smoke, not sanitizer or coverage qualification.
+
 The APFS target includes independently assembled two-volume and retained-
 checkpoint seeds, plus a rehashed unsupported unselected-volume seed. The input
 ceiling remains 2 MiB; the explicit shared memory ceiling is now 256 MiB to

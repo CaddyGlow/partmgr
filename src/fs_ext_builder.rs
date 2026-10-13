@@ -845,11 +845,16 @@ impl ExtBuildPlan {
                 materialized_sparse: true,
             })
         })();
-        result.map_err(|mut e| {
-            if mutated && e.kind != ErrorKind::UncertainDurability {
-                e.kind = ErrorKind::InterruptedWrite;
+        result.map_err(|error| {
+            if mutated && error.kind != ErrorKind::UncertainDurability {
+                Error {
+                    kind: ErrorKind::InterruptedWrite,
+                    context: "ext2 staged emission interrupted".into(),
+                    source: Some(io::Error::other(error)),
+                }
+            } else {
+                error
             }
-            e
         })
     }
 }

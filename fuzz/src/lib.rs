@@ -3,6 +3,7 @@ mod bitlocker;
 mod ext_profile;
 mod fixtures;
 mod flash;
+mod forensics;
 mod hfs;
 mod hfsplus;
 mod jffs2;
@@ -89,6 +90,7 @@ pub fn run(target: &str, data: &[u8]) -> Result<(), &'static str> {
         "ext" => ext(data),
         "exfat" => exfat(data),
         "ntfs" => ntfs(data),
+        "forensics" => forensics(data),
         "xfs" => xfs(data),
         "jffs2" => jffs2(data),
         "hfsplus" => hfsplus(data),
@@ -112,6 +114,7 @@ pub const TARGETS: &[&str] = &[
     "ext",
     "exfat",
     "ntfs",
+    "forensics",
     "xfs",
     "jffs2",
     "hfsplus",
@@ -122,6 +125,23 @@ pub const TARGETS: &[&str] = &[
     "undo",
 ];
 pub fn seeds(target: &str) -> Vec<Vec<u8>> {
+    if target == "forensics" {
+        let mut inputs = seeds("ntfs");
+        // Standalone valid FILE/USN structures keep low-level mutation paths
+        // reachable even when unrelated volume bootstrap bytes are damaged.
+        let clean = fixtures::ntfs_seed();
+        inputs.push(clean[2048 + 25 * 1024..2048 + 26 * 1024].to_vec());
+        let mut usn = vec![0; 64];
+        usn[..4].copy_from_slice(&64u32.to_le_bytes());
+        usn[4..6].copy_from_slice(&2u16.to_le_bytes());
+        usn[40..44].copy_from_slice(&0x100u32.to_le_bytes());
+        usn[56..58].copy_from_slice(&2u16.to_le_bytes());
+        usn[58..60].copy_from_slice(&60u16.to_le_bytes());
+        usn[60..62].copy_from_slice(&65u16.to_le_bytes());
+        inputs.push(usn);
+        inputs.extend(seeds("fat"));
+        return inputs;
+    }
     if matches!(target, "bitlocker" | "bitlocker-reader") {
         return bitlocker::seeds();
     }
@@ -386,6 +406,16 @@ pub fn seeds(target: &str) -> Vec<Vec<u8>> {
         vec![0; 4096],
         vec![],
     ]
+}
+/// Opt-in forensic raw records, FAT copies/slots and native timestamp decoding.
+pub fn forensics(data: &[u8]) {
+    forensics::run(data);
+}
+/// Positive parser-path counters for reproducible bounded mutation campaigns.
+pub use forensics::ObservedProfiles;
+/// Run the same forensic harness while retaining bounded positive-path counters.
+pub fn forensics_with_profiles(data: &[u8]) -> ObservedProfiles {
+    forensics::run(data)
 }
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -1203,6 +1233,15 @@ pub fn apfs(data: &[u8]) {
     apfs::run(data);
 }
 
+/// Bounded BitLocker envelope and metadata inspection without credential work.
+pub fn bitlocker(data: &[u8]) {
+    bitlocker::inspection(data);
+}
+/// Fixed-key bounded decrypted reader and logical mapping fuzzing.
+pub fn bitlocker_reader(data: &[u8]) {
+    bitlocker::reader(data);
+}
+
 #[cfg(test)]
 mod smoke {
     #[test]
@@ -1600,13 +1639,4 @@ mod smoke {
             }
         }
     }
-}
-
-/// Bounded BitLocker envelope and metadata inspection without credential work.
-pub fn bitlocker(data: &[u8]) {
-    bitlocker::inspection(data);
-}
-/// Fixed-key bounded decrypted reader and logical mapping fuzzing.
-pub fn bitlocker_reader(data: &[u8]) {
-    bitlocker::reader(data);
 }

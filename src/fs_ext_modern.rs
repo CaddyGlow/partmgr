@@ -94,12 +94,9 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
         inode: &super::ExtInode,
         resources: &Resources,
     ) -> io::Result<crate::fs_core::Budgeted<Vec<u8>>> {
-        let Some(proof) = &self.geometry.modern else {
-            return crate::fs_core::Budgeted::try_new(&resources.memory, 0, || Ok(Vec::new()))
-                .map_err(io::Error::other);
-        };
+        let proof = self.geometry.modern.as_ref();
         let tail = &inode.extra[usize::from(inode.extra_size)..];
-        let inline = if proof.inode_size == 256 && tail.iter().any(|v| *v != 0) {
+        let inline = if proof.is_some_and(|p| p.inode_size == 256) && tail.iter().any(|v| *v != 0) {
             tail
         } else {
             &[]
@@ -108,7 +105,7 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
         let external_bytes = if external == 0 {
             0
         } else {
-            proof.block_size as usize
+            self.geometry.block_size as usize
         };
         let length = if inline.is_empty() && external == 0 {
             0
@@ -139,16 +136,18 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
                 bytes.resize(length, 0);
                 if external != 0 {
                     self.read_exact_at(
-                        u64::from(external) * u64::from(proof.block_size),
+                        u64::from(external) * u64::from(self.geometry.block_size),
                         &mut bytes[at..],
                     )
                     .map_err(|error| crate::fs_core::Error::io("ext opaque xattr read", error))?;
-                    proof
-                        .checksums
-                        .xattr(u64::from(external), &bytes[at..])
-                        .map_err(|error| {
-                            crate::fs_core::Error::io("ext opaque xattr checksum", error)
-                        })?;
+                    if let Some(proof) = proof {
+                        proof
+                            .checksums
+                            .xattr(u64::from(external), &bytes[at..])
+                            .map_err(|error| {
+                                crate::fs_core::Error::io("ext opaque xattr checksum", error)
+                            })?;
+                    }
                     super::xattr::validate(&bytes[at..], 0, true, resources).map_err(|error| {
                         crate::fs_core::Error::io("ext opaque xattr layout", error)
                     })?;
@@ -178,8 +177,8 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
     ) -> io::Result<Self> {
         Self::open_structural(source, source_id, resources, false)
     }
-    // Private owned qualification only; immutable/public admission stays strict.
-    #[cfg(all(test, feature = "std"))]
+    // Private owned admission only; immutable/public reader admission stays strict.
+    #[cfg(feature = "std")]
     pub(super) fn open_owned_profile_qualification(
         source: R,
         source_id: u128,
@@ -195,7 +194,7 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
             Self::open_reader(source, source_id, resources, true)
         }
     }
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(feature = "std")]
     pub(super) fn open_legacy_structural_qualification(
         source: R,
         source_id: u128,
@@ -249,6 +248,7 @@ impl<R: ExtDecodeRead> super::ExtDecoder<R> {
                 sparse_super: proof.ro & 1 != 0,
                 extent_profile: proof.incompat & 0x40 != 0,
                 has_journal: proof.compat & 4 != 0,
+                external_xattrs: proof.compat & 8 != 0,
                 journal_inode,
                 uuid: sb[104..120].try_into().unwrap(),
                 modern: Some(proof),

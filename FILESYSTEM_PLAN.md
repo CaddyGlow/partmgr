@@ -2,6 +2,11 @@
 
 ## Objective and agreed scope
 
+The detailed follow-up [write and maintenance plan](docs/filesystem-write-maintenance-plan.md)
+covers ext3/ext4 writes, NTFS writes including ADS, ACLs, compression, EFS and
+USN-enabled/disabled volumes, per-family timestamp/metadata/ACL/journal editing,
+and check/repair/format/expand operations wherever the native format supports them.
+
 Build a Rust framework for strict filesystem inspection, file access, new-image
 authoring, and recoverable editing. Integrate logical storage from `virtdisk`,
 partition management from `partmgr`, and optical/media operations from `mkiso-rs`.

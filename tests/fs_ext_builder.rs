@@ -278,10 +278,18 @@ fn stale_faults_and_budget_refund() {
     );
     s.fail.store(false, Ordering::SeqCst);
     image.fail_write = true;
-    assert_eq!(
-        p.emit(&mut image, &r).unwrap_err().kind,
-        ErrorKind::InterruptedWrite
-    );
+    let error = p.emit(&mut image, &r).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InterruptedWrite);
+    let original = error
+        .source
+        .as_ref()
+        .unwrap()
+        .get_ref()
+        .unwrap()
+        .downcast_ref::<partmgr::fs_core::Error>()
+        .unwrap();
+    assert_eq!(original.kind, ErrorKind::Io);
+    assert!(original.source.is_some());
     image.fail_write = false;
     image.fail_flush = true;
     assert_eq!(
@@ -290,10 +298,17 @@ fn stale_faults_and_budget_refund() {
     );
     image.fail_flush = false;
     image.corrupt = true;
-    assert_eq!(
-        p.emit(&mut image, &r).unwrap_err().kind,
-        ErrorKind::InterruptedWrite
-    );
+    let error = p.emit(&mut image, &r).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InterruptedWrite);
+    let original = error
+        .source
+        .as_ref()
+        .unwrap()
+        .get_ref()
+        .unwrap()
+        .downcast_ref::<partmgr::fs_core::Error>()
+        .unwrap();
+    assert_eq!(original.kind, ErrorKind::InvalidData);
     drop(p);
     assert_eq!(r.memory.used(), 0);
     let low = Resources {

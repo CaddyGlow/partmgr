@@ -17,6 +17,12 @@ pub mod bitlocker;
 mod bitlocker_crypto;
 #[cfg(feature = "bitlocker")]
 mod bitlocker_disk;
+#[cfg(all(feature = "bitlocker-tpm", unix))]
+pub mod bitlocker_swtpm;
+#[cfg(feature = "bitlocker-tpm")]
+pub mod bitlocker_tpm;
+#[cfg(feature = "bitlocker-tpm")]
+pub mod bitlocker_tpm_host;
 #[cfg(feature = "bitlocker-write")]
 pub mod bitlocker_write;
 
@@ -98,6 +104,13 @@ pub mod fs_jffs2;
 pub mod fs_jffs2_audit;
 pub mod fs_jffs2_builder;
 pub mod fs_jffs2_tree;
+/// Conservative maintenance contracts; capability declarations do not authorize writes.
+pub mod fs_maintenance;
+/// Read-only bridges from allocation audits to scoped maintenance reports.
+pub mod fs_maintenance_audit;
+/// Owned creation, verification and audit of fresh classic ext2 working images.
+#[cfg(feature = "std")]
+pub mod fs_maintenance_format;
 /// Explicit outcomes and recovery obligations for independently committed media layers.
 pub mod fs_pipeline;
 /// Bounded storage sessions and immutable filesystem read regions.
@@ -112,6 +125,8 @@ pub mod recovery;
 
 /// Strict clean NTFS 3.1 base-record and positional unnamed-data reader.
 pub mod fs_ntfs;
+/// Bounded native NTFS restart-page inspection without replay or mutation.
+pub mod fs_ntfs_logfile;
 /// Volume-bound native NTFS metadata and lossless security capture.
 pub mod fs_ntfs_metadata;
 /// Lossless bounded inspection of native self-relative security descriptors.
@@ -169,3 +184,53 @@ pub mod fs_apfs_tree;
 
 /// Bounded source-bound USN stream extraction.
 pub mod fs_ntfs_usn_extract;
+
+/// Portable stable-source forensic evidence and bounded scan outcomes.
+#[cfg(feature = "forensics")]
+pub mod forensics;
+/// Exclusive host candidate exports and terminal manifests.
+#[cfg(all(feature = "std", feature = "forensics"))]
+pub mod forensics_export;
+/// Bounded streaming candidate extraction with explicit reuse evidence.
+#[cfg(feature = "forensics")]
+pub mod forensics_extract;
+/// Host forensic source selection.
+#[cfg(all(feature = "std", feature = "forensics"))]
+pub mod forensics_host;
+/// Versioned streaming JSON Lines for forensic coverage and terminal outcomes.
+#[cfg(all(feature = "std", feature = "forensics"))]
+pub mod forensics_json;
+/// Lossless NTFS/FAT timestamp decoding with explicit timezone assumptions.
+#[cfg(feature = "forensics")]
+pub mod forensics_time;
+/// Native NTFS/FAT timestamp events and provenance-preserving coverage.
+#[cfg(feature = "forensics")]
+pub mod forensics_timeline;
+
+#[cfg(feature = "forensics")]
+pub mod forensics_ntfs;
+
+/// Opt-in lossless FAT forensic slot and allocation observations.
+#[cfg(feature = "forensics")]
+pub mod forensics_fat;
+/// Bounded independent FAT-copy comparison and divergent-chain evidence.
+#[cfg(feature = "forensics")]
+pub mod forensics_fat_copies;
+
+/// Opt-in FAT live and deleted-alias candidate extraction maps.
+#[cfg(feature = "forensics")]
+pub mod forensics_fat_extract;
+
+#[cfg(feature = "forensics")]
+pub mod forensics_ntfs_extract;
+
+/// Bounded host external sorting for interpreted chronological evidence.
+#[cfg(all(feature = "std", feature = "forensics"))]
+pub mod forensics_sort;
+
+#[cfg(feature = "forensics")]
+pub mod forensics_journal;
+
+/// Bounded timestamp serialization spool for external chronological sorting.
+#[cfg(all(feature = "std", feature = "forensics"))]
+pub mod forensics_timeline_spool;

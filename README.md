@@ -5,14 +5,14 @@ and explicit recovery. Partition metadata, filesystem operations, payload copyin
 and observed firmware boot have separate APIs and outcomes.
 
 ```toml
-partmgr = "0.1.1"
+partmgr = "0.1.2"
 ```
 
 ```sh
 cargo test --all-features --locked
 ```
 
-Dependencies resolve from crates.io; no sibling checkout is required. CI checks
+Requires Rust 1.96 or newer. Dependencies resolve from crates.io; no sibling checkout is required. CI checks
 formatting, Clippy and tests on Linux and Windows. Independent partition-tool and
 QEMU/OVMF jobs provide additional format and firmware evidence.
 
@@ -29,8 +29,9 @@ filesystem APIs. The separate `bitlocker-write` feature adds owned ciphertext
 transactions and external undo recovery. Envelope discovery is available without
 either feature; decrypted views retain distinct provenance identities.
 See [BitLocker support](docs/bitlocker.md) for the exact profile,
-usage, native evidence, and remaining qualification gates. TPM/swtpm unlocking
-is not implemented.
+usage, native evidence, and remaining qualification gates. The opt-in
+`bitlocker-tpm` feature adds experimental TPM 2.0 policy unsealing and isolated
+swtpm state imports; see [provider support and limits](docs/bitlocker-tpm.md).
 
 ## Building without std
 
@@ -38,7 +39,7 @@ Disable the default `std` feature to build the entire library with `core` and
 `alloc`, including every filesystem reader, builder and owned editor:
 
 ```toml
-partmgr = { version = "0.1.1", default-features = false }
+partmgr = { version = "0.1.2", default-features = false }
 ```
 
 ```sh
@@ -54,7 +55,7 @@ backend. Targets must support pointer and 64-bit atomics. Implement
 `partmgr::io::ReadAt` for immutable positional reads and `storage::Storage` for
 exclusive writes and durable flushes. The portable I/O module retains typed
 errors, reader provenance, bounded views and metadata budgets by reexporting
-virtdisk 0.3.0's shared API in both configurations. Host image/file adapters
+virtdisk 0.3.1's shared API in both configurations. Host image/file adapters
 require `std`. Host backends convert standard I/O errors into the shared portable
 error type; positional-reader identities and budgets use the same upstream types.
 
@@ -86,6 +87,19 @@ release gates. See [filesystem support](docs/filesystem-support.md),
 [read facade](docs/filesystem-image.md) and
 [native validation](docs/filesystem-native-validation.md) for exact profiles,
 evidence and remaining work. `FILESYSTEM_PLAN.md` remains ongoing.
+
+The `std` [classic-ext3 ordered session](docs/filesystem-ext-journal-edit.md)
+provides owned append/create/truncate, range overwrite, sparse extension,
+hardlink and namespace editing with explicit recovery. Manifest seven integrates
+unfollowed symlink creation, target replacement, reading, rename and unlink;
+all five source-bound host checks pass
+([365-source receipt](/data/cache/partmgr-maintenance-ext-symlink-checks-20261011-v5/result.json));
+source-bound native interruption/recovery, adversarial controls and final rehash pass for the archived manifest-seven snapshot.
+The [current implementation checkpoint](docs/filesystem-maintenance-status.md#current-implementation-checkpoint--2026-10-12)
+also distinguishes unintegrated preallocation, counter-repair and NTFS drafts. Earlier manifest-six
+sparse extension has scoped host/native and adversarial qualification bound to
+its archived revision. Modern ext4 and NTFS transactional writers remain
+unfinished; see the [maintenance inventory](docs/filesystem-maintenance-status.md).
 
 ```rust
 use partmgr::{guid::Guid, layout::{Geometry, GptLayout}};

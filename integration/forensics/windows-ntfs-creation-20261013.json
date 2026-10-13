@@ -1,0 +1,250 @@
+{
+    "version":  1,
+    "profile":  "windows-created-private-ntfs-known-operations-v1",
+    "started_utc":  "2026-10-13T09:39:06.1224794Z",
+    "os":  "Microsoft Windows NT 10.0.26200.0",
+    "powershell":  "5.1.26100.7920",
+    "runner_sha256":  "566780c91a1c0454981526b9a506885203571880d4fbc4319ae8fbc232b5160d",
+    "operations":  [
+                       {
+                           "command":  "fsutil.exe",
+                           "arguments":  [
+                                             "fsinfo",
+                                             "ntfsinfo",
+                                             "E:"
+                                         ],
+                           "exit_code":  0,
+                           "output":  "NTFS Volume Serial Number :        0xd06eb9746eb953c6\nNTFS Version      :                3.1\nLFS Version       :                2.0\nTotal Sectors     :                130,815  (63.9 MB)\nTotal Clusters    :                 16,351  (63.9 MB)\nFree Clusters     :                 14,357  (56.1 MB)\nTotal Reserved Clusters :            1,024  ( 4.0 MB)\nReserved For Storage Reserve :           0  ( 0.0 KB)\nBytes Per Sector  :                512\nBytes Per Physical Sector :        512\nBytes Per Cluster :                4096  (4 KB)\nBytes Per FileRecord Segment    :  1024\nClusters Per FileRecord Segment :  0\nMft Valid Data Length :            256.00 KB\nMft Start Lcn  :                   0x000000000000154a\nMft2 Start Lcn :                   0x0000000000000002\nMft Zone Start :                   0x0000000000001540\nMft Zone End   :                   0x0000000000001d60\nMFT Zone Size  :                   8.13 MB\nMax Device Trim Extent Count :     4096\nMax Device Trim Byte Count :       0xffffffff\nMax Volume Trim Extent Count :     62\nMax Volume Trim Byte Count :       0x40000000\nResource Manager Identifier :      CB07F341-C6E6-11F1-8CE9-85CBF643C46A",
+                           "utc":  "2026-10-13T09:39:23.7785673Z"
+                       },
+                       {
+                           "command":  "fsutil.exe",
+                           "arguments":  [
+                                             "usn",
+                                             "createjournal",
+                                             "m=8388608",
+                                             "a=1048576",
+                                             "E:"
+                                         ],
+                           "exit_code":  0,
+                           "output":  "",
+                           "utc":  "2026-10-13T09:39:23.8708164Z"
+                       },
+                       {
+                           "command":  "compact.exe",
+                           "arguments":  [
+                                             "/c",
+                                             "/i",
+                                             "/q",
+                                             "E:\\compressed.bin"
+                                         ],
+                           "exit_code":  0,
+                           "output":  "\n Compressing files in E:\\\n\n\n1 files within 1 directories were compressed.\n262,144 total bytes of data are stored in 16,384 bytes.\nThe compression ratio is 16.0 to 1.",
+                           "utc":  "2026-10-13T09:39:25.3037867Z"
+                       },
+                       {
+                           "command":  "fsutil.exe",
+                           "arguments":  [
+                                             "sparse",
+                                             "setflag",
+                                             "E:\\sparse.bin"
+                                         ],
+                           "exit_code":  0,
+                           "output":  "",
+                           "utc":  "2026-10-13T09:39:25.6132137Z"
+                       },
+                       {
+                           "command":  "fsutil.exe",
+                           "arguments":  [
+                                             "sparse",
+                                             "setrange",
+                                             "E:\\sparse.bin",
+                                             "4096",
+                                             "8192"
+                                         ],
+                           "exit_code":  0,
+                           "output":  "",
+                           "utc":  "2026-10-13T09:39:25.7646247Z"
+                       },
+                       {
+                           "command":  "fsutil.exe",
+                           "arguments":  [
+                                             "usn",
+                                             "queryjournal",
+                                             "E:"
+                                         ],
+                           "exit_code":  0,
+                           "output":  "Usn Journal ID   : 0x01dd5af6bb1a125e\nFirst Usn        : 0x0000000000000000\nNext Usn         : 0x0000000000000fa0\nLowest Valid Usn : 0x0000000000000000\nMax Usn          : 0x00000fffffff0000\nMaximum Size     : 0x0000000000100000 (  1.0 MB)\nAllocation Delta : 0x0000000000040000 (256.0 KB)\nMinimum record version supported : 2\nMaximum record version supported : 4\nWrite range tracking: Disabled",
+                           "utc":  "2026-10-13T09:39:26.4576559Z"
+                       },
+                       {
+                           "command":  "fsutil.exe",
+                           "arguments":  [
+                                             "dirty",
+                                             "query",
+                                             "E:"
+                                         ],
+                           "exit_code":  0,
+                           "output":  "Volume - E: is NOT Dirty",
+                           "utc":  "2026-10-13T09:39:26.6647392Z"
+                       },
+                       {
+                           "command":  "fsutil.exe",
+                           "arguments":  [
+                                             "volume",
+                                             "dismount",
+                                             "E:"
+                                         ],
+                           "exit_code":  0,
+                           "output":  "",
+                           "utc":  "2026-10-13T09:39:26.9322074Z"
+                       }
+                   ],
+    "files":  [
+                  {
+                      "kind":  "live",
+                      "relative_name":  "live.bin",
+                      "native_id_hex":  "00000000000000000001000000000028",
+                      "record":  40,
+                      "sequence":  1,
+                      "length":  131072,
+                      "sha256":  "b030dd7f20a60afd578542f4184685ebdc692d8fedb75c19d71810ef49fbce28"
+                  },
+                  {
+                      "kind":  "live",
+                      "relative_name":  "resident.txt",
+                      "native_id_hex":  "00000000000000000001000000000029",
+                      "record":  41,
+                      "sequence":  1,
+                      "length":  32,
+                      "sha256":  "4f4e954b8245dd1a8e7caac18e80015fbd134946a44b5ef92a99247bd3c509bf"
+                  },
+                  {
+                      "kind":  "live",
+                      "relative_name":  "compressed.bin",
+                      "native_id_hex":  "0000000000000000000100000000002a",
+                      "record":  42,
+                      "sequence":  1,
+                      "length":  262144,
+                      "sha256":  "4f505dc9cd3e95f011f2b93687ab4198637499b72e6a6995193c38f2152f369b"
+                  },
+                  {
+                      "kind":  "live",
+                      "relative_name":  "sparse.bin",
+                      "native_id_hex":  "0000000000000000000100000000002c",
+                      "record":  44,
+                      "sequence":  1,
+                      "length":  32768,
+                      "sha256":  "a84110ba442965934478d1d9fc497b67e630f2c47d2d942e3bb37ba390a2b74e"
+                  },
+                  {
+                      "kind":  "live",
+                      "relative_name":  "renamed.txt",
+                      "native_id_hex":  "0000000000000000000100000000002d",
+                      "record":  45,
+                      "sequence":  1,
+                      "length":  21,
+                      "sha256":  "9eb443827a4a315dd20fb89c14fd9005c0b2572242535e8eb280fde691d58cbe"
+                  }
+              ],
+    "diskpart":  [
+                     {
+                         "commands":  [
+                                          "create vdisk file=\"C:\\Windows\\Temp\\partmgr-forensics-native-20261013\\ntfs-known-20261013-b\\fixture.vhd\" maximum=64 type=fixed",
+                                          "select vdisk file=\"C:\\Windows\\Temp\\partmgr-forensics-native-20261013\\ntfs-known-20261013-b\\fixture.vhd\"",
+                                          "attach vdisk"
+                                      ],
+                         "exit_code":  0,
+                         "output":  "\nMicrosoft DiskPart version 10.0.26100.1150\n\nCopyright (C) Microsoft Corporation.\nOn computer: DEPLOYV-3R51II0\n\n\n    0 percent completed\n    0 percent completed\n  100 percent completed\n\n\nDiskPart successfully created the virtual disk file.\n\nDiskPart successfully selected the virtual disk file.\n\n\n  100 percent completed\n\n\nDiskPart successfully attached the virtual disk file."
+                     },
+                     {
+                         "commands":  [
+                                          "select vdisk file=\"C:\\Windows\\Temp\\partmgr-forensics-native-20261013\\ntfs-known-20261013-b\\fixture.vhd\"",
+                                          "detach vdisk"
+                                      ],
+                         "exit_code":  0,
+                         "output":  "\nMicrosoft DiskPart version 10.0.26100.1150\n\nCopyright (C) Microsoft Corporation.\nOn computer: DEPLOYV-3R51II0\n\nDiskPart successfully selected the virtual disk file.\n\nDiskPart successfully detached the virtual disk file."
+                     }
+                 ],
+    "creation_passed":  true,
+    "library_qualification_passed":  false,
+    "consistency":  "private filesystem; all test handles closed and native volume dismounted before VHD detach; no live-media capture claim",
+    "stability":  "closed detached private fixed-VHD and copied raw artifacts; keep artifacts immutable during deferred analysis",
+    "disk_number":  1,
+    "logical_sector_size":  512,
+    "disk_bytes":  67108864,
+    "partition_offset":  65536,
+    "partition_bytes":  66977792,
+    "cluster_bytes":  4096,
+    "ads":  {
+                "base":  "live.bin",
+                "name":  "forensic-ads",
+                "length":  22,
+                "sha256":  "2dfb693a178b33c39f8a5e8e65e9778bd553c9d65810355aa6f4ee4387d48b7b"
+            },
+    "reuse":  {
+                  "victim":  {
+                                 "kind":  "deleted-before-record-reuse-search",
+                                 "relative_name":  "reuse-victim.bin",
+                                 "native_id_hex":  "0000000000000000000100000000002e",
+                                 "record":  46,
+                                 "sequence":  1,
+                                 "length":  8192,
+                                 "sha256":  "b7857819da8fc9358221176b245baac0c3290ccb7bb15ed79bf213e05077bfd7"
+                             },
+                  "matching_current_record":  {
+                                                  "kind":  "record-reuse-search",
+                                                  "relative_name":  "reuse\\r0000.bin",
+                                                  "native_id_hex":  "0000000000000000000200000000002e",
+                                                  "record":  46,
+                                                  "sequence":  2,
+                                                  "length":  512,
+                                                  "sha256":  "be4ac43ca5092ee517e5b6a26ffb35cd4619a21a44efff5e8ed514bc778fa287"
+                                              },
+                  "attempts_completed":  1,
+                  "record_reuse_observed":  true
+              },
+    "deleted_preserved":  {
+                              "kind":  "deleted-last-no-further-file-creation",
+                              "relative_name":  "deleted-preserved.bin",
+                              "native_id_hex":  "0000000000000000000100000000002f",
+                              "record":  47,
+                              "sequence":  1,
+                              "length":  8192,
+                              "sha256":  "abf41343a79ca1ae63b6abb969f51f51166eaf748135c942ff99a64033275d6a"
+                          },
+    "usn_query":  "Usn Journal ID   : 0x01dd5af6bb1a125e\nFirst Usn        : 0x0000000000000000\nNext Usn         : 0x0000000000000fa0\nLowest Valid Usn : 0x0000000000000000\nMax Usn          : 0x00000fffffff0000\nMaximum Size     : 0x0000000000100000 (  1.0 MB)\nAllocation Delta : 0x0000000000040000 (256.0 KB)\nMinimum record version supported : 2\nMaximum record version supported : 4\nWrite range tracking: Disabled",
+    "dirty_query":  "Volume - E: is NOT Dirty",
+    "closed_utc":  "2026-10-13T09:39:30.6941178Z",
+    "artifacts":  [
+                      {
+                          "name":  "fixture.vhd",
+                          "host_name":  "ntfs-known-20261013-b-fixture.vhd",
+                          "length":  67109376,
+                          "sha256":  "50d2c048d55bc0e3d1de7f5cbb180b9a95ff5a81d145764ddd4aaea1047be44d",
+                          "hash_domain":  "original_fixed_vhd_container_bytes"
+                      },
+                      {
+                          "name":  "disk.dd",
+                          "host_name":  "ntfs-known-20261013-b-disk.dd",
+                          "length":  67108864,
+                          "sha256":  "845556344fc193af3bade6dcee06b64690b4fd584ed25989dd5154a94717f37f",
+                          "hash_domain":  "logical_disk_bytes"
+                      },
+                      {
+                          "name":  "volume.dd",
+                          "host_name":  "ntfs-known-20261013-b-volume.dd",
+                          "length":  66977792,
+                          "sha256":  "bc5e170fc8dd134c9e7f15a3f46f52543b8b37847ade685cdd38a85f878ed852",
+                          "hash_domain":  "selected_ntfs_volume_bytes"
+                      },
+                      {
+                          "name":  "usn-native.csv",
+                          "host_name":  "ntfs-known-20261013-b-usn-native.csv",
+                          "length":  9566,
+                          "sha256":  "f120bb0e1790533c6ef1df00af258ffe49f80efbd0f23f14de1cd67e24a06717",
+                          "hash_domain":  "native_fsutil_oracle_export_bytes"
+                      }
+                  ],
+    "finished_utc":  "2026-10-13T09:39:38.6306222Z"
+}

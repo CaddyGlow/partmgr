@@ -30,15 +30,26 @@ mod journal;
 // Native transaction codec is staged independently before owned-session wiring.
 #[path = "fs_ext_integrity.rs"]
 mod integrity;
-#[cfg(all(test, feature = "std"))]
+#[cfg(feature = "std")]
 #[path = "fs_ext_jbd.rs"]
 mod jbd;
+#[cfg(feature = "std")]
+pub use jbd::{
+    ExtJournalFile, ExtJournalLimits, ExtJournalProfile, ExtJournalSession, ExtJournalState,
+};
 #[path = "fs_ext_metadata.rs"]
 mod metadata;
 #[path = "fs_ext_modern.rs"]
 mod modern;
 #[path = "fs_ext_resize.rs"]
 mod resize;
+// Read-only codec staged independently of audited mutation admission.
+#[allow(dead_code)]
+#[path = "fs_ext_acl.rs"]
+mod acl;
+#[allow(dead_code)]
+#[path = "fs_ext_acl_semantics.rs"]
+mod acl_semantics;
 #[path = "fs_ext_xattr.rs"]
 mod xattr;
 use crate::io::{DiskView, ReadAt};
@@ -198,6 +209,7 @@ pub struct ExtGeometry {
     pub(crate) sparse_super: bool,
     pub(crate) extent_profile: bool,
     pub(crate) has_journal: bool,
+    pub(crate) external_xattrs: bool,
     pub(crate) journal_inode: u32,
     pub(crate) uuid: [u8; 16],
     pub(crate) modern: Option<Arc<modern::ModernProof>>,
@@ -208,7 +220,7 @@ impl ExtGeometry {
         if self.modern.is_some() {
             return false;
         }
-        self.inode_size == 128 && !self.extent_profile && !self.has_journal
+        self.inode_size == 128 && !self.extent_profile && !self.has_journal && !self.external_xattrs
     }
     /// Filesystem block byte size.
     pub fn block_size(&self) -> u32 {
@@ -409,12 +421,12 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
             }
             return Self::open_modern(source, source_id, resources);
         }
-        if compat & !4 != 0 || incompat & !(2 | 0x40) != 0 || ro & !(3 | 0x40) != 0 {
+        if compat & !(4 | 8) != 0 || incompat & !(2 | 0x40) != 0 || ro & !(3 | 0x40) != 0 {
             return Err(unsupported(
                 "ext feature profile: journal, xattrs, checksums, 64-bit groups or unknown feature",
             ));
         }
-        if !immutable_profile && (compat & 4 != 0 || incompat & 0x40 != 0 || ro & 0x40 != 0) {
+        if !immutable_profile && (compat & (4 | 8) != 0 || incompat & 0x40 != 0 || ro & 0x40 != 0) {
             return Err(unsupported("owned ext2 decoder requires classic profile"));
         }
         let journal_inode = u32le(&sb, 224);
@@ -502,6 +514,7 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
                 sparse_super: ro & 1 != 0,
                 extent_profile: incompat & 0x40 != 0,
                 has_journal: compat & 4 != 0,
+                external_xattrs: compat & 8 != 0,
                 journal_inode,
                 uuid: sb[104..120].try_into().unwrap(),
                 modern: None,
@@ -643,6 +656,21 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
         }
         Ok(())
     }
+    /// Structural external-container facade for the sibling complete audit.
+    /// The returned count is native evidence, not an ownership/refcount proof.
+    pub(crate) fn external_xattr_reference_count(
+        &self,
+        bytes: &[u8],
+        resources: &Resources,
+    ) -> io::Result<u32> {
+        if !self.geometry.external_xattrs {
+            return Err(unsupported("ext xattr block without feature"));
+        }
+        if bytes.len() != self.geometry.block_size as usize {
+            return Err(invalid("ext xattr container geometry mismatch"));
+        }
+        Ok(xattr::validate(bytes, 0, true, resources)?.reference_count)
+    }
     /// Inspect an allocated inode, rejecting unsupported per-inode states.
     pub fn inode(&self, number: u32, resources: &Resources) -> io::Result<ExtInode> {
         resources.cancellation.check().map_err(io::Error::other)?;
@@ -661,8 +689,24 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
         if let Some(proof) = &g.modern {
             return self.modern_inode(number, bytes, proof, resources);
         }
-        let mut inode =
-            ExtInode::decode_profile(number, bytes[..128].try_into().unwrap(), g.extent_profile)?;
+        let external = u32le(&bytes, 104);
+        let mut raw: [u8; 128] = bytes[..128].try_into().unwrap();
+        if external != 0 {
+            if !g.external_xattrs {
+                return Err(unsupported("ext xattr block without feature"));
+            }
+            self.block(external)?;
+            let mut block = [0; 4096];
+            let bs = g.block_size as usize;
+            self.read_exact_at(
+                u64::from(external) * u64::from(g.block_size),
+                &mut block[..bs],
+            )?;
+            xattr::validate(&block[..bs], 0, true, resources)?;
+            raw[104..108].fill(0);
+        }
+        let mut inode = ExtInode::decode_profile(number, raw, g.extent_profile)?;
+        inode.raw = bytes[..128].try_into().unwrap();
         if g.inode_size == 256 {
             inode.extra.copy_from_slice(&bytes[128..]);
             inode.extra_size = ExtInode::validate_extra(&inode.extra)?;
@@ -676,7 +720,7 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
         fs_core::Error::classified_io("ext symlink access", error)
     }
     /// Read an unfollowed native symlink target under shared memory and block ceilings.
-    /// Fast symlinks use i_block only when i_blocks is zero; external xattrs remain gated.
+    /// Fast symlinks use i_block when i_blocks contains only any external xattr block.
     pub fn symlink_target(
         &self,
         number: u32,
@@ -703,12 +747,18 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
                 fs_core::Error::new(fs_core::ErrorKind::BudgetExhausted, e.to_string())
             })?;
             target.resize(length, 0);
-            let xattr_sectors = if self.geometry.modern.is_some() && u32le(&inode.raw, 104) != 0 {
+            let xattr_sectors = if self.geometry.external_xattrs && u32le(&inode.raw, 104) != 0 {
                 self.geometry.block_size / 512
             } else {
                 0
             };
             if u32le(&inode.raw, 28) == xattr_sectors {
+                if u32le(&inode.raw, 32) & 0x80000 != 0 {
+                    return Err(fs_core::Error::new(
+                        fs_core::ErrorKind::InvalidData,
+                        "ext fast symlink cannot carry extent flag",
+                    ));
+                }
                 if length >= 60 {
                     return Err(fs_core::Error::new(
                         fs_core::ErrorKind::InvalidData,
@@ -785,8 +835,8 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
         symlink: bool,
     ) -> io::Result<ExtDecodedFileMap> {
         let inode = self.inode(number, resources)?;
-        if !matches!(inode.mode & 0xf000, 0x8000 | 0x4000)
-            && !(symlink && inode.mode & 0xf000 == 0xa000)
+        if !(matches!(inode.mode & 0xf000, 0x8000 | 0x4000)
+            || symlink && inode.mode & 0xf000 == 0xa000)
         {
             return Err(unsupported("ext stream kind (including symlink)"));
         }
@@ -894,7 +944,7 @@ impl<R: ExtDecodeRead> ExtDecoder<R> {
         }
         indirect.sort_unstable();
         indirect.dedup();
-        if self.geometry.modern.is_some() {
+        if self.geometry.external_xattrs {
             let xattr = u32le(&inode.raw, 104);
             if xattr != 0 && (data.contains(&xattr) || indirect.binary_search(&xattr).is_ok()) {
                 return Err(invalid("ext inode map aliases its external xattrs"));
@@ -1401,3 +1451,47 @@ impl FileRead for ExtFile {
         Ok(())
     }
 }
+
+#[allow(dead_code)]
+#[path = "fs_ext_xattr_write.rs"]
+mod xattr_write;
+
+#[cfg(feature = "std")]
+#[allow(dead_code)]
+#[path = "fs_ext_xattr_plan.rs"]
+mod xattr_plan;
+
+#[cfg(feature = "std")]
+#[allow(dead_code)]
+#[path = "fs_ext_xattr_recovery.rs"]
+mod xattr_recovery;
+
+#[cfg(feature = "std")]
+#[allow(dead_code)]
+#[path = "fs_ext_xattr_session.rs"]
+mod xattr_session;
+
+#[cfg(feature = "std")]
+#[allow(dead_code)] // Private typed ACL authority; native qualification remains separate.
+#[path = "fs_ext_acl_container.rs"]
+mod acl_container;
+
+#[cfg(feature = "std")]
+#[allow(dead_code)] // Private typed ACL authority; native qualification remains separate.
+#[path = "fs_ext_acl_write.rs"]
+mod acl_write;
+
+#[cfg(feature = "std")]
+#[allow(dead_code)] // Private typed ACL authority; native qualification remains separate.
+#[path = "fs_ext_acl_plan.rs"]
+mod acl_plan;
+
+#[cfg(feature = "std")]
+#[allow(dead_code)] // Private typed ACL authority; native qualification remains separate.
+#[path = "fs_ext_acl_recovery.rs"]
+mod acl_recovery;
+
+#[cfg(feature = "std")]
+#[allow(dead_code)]
+#[path = "fs_ext_acl_session.rs"]
+mod acl_session;

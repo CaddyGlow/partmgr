@@ -425,6 +425,52 @@ pub(crate) struct ProtectorEntry<'a> {
     properties: &'a [u8],
 }
 impl<'a> ProtectorEntry<'a> {
+    #[cfg(feature = "bitlocker-tpm")]
+    pub(crate) fn tpm2(&self) -> Result<crate::bitlocker_tpm::Tpm2Protector<'a>> {
+        if self.protection_type != 0x0100 {
+            return Err(unsupported("TPM-only protector required"));
+        }
+        let mut data = self.properties;
+        let mut sealed = None;
+        let mut auxiliary = false;
+        while !data.is_empty() {
+            if data.iter().all(|byte| *byte == 0) {
+                break;
+            }
+            if data.len() < 8 {
+                return Err(invalid("TPM protector property header"));
+            }
+            let size = usize::from(u16le(data, 0));
+            let datum = data
+                .get(..size)
+                .filter(|_| size >= 8)
+                .ok_or_else(|| invalid("TPM protector property bounds"))?;
+            if u16le(datum, 2) != 0 {
+                return Err(unsupported("TPM protector property kind"));
+            }
+            match u16le(datum, 4) {
+                6 if sealed.is_none() => sealed = Some(datum),
+                // The native Windows 26200 auxiliary envelope is retained in
+                // metadata, never executed as an alternative authorization.
+                // The sealed public area's entire policy is checked separately.
+                30 if !auxiliary
+                    && size == 128
+                    && u16le(datum, 6) == 5
+                    && u16le(datum, 8) == 1
+                    && datum[96..].iter().all(|byte| *byte == 0) =>
+                {
+                    auxiliary = true;
+                }
+                _ => return Err(unsupported("unqualified TPM protector property")),
+            }
+            data = &data[size..];
+        }
+        crate::bitlocker_tpm::Tpm2Protector::parse(
+            self.protection_type,
+            sealed.ok_or_else(|| unsupported("TPM sealed property absent"))?,
+        )
+    }
+
     pub(crate) fn salt(&self) -> Result<[u8; 16]> {
         let stretch = unique(Entries(self.properties), 0, 3)?;
         if u32le(stretch.body, 0) != 0x1000 {

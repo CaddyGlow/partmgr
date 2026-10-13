@@ -52,6 +52,17 @@ fn fixture() -> Vec<u8> {
     clean_fixture::fixture()
 }
 
+// Valid block-backed short targets remain unqualified even though canonical
+// fast and one-direct long symlinks are now admitted.
+fn unqualified_symlink(bytes: &mut [u8]) {
+    w(bytes, FILE, 0xa1ff);
+    d(bytes, FILE + 4, 1);
+    bytes[8 * 1024..9 * 1024].fill(0);
+    bytes[8 * 1024] = b'x';
+    bytes[7 * 1024 + 24 + 7] = 7;
+    bytes[7 * 1024 + 40 + 7] = 7;
+}
+
 fn volume(b: Vec<u8>, r: &Resources) -> ExtVolume {
     ExtVolume::open(Arc::new(Image(b)), r).unwrap()
 }
@@ -212,7 +223,7 @@ fn budgets_cancel_and_unsupported_abort_without_clean_report() {
     );
     let r = resources();
     let mut b = fixture();
-    w(&mut b, FILE, 0xa1ff);
+    unqualified_symlink(&mut b);
     assert_eq!(
         audit(&volume(b, &r), limits(), &r).err().unwrap().kind,
         ErrorKind::Unsupported
@@ -669,4 +680,102 @@ fn all_counter_classes_reserved_allocations_and_fragment_gates() {
         ErrorKind::BudgetExhausted
     );
     assert_eq!(r.memory.used(), 0);
+}
+
+#[test]
+fn detailed_audit_retains_findings_and_budget_on_late_failure() {
+    use partmgr::fs_ext_audit::audit_detailed;
+    let r = resources();
+    let mut bytes = fixture();
+    // Establish a descriptor discrepancy before visiting the unsupported file.
+    w(&mut bytes, 2060, 54);
+    unqualified_symlink(&mut bytes);
+    let v = volume(bytes, &r);
+    let failure = audit_detailed(&v, limits(), &r).err().unwrap();
+    assert_eq!(failure.error.kind, ErrorKind::Unsupported);
+    let partial = failure.partial.unwrap();
+    assert!(partial.findings().contains(&Finding::GroupFreeCount {
+        group: 0,
+        inodes: false,
+        recorded: 54,
+        actual: 55,
+    }));
+    assert!(!partial.complete());
+    assert!(!partial.namespace_complete());
+    assert!(!partial.is_clean());
+    assert!(partial.free_ranges().is_empty());
+    assert!(r.memory.used() > 0);
+    drop(partial);
+    assert_eq!(r.memory.used(), 0);
+}
+
+#[test]
+fn detailed_audit_retains_prior_findings_when_findings_budget_is_exhausted() {
+    use partmgr::fs_ext_audit::audit_detailed;
+    let r = resources();
+    let mut bytes = fixture();
+    w(&mut bytes, 2060, 54);
+    w(&mut bytes, 2062, 4);
+    let mut cap = limits();
+    cap.findings = 1;
+    let failure = audit_detailed(&volume(bytes, &r), cap, &r).err().unwrap();
+    assert_eq!(failure.error.kind, ErrorKind::BudgetExhausted);
+    let partial = failure.partial.unwrap();
+    assert_eq!(partial.findings().len(), 1);
+    assert!(!partial.is_clean());
+    assert!(partial.free_ranges().is_empty());
+    drop(partial);
+    assert_eq!(r.memory.used(), 0);
+}
+
+#[test]
+fn detailed_audit_retains_findings_before_io_or_cancellation() {
+    use partmgr::fs_ext_audit::audit_detailed;
+    struct Controlled {
+        image: Image,
+        cancellation: Option<Cancellation>,
+    }
+    impl ReadAt for Controlled {
+        fn len(&self) -> u64 {
+            self.image.len()
+        }
+        fn read_exact_at(&self, offset: u64, output: &mut [u8]) -> io::Result<()> {
+            if offset == FILE as u64 {
+                if let Some(cancellation) = &self.cancellation {
+                    cancellation.cancel();
+                } else {
+                    return Err(io::Error::other("late ext audit read failure"));
+                }
+            }
+            self.image.read_exact_at(offset, output)
+        }
+    }
+    for cancelled in [false, true] {
+        let r = resources();
+        let mut bytes = fixture();
+        w(&mut bytes, 2060, 54);
+        let v = ExtVolume::open(
+            Arc::new(Controlled {
+                image: Image(bytes),
+                cancellation: cancelled.then(|| r.cancellation.clone()),
+            }),
+            &r,
+        )
+        .unwrap();
+        let failure = audit_detailed(&v, limits(), &r).err().unwrap();
+        assert_eq!(
+            failure.error.kind,
+            if cancelled {
+                ErrorKind::Cancelled
+            } else {
+                ErrorKind::Io
+            }
+        );
+        let partial = failure.partial.unwrap();
+        assert!(!partial.findings().is_empty());
+        assert!(!partial.complete());
+        assert!(partial.free_ranges().is_empty());
+        drop(partial);
+        assert_eq!(r.memory.used(), 0);
+    }
 }

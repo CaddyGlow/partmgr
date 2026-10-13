@@ -86,3 +86,77 @@ It records the exact input ciphertext hash, unlocks, checks the native file hash
 runs `chkdsk /scan`, locks/dismounts, and cleanly detaches before publishing a
 success manifest. Windows may update filesystem housekeeping during this check;
 the input hash identifies the host-produced artifact before that native activity.
+
+## Experimental TPM/swtpm provider gates
+
+The opt-in Rust `bitlocker-tpm` feature exposes strict native TPM-only decoding,
+a raw TPM2 command transport, authenticated policy sessions and an isolated
+persistent-state importer. The command endpoint and emulator control endpoint
+are distinct. A caller must explicitly own/co-ordinate the command connection;
+never connect this provider to QEMU's active TPM. `ImportedSwtpm` requires a
+stopped source state directory and a fresh private destination; it copies only
+`tpm2-00.permall`. `Startup::Clear` cold-starts the copy, while `Startup::Caller`
+leaves TPM startup to the lifecycle caller. Neither reconstructs measured boot.
+Drop/shutdown affects only the owned child and retains its disposable artifacts.
+
+Install/provide `swtpm` and `tpm2-tools` independently of the Rust portable build.
+The executed laboratory used swtpm 0.11.0 and tpm2-tools 5.7. Native library
+requirements come from those executables; the Rust transport itself does not
+link libtss2 or libtpms. Use short absolute output paths for UNIX socket limits.
+
+Create a real synthetic PolicyAuthValue→PolicyPCR fixture and exercise matching
+copied state, changed-PCR rejection and wrong-TPM rejection:
+
+```sh
+python3 integration/bitlocker/swtpm-gate.py \
+  --swtpm /path/to/swtpm --tools /path/to/tpm2-tools/bin \
+  --output /data/cache/new-tpm-fixture
+PARTMGR_SWTPM=/path/to/swtpm \
+PARTMGR_BITLOCKER_TPM_FIXTURE=/data/cache/new-tpm-fixture \
+  cargo test --features bitlocker-tpm --locked --test bitlocker_tpm_native \
+  imported_swtpm_policy_auth_value_unseals_and_preserves_source -- --ignored
+```
+
+Output contains sensitive TPM state and synthetic secrets under a private
+0700 directory. `secret.bin` is a 44-byte native-shaped VMK record. The fixture
+uses persistent parent 0x81000001 and explicit SHA256 PCR7+11; these are fixture
+parameters, not universal BitLocker policy assumptions.
+
+The Windows laboratory additionally captured a real native TPM-only protector
+and the Windows measured-boot log. The provider's native gate authenticates the
+wrapped FVEK independently of filesystem mapping, so the OS fixture's unsupported
+used-space mapping never becomes an unlocked reader.
+
+`extract-tpm.py` exports bounded native TPM2B public/private blobs and policy
+inputs from the selected captured Windows metadata. The required replay fixture
+files are `native-sealed.pub`, `native-sealed.priv`, and `native-pcr.digest`;
+the root Rust native gate also consumes captured `encrypted-boot.bin` and
+`metadata-*.bin` files. The persistent parent must be established independently
+(e.g. read capabilities and verify Load on an isolated copy); metadata does not
+supply a guessed parent handle.
+
+For explicitly authorized **laboratory replay**, the harness below parses a
+Windows log with `tpm2_eventlog`, finds the event prefix matching the protector's
+PCR digest, cold-starts a private copied TPM state and extends only that copy.
+It never accepts a live endpoint, touches original state, clears a TPM, or claims
+that replay is genuine measured execution. The root positive gate then unseals
+through the Rust provider and authenticates the native FVEK:
+
+```sh
+PARTMGR_BITLOCKER_TPM_EVIDENCE=/path/to/native-metadata \
+PARTMGR_BITLOCKER_LENGTH=67445456896 \
+python3 integration/bitlocker/swtpm-replay.py \
+  --swtpm /path/to/swtpm --tools /path/to/tpm2-tools/bin \
+  --source-state /path/to/stopped-tpm-directory \
+  --event-log /path/to/Windows/MeasuredBoot/0000000003-0000000000.log \
+  --fixture /path/to/native-metadata --parent-handle 0x81000001 \
+  --pcrs 7,11 --output /data/cache/new-native-replay -- \
+  cargo test --features bitlocker-tpm --locked --test bitlocker_tpm_native \
+  windows_native_tpm_authenticates_wrapped_fvek -- --ignored
+```
+
+The harness supplies the owned command socket and explicit parent to the engine
+command, records input hashes and replay prefix, verifies original persistent
+state is unchanged, and stops its child. Live VM handoff, volatile snapshot
+restoration, TPM+PIN and portable reading of this OS conversion profile remain
+separate unqualified gates. OVMF variables are boot inputs, never credentials.

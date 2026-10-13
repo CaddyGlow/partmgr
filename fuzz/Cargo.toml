@@ -2,14 +2,14 @@
 name = "partmgr-fuzz"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.96"
 publish = false
 
 [workspace]
 
 [dependencies]
 honggfuzz = "=0.5.62"
-partmgr = { path = "..", features = ["bitlocker"] }
+partmgr = { path = "..", features = ["bitlocker", "forensics"] }
 sha2 = "0.10.9"
 
 [lints.rust]

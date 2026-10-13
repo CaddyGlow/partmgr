@@ -229,13 +229,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ms-compress"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "319b99243f88f9fd7cc338135241d91b711be88fb2ce2a4a3ee0fb09ae283d05"
+
+[[package]]
 name = "partmgr"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aes",
  "ccm",
  "hashbrown",
  "miniz_oxide",
+ "ms-compress",
  "sha2",
  "spin",
  "virtdisk",
@@ -332,9 +339,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "virtdisk"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55fe74a88b18dd7372e3e65e4e99c76639c37983af239b0bc1a8831b02468a9f"
+checksum = "41e519d12a9b7f4f4d0700008533f8f4041280251b324dffd1c90f041e424aa2"
 dependencies = [
  "getrandom",
  "miniz_oxide",

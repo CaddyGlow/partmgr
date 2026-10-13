@@ -1,10 +1,40 @@
 # Filesystem support and dependency status
 
-This matrix records the development implementation inventory (2026-10-08).
+This matrix records the development implementation inventory (updated 2026-10-12).
 A planned profile is not operational support.
 Update an operation only when its code and independent evidence meet
 `FILESYSTEM_PLAN.md`; attach the evidence record. The specification/profile
 inventory is in [filesystem-specifications.md](filesystem-specifications.md).
+
+The additive `fs_maintenance` contracts separate check, repair, format, grow and
+shrink from existing build/recover/resize capabilities. `fs_maintenance_audit`
+bridges existing ext/NTFS audits with explicit incomplete maintenance coverage;
+it adds no writer or repair authority. See the
+[maintenance implementation inventory](filesystem-maintenance-status.md) for
+current exclusions and qualification work. No operation in the matrix below is
+promoted by these contracts.
+
+The separate public `std` [classic-ext3 ordered session](filesystem-ext-journal-edit.md)
+now declares manifest seven, integrating exact unfollowed symlink creation,
+target replacement, reading, rename and unlink alongside append/create/truncate,
+within-EOF range overwrite, sparse extension, hardlink and namespace operations.
+The symlink changes pass all five source-bound host checks
+([365-source receipt](/data/cache/partmgr-maintenance-ext-symlink-checks-20261011-v5/result.json)); source-bound native interruption/recovery, adversarial controls and final rehash pass for the archived manifest-seven snapshot.
+Manifest-six sparse extension has scoped host/native and adversarial qualification
+bound to its archived revision. Earlier operations retain their scoped receipts.
+This profile does not admit modern ext4 mutation or general journaled-volume editing.
+
+The std-only [fresh classic ext2 formatting adapter](filesystem-ext-format.md)
+now owns new working files, verifies complete output and audits it before
+artifact extraction. Its empty-root profile has scoped e2fsprogs and host fault
+evidence. Mounted native round trips, publication durability, existing-volume
+formatting and ext3/ext4 formatting remain separate gates; the family-wide
+maintenance matrix is unchanged.
+
+[Classic ext2 growth within the final group](filesystem-ext-grow.md) now has
+scoped offline e2fsprogs and host recovery evidence. The owned backend must
+already cover the requested geometry. New groups, ext3/ext4 growth, mounted use,
+native crash recovery and native allocation after growth remain separate gates.
 
 The current tree now includes `fs_core` lossless names, metadata/capability/source
 contracts and shared cancellation/budgets; `fs_storage` owned bounded sessions,
@@ -49,7 +79,8 @@ Numeric performance release thresholds remain unverified.
 | Clean single-FAT exFAT revision 1.00 | Both boot checksums, bitmap/upcase validation and bounded namespace; full bounded ownership/state audit | Exact UTF-16 names, indexed chains/contiguous files, valid-data zero tails and tree source | Deterministic nested UTF16 direct builder; explicit content-only common-tree staged copies | Owned replacement, VDL initialization, zero extension, FAT conversion, truncation and empty files with external undo and dirty-state fencing; creation, directory growth, rename/move and file/empty-directory deletion implemented; ClearToZero-set writes excluded, TexFAT separate | Native exfatprogs/TSK initialized payload checks and native FAT destination validation; native zero-tail oracle gap documented |
 | NTFS 3.1 clean-marker, sector 512 | Boot/MFT/USA/base attributes checked; complete bounded base-record allocation/reference audit; journal validation absent | Indexed resident/nonresident unnamed DATA, sparse/unwritten zeros, exact UTF-16 FILE names/sequence identities; native $I30 index traversal and explicit policy-scoped tree source | Planned staged profiles | Planned journal/system-file work | Independent mkntfs/ntfscp + TSK directory/payload checks, direct ISO/UDF capture +7z; malformed index fixtures and fuzz; broader native/performance gates remain |
 | Clean classic ext2, 1/2/4 KiB blocks, 128-byte inodes | Explicit feature allowlist; checked groups/maps; full allocation/reference audit | Indexed indirect/sparse reads; byte names, UID/GID, mode/flags, opaque timestamps, hard-link identities and exact unfollowed symlink targets; tree source | Deterministic classic ext2 direct builder and common-tree content-only capture, explicit caller metadata defaults and preserved hardlinked objects | Owned range replacement, sparse allocation, extension/truncation, create, rename/move and unlink/delete with staged external undo and restartable recovery | Source-bound 5001-case e2fsck/debugfs owned-edit gate; eight e2fsck/debugfs builder images; handcrafted/native e2fsprogs audit and reader fixtures; native optical content-only capture; bounded raw-read benchmark; advanced features remain gated |
-| Bounded ext3/JBD2 and extent-enabled ext4, 128/256-byte inodes | Explicit feature gates; clean inactive journal validation and complete allocation/reference audit | Checked indexed extent trees, data/hole/unwritten maps, native byte names and audited common tree; explicit facade/CLI opt-in | Classic ext2 destination only | Existing editor rejects these source features; native journal mutation planned | Source-bound extended-inode/timestamp and inactive-journal checksum native profiles; positive extent fuzz and instrumented campaign; independent CLI destination payload/hardlinks; the separate modern default-format profile below has frozen immutable acceptance; writable modern operations remain under development |
+| Classic ext3 ordered journal, manifest seven, 1/2/4 KiB blocks, 128-byte inodes | Explicit fixed feature allowlist and complete owned admission audit | Owner/generation-bound regular-file handles and reads; Exact unfollowed symlink reads implemented and host-tested; source-bound native lifecycle, adversarial controls and final rehash pass | No ext3 formatter | Public std `ExtJournalSession`: append/create/truncate, within-EOF COW `write_at`, `extend_sparse`, hardlink, mkdir, rename/move, unlink/rmdir and explicit owned recovery; Symlink create/target replacement/unlink implemented and host-tested; source-bound native lifecycle, adversarial controls and final rehash pass | Scoped source-bound native append/create, namespace/growth, truncate and hardlink receipts; archived range-overwrite and sparse-extension host/native/adversarial gates pass for their exact prior revisions; all five manifest-seven host checks and source-bound native/adversarial qualification with final rehash pass; modern profiles and metadata/ACL editing remain open |
+| Bounded ext3/JBD2 and extent-enabled ext4, 128/256-byte inodes | Explicit feature gates; clean inactive journal validation and complete allocation/reference audit | Checked indexed extent trees, data/hole/unwritten maps, native byte names and audited common tree; explicit facade/CLI opt-in | Classic ext2 destination only | Classic external-undo editor rejects these source features; broader modern native mutation remains private | Source-bound extended-inode/timestamp and inactive-journal checksum native profiles; positive extent fuzz and instrumented campaign; independent CLI destination payload/hardlinks; the separate modern default-format profile below has frozen immutable acceptance; writable modern operations remain under development |
 | Bounded modern ext4 metadata-checksummed profile | Checked low32-bit addresses,64-byte group descriptors,256-byte inodes, checksummed metadata/bitmaps, flex/uninitialized groups, indexed directories, resize/orphan references and inactive internal journal | Immutable public reader, complete audit, exact native byte names, hardlinks, inline/external xattrs and retained file maps; Ext facade required | Classic ext2 capture with explicit metadata defaults | Native journal editor/replay under development; classic editor rejects this profile | Root-audited six1/2/4KiB checksum-seed native cases; separate frozen603-payload/name capture and compact-map retention regression; larger addresses, unsupported feature combinations, writable journal and release-wide evidence remain open |
 | XFS v5 leaf/inline/shortform, formatter-fresh log | Checked geometry, CRCs, single-leaf AG trees and complete bounded allocation/reference audit | Native byte names, hardlinks, indexed sparse/unwritten files and deferred tree source | Planned | Planned log/reference work | Six portable tests and independent xfsprogs 6.19.0 read/audit/payload/framing gate; broader trees, directories and ordinary mounted logs unsupported |
 | Bare clean classic HFS, alphanumeric native comparison | Checked MDB, indexed catalog/overflow trees and complete bounded allocation/reference audit | Exact byte names, indexed data/resource forks and audited common tree | Planned | Planned external recovery | Five ordinary tests, facade and instrumented reader fuzz; native hfsutils catalog/free-count/two-fork oracle with compiled source/tool binding; broader collation, wrappers/self-overflow and macOS validation open; TSK rejects classic HFS |
@@ -65,6 +96,16 @@ No family row grants all historical/vendor variants. Dirty/recovery-required,
 encrypted, unsupported incompatible features, uninspected metadata, auxiliary
 devices and resizing each need explicit outcomes. Recognition, local validation,
 global ownership audit, payload decode and durable commit are separate evidence.
+
+Classic EXT_ATTR readers now validate external containers and complete shared
+reference counts; the modern readonly audit handles checksum-validated fast and
+single-block extent symlinks with EA-inclusive sector accounting. Public tree
+metadata preserves opaque inline/external xattr bytes. All 24 native cases across
+six 1/2/4 KiB classic/modern profiles pass in the
+[source-bound consumer run](/data/cache/partmgr-ext-acl-xattr-public-consumer-20261012-v3/result.json),
+matching the integrated 378-source host snapshot. Ordinary owned and classic
+journal writer admission still reject EXT_ATTR; typed ACL edits, inheritance and
+xattr lifetime recovery remain under implementation.
 
 ## Initial API/dependency review
 

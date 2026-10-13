@@ -84,6 +84,7 @@ fn native_jbd2_codec_e2fsck_replay_and_payload() {
         "src/fs_ext_jbd_overlay.rs",
         "src/fs_ext_jbd_bootstrap.rs",
         "src/fs_ext_jbd_recovery.rs",
+        "src/fs_ext_jbd_foreign.rs",
         "src/fs_ext_jbd_transaction.rs",
         "src/fs_ext_jbd_session.rs",
         "src/fs_ext_jbd_modern_plan.rs",

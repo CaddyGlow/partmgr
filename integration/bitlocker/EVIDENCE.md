@@ -108,3 +108,79 @@ edits; both Python helpers passed bytecode compilation.
 Cleanup: Windows accepted orderly shutdown, the dedicated VM launcher exited
 with status 0, and its QMP socket disappeared. Disposable disk/OVMF/TPM artifacts
 and all qualification fixtures were retained; no unrelated instance was stopped.
+
+## Experimental TPM/swtpm qualification (2026-10-09)
+
+Tools: swtpm executable reports 0.11.0 (Nix package
+`swtpm-0.10.1-unstable-2026-05-21`), tpm2-tools 5.7. The optional Rust importer and
+command provider do not link those tools' native libraries into the portable
+BitLocker build.
+
+The executed `swtpm-gate.py` fixture is
+`/data/cache/partmgr-tpm-synthetic-4`. It creates a real SHA256 keyed-hash sealed
+44-byte native-shaped key record with attributes 0x412 and
+PolicyAuthValue→PolicyPCR, PCR7+11, parent 0x81000001. Native tools unsealed using
+an imported matching state copy, rejected a changed PCR7, and rejected the blob
+under an unrelated TPM's parent. Original persistent state stayed unchanged.
+Synthetic policy fixtures do not qualify a Windows-created protector by
+identity alone.
+
+The real Windows protector was independently loaded under the original stopped
+VM state's copied persistent parent 0x81000001. Other native persistent parents
+0x81000002/0x81010001 were unsuitable. Cold-start SHA256 PCR7/PCR11 were zero;
+a valid PolicyAuthValue→PolicyPCR session on those values failed native Unseal
+with TPM return 0x99d (policy check failed). A distinct TPM at the same persistent
+parent handle rejected the Windows blob with TPM 0x1df (integrity check failed).
+Evidence: `/data/cache/partmgr-tpm-native-3` and `partmgr-tpm-native-wrong`.
+
+For measured-boot inputs, a separate VM used a new overlay with the original
+stopped disk as read-only backing, and private copied firmware/TPM state. It
+booted Windows, exported `C:\Windows\Logs\MeasuredBoot` logs, then shut down
+orderly with launcher status 0. Original OVMF and TPM hashes were verified
+unchanged; `/data/cache/partmgr-tpm-replay/shutdown.json` records cleanup.
+
+The captured boot3 log SHA-256 is
+`d534a0e445d8fcbd67ebfad4d8ae623d06e137dbd5e0f6c76f0ea5dc2aa72a10`.
+`tpm2_eventlog` decoded it. Seven SHA256 PCR7 extensions through event 28,
+with PCR11 still zero, reproduce the exact native protector's combined PCR digest.
+Later log events extend PCR11 beyond that authorization point. This explains why
+cold-start state alone and the ordinary post-boot state are insufficient.
+
+Explicit replay into an isolated imported copy of original permanent state
+SHA-256 `e94b926671184233e6b8524b6288d65c81073199b3e5060ff045654c48a80450`
+allowed native tools to unseal the Windows-created 44-byte VMK record. Its observed
+header is `2c0000000100000003200000`; the independently published artifact uses
+five in the second 16-bit word, so the strict decoder accepts those two observed
+values while retaining all other checks. The returned key is never included in
+ordinary logs or reports.
+
+The committed `swtpm-replay.py` reproduced this native-tool success and clean
+shutdown at `/data/cache/partmgr-tpm-native-script`; it verified the original
+persistent-state hash remained unchanged. Its manifest explicitly labels
+laboratory replay, `firmwareBoot=false` and `liveVmHandoff=false`. This proves
+matching state and reconstructed policy can release the native sealed object;
+it is not a live boot-time handoff, volatile snapshot restoration or proof that
+arbitrary Windows policies are supported.
+
+The Rust `windows_native_tpm_authenticates_wrapped_fvek` gate passed against that
+isolated replayed endpoint: native datum parsing, TPM policy/HMAC session,
+authenticated unseal response, VMK decoding and authentication of the native
+wrapped FVEK all succeeded. It reported authenticated TPM key evidence and still
+refused an unlocked reader for the unsupported OS mapping profile. Thus this gate
+qualifies the observed native TPM-only key chain without widening volume-mapping
+support or claiming firmware handoff.
+
+The complete repository replay harness plus Rust gate was then rerun as one
+command at `/data/cache/partmgr-tpm-native-6`. Its manifest records both
+`nativeToolUnseal=true` and `externalEngineCommandPassed=true`, with source state
+unchanged and the owned emulator shut down. The preserved source-state SHA-256 is
+`e94b926671184233e6b8524b6288d65c81073199b3e5060ff045654c48a80450`; measured-log
+SHA-256 is `d534a0e445d8fcbd67ebfad4d8ae623d06e137dbd5e0f6c76f0ea5dc2aa72a10`.
+
+Final host validation: formatting and all-target/all-feature Clippy with warnings
+denied passed; the full locked all-feature suite passed 761 tests with 88 ignored.
+The synthetic full-chain and native cold-PCR/positive-replay gates were invoked
+separately. Portable `--no-default-features --features bitlocker` and the
+all-feature `x86_64-pc-windows-msvc` compilation checks passed. Cross-compilation
+does not supply a Windows TBS transport or establish Windows runtime behavior.
+The full test log is `/data/cache/partmgr-tpm-host-tests.log`.

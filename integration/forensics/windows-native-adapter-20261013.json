@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "profile": "disposable-windows-readonly-vhd",
+  "os": "Microsoft Windows NT 10.0.26200.0",
+  "powershell": "5.1.26100.7920",
+  "device": "\\\\.\\PhysicalDrive1",
+  "logical_sector_size": 512,
+  "backend": "upstream-physical-disk",
+  "binary_sha256": "7decd2f2fe5b963fbf1b23c07f2ae0edca9d5b8f7d2c03ad7aafde727667d6a2",
+  "fixture_hash_domain": "original_fixed_vhd_container_bytes",
+  "fixture_sha256_before": "912295230954555f5fa2bb4fcc78ba684cc10f797516d0e970846861191f3b34",
+  "fixture_sha256_after": "912295230954555f5fa2bb4fcc78ba684cc10f797516d0e970846861191f3b34",
+  "exit_code": 0,
+  "stdout": "\nrunning 1 test\ntest native_device_geometry_byte_reads_bounds_and_concurrency ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s\n",
+  "selected_test_executed": true,
+  "immutable_fixture_verified": true,
+  "passed": true
+}

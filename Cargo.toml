@@ -1,8 +1,8 @@
 [package]
 name = "partmgr"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.96"
 license = "MIT"
 repository = "https://github.com/CaddyGlow/partmgr"
 description = "Lossless GPT and MBR inspection, checked editing, and durable partition metadata plans"
@@ -13,21 +13,25 @@ keywords = ["partition", "gpt", "mbr", "disk"]
 categories = ["filesystem", "parser-implementations"]
 
 [features]
+forensics = []
 default = ["std"]
 std = ["virtdisk/std", "sha2/std"]
 bitlocker-write = ["bitlocker"]
 bitlocker = ["dep:aes", "dep:ccm", "dep:xts-mode", "dep:zeroize"]
+bitlocker-tpm = ["bitlocker", "std", "dep:hmac"]
 
 [dependencies]
-virtdisk = { version = "0.3.0", default-features = false }
+virtdisk = { version = "0.3.1", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 hashbrown = { version = "0.17.1", default-features = false, features = ["default-hasher", "inline-more"] }
 spin = { version = "0.9.8", default-features = false, features = ["mutex", "spin_mutex"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
+ms-compress = { version = "0.2.1", default-features = false, features = ["lznt1"] }
 aes = { version = "0.8.4", default-features = false, features = ["zeroize"], optional = true }
 ccm = { version = "0.5.0", default-features = false, optional = true }
 xts-mode = { version = "0.5.1", default-features = false, optional = true }
 zeroize = { version = "1.8", default-features = false, features = ["alloc"], optional = true }
+hmac = { version = "0.12", default-features = false, optional = true }
 
 [[bench]]
 name = "refactoring"
@@ -97,7 +101,10 @@ unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
 redundant_clone = "warn"
-chunks_exact_to_as_chunks = "allow"
 
 [workspace]
 exclude = ["fuzz", "integration/optical", "integration/storage"]
+
+[[example]]
+name = "filesystem-forensics"
+required-features = ["std", "forensics"]

@@ -766,7 +766,6 @@ fn native_hfsprogs_tsk_catalog_forks_and_unchanged_validation() {
         );
         layers.push_str(&format!("family={profile} allocated_blocks={owned} native_formatted_sha256={formatted_sha:x} validated_image_sha256={before:x} payload_sha256={:x} unchanged_validation=passed refund=passed\n",Sha256::digest(&data_payload)));
     }
-    drop(run);
     receipt.push_str(&layers);
     receipt.push_str("status=passed\n");
     std::fs::write(root.join("receipt.txt"), receipt).unwrap();

@@ -1,0 +1,393 @@
+{
+  "version": 1,
+  "profile": "native-fat16-mtools-tsk-cli",
+  "platform": "Linux-6.18.53-x86_64-with-glibc2.42",
+  "binary_sha256": "69fe257e23df06605f4def28513565d9b9e0134da0fc5b3eb6376a4e13016c3d",
+  "runner_sha256": "53eb38f1dc2b0e3c2fd28669a88a4f5993425d650c56a091b796e21b6bebd0a2",
+  "commands": [
+    {
+      "argv": [
+        "fls",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "2b47f72ebeac63a5d41ae188abcacbe9e11aa7c386d9a111b6168a1bb2112a6c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "icat",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "2b47f72ebeac63a5d41ae188abcacbe9e11aa7c386d9a111b6168a1bb2112a6c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "fsstat",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "2b47f72ebeac63a5d41ae188abcacbe9e11aa7c386d9a111b6168a1bb2112a6c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mkfs.fat",
+        "--help"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "f522bf46cc2cfa3bf6c540db3d8ef9b4bc325392ddd52adf477f54eaa13906e6",
+      "stderr_sha256": "e40f2b1af5302ece63a425d0d4a29f13058148fd3d8bfea506e7373f3e55bd32"
+    },
+    {
+      "argv": [
+        "mcopy",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "2aebf40446aaf1423e3d9eeb9cd041ffc99846c9cb8976b0b6d7be9f71816ba9",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mkfs.fat",
+        "-F",
+        "16",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-working.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "f522bf46cc2cfa3bf6c540db3d8ef9b4bc325392ddd52adf477f54eaa13906e6",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mcopy",
+        "-i",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-working.dd",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/live-content.bin",
+        "::LIVE.BIN"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mcopy",
+        "-i",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-working.dd",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/deleted-content.bin",
+        "::deleted long file.txt"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mdel",
+        "-i",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-working.dd",
+        "::deleted long file.txt"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "mcopy",
+        "-i",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-working.dd",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/reused-content.bin",
+        "::REUSE.BIN"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/data/cache/rust/debug/examples/filesystem-forensics",
+        "slots-fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-deleted.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-deleted.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "34816",
+        "--directory-length",
+        "16384"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "485903e7b90703d45b9f05d9c30547710756463094c11bd4600d30afbd8f5b5a",
+      "stderr_sha256": "98f6ed9b384d0f860b4803620caf24ab20ea60328331393b0d5fe35b126703e6"
+    },
+    {
+      "argv": [
+        "fls",
+        "-f",
+        "fat",
+        "-r",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-deleted.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "9b35e45fb4ac1cbc0a1410abeb04027df7951e78912626deb05d0331f3ab4e42",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "icat",
+        "-f",
+        "fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-deleted.dd",
+        "3"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "fsstat",
+        "-f",
+        "fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-deleted.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "45be1164af4e860e2862e170a6269ee5b334e27bcd40637c77f3ef01d01e8eda",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/data/cache/rust/debug/examples/filesystem-forensics",
+        "extract-fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-deleted.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-deleted.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "34816",
+        "--directory-length",
+        "16384",
+        "--slot-offset",
+        "34816",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/exports-0"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "9a144449131304f427eef8276e121c51664682d71e7e449878b6ff1fe13d359c",
+      "stderr_sha256": "15d4ea03e581d2783e73f6a673ad17f1966bdf88084281da23f5f6f4e0f87df6"
+    },
+    {
+      "argv": [
+        "/data/cache/rust/debug/examples/filesystem-forensics",
+        "slots-fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/derived-negative-controls.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "derived-negative-controls.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "34816",
+        "--directory-length",
+        "16384"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "5ea66f45a54890ef853ae43b5d9b7ab4e9da68a45dbe6f3ef641e2d54369a886",
+      "stderr_sha256": "98f6ed9b384d0f860b4803620caf24ab20ea60328331393b0d5fe35b126703e6"
+    },
+    {
+      "argv": [
+        "/data/cache/rust/debug/examples/filesystem-forensics",
+        "extract-fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/derived-negative-controls.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "derived-negative-controls.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "34816",
+        "--directory-length",
+        "16384",
+        "--slot-offset",
+        "34976",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/negative-slack-exports"
+      ],
+      "exit_code": 2,
+      "stdout_sha256": "d5c8a281cb62e0f9b8a9239dc743f4b4598ccf16049d62b729833f0d041f2821",
+      "stderr_sha256": "98f6ed9b384d0f860b4803620caf24ab20ea60328331393b0d5fe35b126703e6"
+    },
+    {
+      "argv": [
+        "/data/cache/rust/debug/examples/filesystem-forensics",
+        "slots-fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-reused.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-reused.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "34816",
+        "--directory-length",
+        "16384"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "b79519f0c658f22d6d09f16178221ee8c274bce6ebfea4ed168705eb99c145d0",
+      "stderr_sha256": "98f6ed9b384d0f860b4803620caf24ab20ea60328331393b0d5fe35b126703e6"
+    },
+    {
+      "argv": [
+        "fls",
+        "-f",
+        "fat",
+        "-r",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-reused.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "694480f5cb45b5149d3a520ea762d9148a0802eaec704d3b29fa116f9ac76a0b",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "icat",
+        "-f",
+        "fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-reused.dd",
+        "3"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "fsstat",
+        "-f",
+        "fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-reused.dd"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "9c3383dffeb87fc7f89485e50de22158d984eae6668119de8b3d0ef111c9cc91",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/data/cache/rust/debug/examples/filesystem-forensics",
+        "extract-fat",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/native-reused.dd",
+        "--format",
+        "raw",
+        "--sector-size",
+        "512",
+        "--assert-stable",
+        "--acquisition-id",
+        "native-reused.dd",
+        "--stability-provider",
+        "private-closed-native-artifact",
+        "--directory-offset",
+        "34816",
+        "--directory-length",
+        "16384",
+        "--slot-offset",
+        "34816",
+        "--output-dir",
+        "/data/cache/partmgr-forensics-fat16-negative-prepublication/exports-1"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "bbe5998f609e801e5a56bdf80fa0fd2fb3d679868836819143c8ffc585071f12",
+      "stderr_sha256": "15d4ea03e581d2783e73f6a673ad17f1966bdf88084281da23f5f6f4e0f87df6"
+    }
+  ],
+  "results": [
+    {
+      "fixture": "native-deleted.dd",
+      "fixture_sha256_before": "5f0f1224b64c61eb93bc029fbdbe581fd912f2d9f8b5de25f0293cf82011f37b",
+      "fixture_sha256_after": "5f0f1224b64c61eb93bc029fbdbe581fd912f2d9f8b5de25f0293cf82011f37b",
+      "immutable_fixture_verified": true,
+      "native_deleted_slots_present": true,
+      "live_tsk_inode": "3",
+      "output_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "native_expected_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "partmgr_output_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "passed": true
+    },
+    {
+      "fixture": "derived-negative-controls.dd",
+      "derived_from": "native-deleted.dd",
+      "parent_sha256_before": "5f0f1224b64c61eb93bc029fbdbe581fd912f2d9f8b5de25f0293cf82011f37b",
+      "parent_sha256_after": "5f0f1224b64c61eb93bc029fbdbe581fd912f2d9f8b5de25f0293cf82011f37b",
+      "fixture_sha256_before": "e08c5a763841be6993d482384102b73b6c2eea3ad5b736f2d8e93a6d18e4348e",
+      "fixture_sha256_after": "e08c5a763841be6993d482384102b73b6c2eea3ad5b736f2d8e93a6d18e4348e",
+      "derivation_patches": [
+        {
+          "volume_offset": 34848,
+          "before_hex": "e5660069006c0065002e000f00a77400780074000000ffffffff0000ffffffff",
+          "after_hex": "4700dc69006c0065002e000f09587400780074000000ffffffff0700ffffffff",
+          "purpose": "malformed_lfn_no_authenticated_name"
+        },
+        {
+          "volume_offset": 34816,
+          "before_hex": "4c4956452020202042494e200000000821002100000000082100020000200000",
+          "after_hex": "4c4956452020202042494e2000c7ffff0000ffff0000ffffffff020000200000",
+          "purpose": "raw_timestamp_invalid_date_time_edges"
+        },
+        {
+          "volume_offset": 34976,
+          "before_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+          "after_hex": "534c41434b20202042494e200000000821002100000000082100020000200000",
+          "purpose": "valid_looking_alias_after_terminator"
+        }
+      ],
+      "immutable_fixture_verified": true,
+      "malformed_lfn_raw_preserved": true,
+      "timestamp_edges_raw_preserved": true,
+      "post_terminator_alias_extraction_rejected": true,
+      "negative_export_files": 0,
+      "passed": true
+    },
+    {
+      "fixture": "native-reused.dd",
+      "fixture_sha256_before": "66202fd6c54a257704b096b97d69b3076662547397d7956955ef332ac7017aad",
+      "fixture_sha256_after": "66202fd6c54a257704b096b97d69b3076662547397d7956955ef332ac7017aad",
+      "immutable_fixture_verified": true,
+      "native_deleted_slots_present": false,
+      "live_tsk_inode": "3",
+      "output_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "native_expected_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "partmgr_output_sha256": "dc404a613fedaeb54034514bc6505f56b933caa5250299ba7d094377a51caa46",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

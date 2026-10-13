@@ -7,9 +7,30 @@ use crate::platform::prelude::*;
 use crate::{fs_ext_audit::ExtAuditLimits, storage::Storage};
 
 pub(crate) struct Outcome {
+    #[cfg(test)]
     pub(crate) transactions: usize,
+    #[cfg(test)]
     pub(crate) blocks: usize,
+    #[cfg(test)]
     pub(crate) next_sequence: u32,
+}
+
+// Backend error kinds are caller-defined. Preserve them as causes while keeping
+// them distinct from format/state rejections produced by the decoder itself.
+struct Inspection<'a>(&'a dyn Storage);
+impl Storage for Inspection<'_> {
+    fn len(&self) -> io::Result<u64> {
+        self.0.len().map_err(io::Error::other)
+    }
+    fn read_exact_at(&self, at: u64, bytes: &mut [u8]) -> io::Result<()> {
+        self.0.read_exact_at(at, bytes).map_err(io::Error::other)
+    }
+    fn write_at(&mut self, _: u64, _: &[u8]) -> io::Result<usize> {
+        Err(io::ErrorKind::PermissionDenied.into())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Err(io::ErrorKind::PermissionDenied.into())
+    }
 }
 
 pub(crate) fn recover(
@@ -19,24 +40,66 @@ pub(crate) fn recover(
     maximum_records: usize,
     resources: &Resources,
 ) -> io::Result<Outcome> {
+    recover_mode(storage, scope, limits, maximum_records, resources, false)
+}
+
+/// Recover only while preserving the narrower public ordered profile.
+pub(crate) fn recover_ordered(
+    storage: &mut dyn Storage,
+    scope: u128,
+    limits: ExtAuditLimits,
+    maximum_records: usize,
+    resources: &Resources,
+) -> io::Result<Outcome> {
+    recover_mode(storage, scope, limits, maximum_records, resources, true)
+}
+
+fn recover_mode(
+    storage: &mut dyn Storage,
+    scope: u128,
+    limits: ExtAuditLimits,
+    maximum_records: usize,
+    resources: &Resources,
+    ordered: bool,
+) -> io::Result<Outcome> {
+    resources.cancellation.check().map_err(io::Error::other)?;
+    let length = storage.len()?;
     // A clean inactive journal has no published recovery work. This also covers
     // interruptions while descriptor/data blocks were being prepared privately,
     // before their preparation commit or journal activation became durable.
-    if let Ok((decoder, proof)) =
-        super::super::ExtDecoder::open_native_clean(storage, scope, resources)
-    {
-        let audit = crate::fs_ext_audit::audit_decoder(&decoder, limits, resources)
-            .map_err(io::Error::other)?;
-        if !audit.is_clean() {
-            return Err(invalid("JBD2 recovery clean-state ownership audit"));
+    let inspection = Inspection(storage);
+    match super::super::ExtDecoder::open_native_clean(&inspection, scope, resources) {
+        Ok((decoder, _proof)) => {
+            let audit = crate::fs_ext_audit::audit_decoder(&decoder, limits, resources)
+                .map_err(io::Error::other)?;
+            if !audit.is_clean() {
+                return Err(invalid("JBD2 recovery clean-state ownership audit"));
+            }
+            resources.cancellation.check().map_err(io::Error::other)?;
+            if storage.len()? != length {
+                return Err(io::Error::other(Error::new(
+                    ErrorKind::StalePlan,
+                    "JBD2 recovery clean source length changed",
+                )));
+            }
+            return Ok(Outcome {
+                #[cfg(test)]
+                transactions: 0,
+                #[cfg(test)]
+                blocks: 0,
+                #[cfg(test)]
+                next_sequence: _proof.geometry.sequence,
+            });
         }
-        return Ok(Outcome {
-            transactions: 0,
-            blocks: 0,
-            next_sequence: proof.geometry.sequence,
-        });
+        // Format/state rejection may require the owned preparation bootstrap.
+        // A failed read or resource check must never become fallback authority.
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::InvalidData | io::ErrorKind::Unsupported
+            ) => {}
+        Err(error) => return Err(error),
     }
-    let length = storage.len()?;
     let bootstrap = bootstrap::Bootstrap::read(storage, 65536, limits.work, resources)?;
     let mut geometry = bootstrap.geometry;
     let mut first = [0; MAX_BLOCK];
@@ -75,9 +138,19 @@ pub(crate) fn recover(
         if !audit.is_clean() {
             return Err(invalid("JBD2 unpublished preparation home audit"));
         }
+        resources.cancellation.check().map_err(io::Error::other)?;
+        if storage.len()? != length {
+            return Err(io::Error::other(Error::new(
+                ErrorKind::StalePlan,
+                "JBD2 unpublished recovery source length changed",
+            )));
+        }
         return Ok(Outcome {
+            #[cfg(test)]
             transactions: 0,
+            #[cfg(test)]
             blocks: 0,
+            #[cfg(test)]
             next_sequence: geometry.sequence,
         });
     }
@@ -110,6 +183,36 @@ pub(crate) fn recover(
         return Err(invalid(
             "native recovery clears fence before complete checkpoint",
         ));
+    }
+    if ordered {
+        let projected_primary = &fence.bytes[inside..inside + 1024];
+        super::owned::validate_primary(projected_primary)?;
+        // Public recovery cannot migrate the admitted owner into another
+        // filesystem geometry or profile through otherwise valid native redo.
+        for range in [
+            4..8,
+            24..28,
+            76..80,
+            72..76,
+            88..90,
+            92..96,
+            100..104,
+            104..120,
+        ] {
+            resources.cancellation.check().map_err(io::Error::other)?;
+            if projected_primary[range.clone()] != bootstrap.primary[range] {
+                return Err(invalid(
+                    "ordered recovery changes admitted filesystem profile",
+                ));
+            }
+        }
+        if super::super::u32le(projected_primary, 96) & !4
+            != super::super::u32le(&bootstrap.primary, 96) & !4
+        {
+            return Err(invalid(
+                "ordered recovery changes admitted filesystem features",
+            ));
+        }
     }
     // No writes occur above this point. The borrowed exclusive Storage remains
     // the same capability throughout preflight, checkpoint and readback.
@@ -187,9 +290,19 @@ pub(crate) fn recover(
     if !audit.is_clean() || proof.geometry.sequence != replay.next_sequence {
         return Err(invalid("JBD2 recovery final native state/audit"));
     }
+    resources.cancellation.check().map_err(io::Error::other)?;
+    if storage.len()? != length {
+        return Err(io::Error::other(Error::new(
+            ErrorKind::StalePlan,
+            "JBD2 final recovery source length changed",
+        )));
+    }
     Ok(Outcome {
+        #[cfg(test)]
         transactions: replay.committed_transactions,
+        #[cfg(test)]
         blocks: replay.blocks.len(),
+        #[cfg(test)]
         next_sequence: replay.next_sequence,
     })
 }
@@ -264,6 +377,92 @@ pub(super) mod tests {
             directory_blocks: 8,
             directory_entries: 32,
             findings: 8,
+        }
+    }
+    #[test]
+    fn initial_backend_or_framework_failure_never_selects_recovery_fallback() {
+        use crate::platform::cell::Cell;
+        struct FirstRead {
+            image: Vec<u8>,
+            reads: Cell<usize>,
+            writes: usize,
+            kind: Option<ErrorKind>,
+            backend_kind: io::ErrorKind,
+        }
+        impl Storage for FirstRead {
+            fn len(&self) -> io::Result<u64> {
+                Ok(self.image.len() as u64)
+            }
+            fn read_exact_at(&self, at: u64, out: &mut [u8]) -> io::Result<()> {
+                let count = self.reads.get() + 1;
+                self.reads.set(count);
+                if count == 1 {
+                    return Err(match self.kind {
+                        Some(kind) => {
+                            io::Error::other(Error::new(kind, "initial recovery failure"))
+                        }
+                        None => {
+                            io::Error::new(self.backend_kind, "initial recovery backend sentinel")
+                        }
+                    });
+                }
+                let at = at as usize;
+                out.copy_from_slice(&self.image[at..at + out.len()]);
+                Ok(())
+            }
+            fn write_at(&mut self, _: u64, _: &[u8]) -> io::Result<usize> {
+                self.writes += 1;
+                Err(io::ErrorKind::PermissionDenied.into())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                panic!("failed initial inspection must not flush")
+            }
+        }
+        for (kind, backend_kind) in [
+            (None, io::ErrorKind::Other),
+            (None, io::ErrorKind::InvalidData),
+            (None, io::ErrorKind::Unsupported),
+            (None, io::ErrorKind::PermissionDenied),
+            (Some(ErrorKind::Cancelled), io::ErrorKind::Other),
+            (Some(ErrorKind::BudgetExhausted), io::ErrorKind::Other),
+            (Some(ErrorKind::StalePlan), io::ErrorKind::Other),
+        ] {
+            let r = resources();
+            let original = bootstrap::tests::fixture().0;
+            let mut source = FirstRead {
+                image: original.clone(),
+                reads: Cell::new(0),
+                writes: 0,
+                kind,
+                backend_kind,
+            };
+            let Err(error) = recover(&mut source, 18u128 << 64, limits(), 8, &r) else {
+                panic!("failed initial inspection cannot recover")
+            };
+            assert_eq!(source.reads.get(), 1);
+            assert_eq!(source.writes, 0);
+            assert_eq!(source.image, original);
+            let backend = error
+                .get_ref()
+                .unwrap()
+                .downcast_ref::<io::Error>()
+                .unwrap();
+            match kind {
+                None => {
+                    assert_eq!(backend.kind(), backend_kind);
+                    assert_eq!(backend.to_string(), "initial recovery backend sentinel");
+                }
+                Some(kind) => assert_eq!(
+                    backend
+                        .get_ref()
+                        .unwrap()
+                        .downcast_ref::<Error>()
+                        .unwrap()
+                        .kind,
+                    kind
+                ),
+            }
+            assert_eq!(r.memory.used(), 0);
         }
     }
     fn fixture(r: &Resources) -> Vec<u8> {
@@ -436,7 +635,9 @@ pub(super) mod tests {
         .unwrap();
         assert_eq!(outcome.transactions, 2);
         let events = success.events;
-        assert_eq!(events, 28);
+        // Two one-descriptor transactions each add header invalidation,
+        // header publication and one barrier: six additional fault events.
+        assert_eq!(events, 34);
         assert_eq!(r.memory.used(), 0);
         for immediate in [false, true] {
             for failed_flush_persists in [false, true] {

@@ -183,6 +183,47 @@ impl core::error::Error for Error {
 /// BitLocker operation result.
 pub type Result<T> = core::result::Result<T, Error>;
 
+/// Failure of experimental TPM unlocking, retaining either format/crypto errors
+/// or the provider's exact TPM return code and cleanup obligations.
+#[cfg(feature = "bitlocker-tpm")]
+#[derive(Debug)]
+pub enum TpmUnlockError {
+    /// Metadata, source stability, resource policy, or key authentication failed.
+    Volume(Error),
+    /// The TPM provider failed; inspect its code and cleanup requirements.
+    Provider(crate::bitlocker_tpm_host::Error),
+}
+#[cfg(feature = "bitlocker-tpm")]
+impl fmt::Display for TpmUnlockError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Volume(error) => error.fmt(f),
+            Self::Provider(error) => error.fmt(f),
+        }
+    }
+}
+#[cfg(feature = "bitlocker-tpm")]
+impl core::error::Error for TpmUnlockError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        Some(match self {
+            Self::Volume(error) => error,
+            Self::Provider(error) => error,
+        })
+    }
+}
+#[cfg(feature = "bitlocker-tpm")]
+impl From<Error> for TpmUnlockError {
+    fn from(error: Error) -> Self {
+        Self::Volume(error)
+    }
+}
+#[cfg(feature = "bitlocker-tpm")]
+impl From<crate::bitlocker_tpm_host::Error> for TpmUnlockError {
+    fn from(error: crate::bitlocker_tpm_host::Error) -> Self {
+        Self::Provider(error)
+    }
+}
+
 pub(crate) fn invalid(context: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, context)
 }
@@ -633,6 +674,77 @@ impl BitLockerVolume {
     /// Iterate protector summaries without copying secret-bearing metadata.
     pub fn protectors(&self) -> impl Iterator<Item = Protector> + '_ {
         self.metadata.protectors()
+    }
+
+    /// Decode the selected experimental Windows TPM-only protector without
+    /// issuing commands. Parsing does not establish matching TPM or PCR state.
+    #[cfg(feature = "bitlocker-tpm")]
+    pub fn tpm_protector(
+        &self,
+        identifier: Identifier,
+    ) -> Result<crate::bitlocker_tpm::Tpm2Protector<'_>> {
+        self.policy.check(&ReadSource(self.source.as_ref()))?;
+        self.metadata.protector(identifier)?.tpm2()
+    }
+
+    /// Unseal the selected TPM protector and authenticate its wrapped FVEK.
+    /// This establishes key authentication independently of sector-read support;
+    /// it returns no key and does not qualify used-space-only reading or boot.
+    /// Supply an explicit persistent parent and a fresh cryptographic nonce for
+    /// every invocation. The provider requires a trusted exclusive transport.
+    #[cfg(feature = "bitlocker-tpm")]
+    pub fn authenticate_tpm<T: crate::bitlocker_tpm_host::CommandTransport>(
+        &self,
+        identifier: Identifier,
+        provider: &mut crate::bitlocker_tpm_host::Tpm2Provider<T>,
+        parent_handle: u32,
+        nonce_caller: &[u8; 32],
+    ) -> core::result::Result<KeyEvidence, TpmUnlockError> {
+        let _key = self.tpm_key(identifier, provider, parent_handle, nonce_caller)?;
+        Ok(KeyEvidence::AuthenticatedKeyRecord)
+    }
+
+    /// Authenticate a TPM-only protector and open the supported full-volume XTS
+    /// reader. Unsupported mappings are rejected before any TPM command.
+    /// Parent selection and a fresh cryptographic nonce are explicit inputs.
+    #[cfg(feature = "bitlocker-tpm")]
+    pub fn unlock_tpm<T: crate::bitlocker_tpm_host::CommandTransport>(
+        &self,
+        identifier: Identifier,
+        provider: &mut crate::bitlocker_tpm_host::Tpm2Provider<T>,
+        parent_handle: u32,
+        nonce_caller: &[u8; 32],
+    ) -> core::result::Result<UnlockedVolume, TpmUnlockError> {
+        self.readable()?;
+        let key = self.tpm_key(identifier, provider, parent_handle, nonce_caller)?;
+        Ok(self.reader_with_key(&key, KeyEvidence::AuthenticatedKeyRecord)?)
+    }
+
+    #[cfg(feature = "bitlocker-tpm")]
+    fn tpm_key<T: crate::bitlocker_tpm_host::CommandTransport>(
+        &self,
+        identifier: Identifier,
+        provider: &mut crate::bitlocker_tpm_host::Tpm2Provider<T>,
+        parent_handle: u32,
+        nonce_caller: &[u8; 32],
+    ) -> core::result::Result<crypto::SecretBytes, TpmUnlockError> {
+        let protector = self.tpm_protector(identifier)?;
+        let secret = provider.unseal(
+            &crate::bitlocker_tpm_host::UnsealRequest {
+                private: protector.private_blob(),
+                public: protector.public_blob(),
+                parent_handle,
+                nonce_caller,
+                pcr_selection: protector.pcr_selection(),
+                pcr_digest: Some(protector.pcr_digest()),
+                policy_or: &[],
+                policy_auth_value: true,
+            },
+            &self.policy.resources,
+        )?;
+        self.policy.check(&ReadSource(self.source.as_ref()))?;
+        let vmk = crate::bitlocker_tpm::UnsealedVmk::parse(secret.as_bytes())?;
+        Ok(vmk_key(&self.metadata, &self.policy, vmk.as_bytes())?)
     }
 
     /// Authenticate the selected recovery protector, then unwrap the volume key.

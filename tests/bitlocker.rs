@@ -993,3 +993,57 @@ fn native_version_two_crc_header_is_bounded_and_checks_crc() {
         ErrorKind::InvalidData
     );
 }
+
+#[cfg(feature = "bitlocker-tpm")]
+#[test]
+fn tpm_preflight_rejects_factors_mapping_cancellation_and_source_change_without_commands() {
+    use partmgr::bitlocker_tpm_host::{CommandTransport, Tpm2Provider};
+    struct NoCommands;
+    impl CommandTransport for NoCommands {
+        fn transact(&mut self, _: &[u8], _: &mut [u8]) -> std::io::Result<usize> {
+            panic!("preflight failure must not contact TPM");
+        }
+    }
+    fn portable_kind<T>(result: core::result::Result<T, bitlocker::TpmUnlockError>) -> ErrorKind {
+        match result {
+            Err(bitlocker::TpmUnlockError::Volume(error)) => error.kind,
+            _ => panic!("expected portable preflight failure"),
+        }
+    }
+    let mut provider = Tpm2Provider::new(NoCommands);
+    let r = resources();
+    let source = Arc::new(Image::new(fixture(0x8004, 512)));
+    let volume = BitLockerVolume::inspect(
+        source.clone(),
+        MetadataSelection::RequireAgreement,
+        Limits::default(),
+        &r,
+    )
+    .unwrap();
+    for identifier in [RECOVERY_ID, CLEAR_ID] {
+        assert_eq!(
+            portable_kind(volume.authenticate_tpm(identifier, &mut provider, 0x81000001, &[1; 32])),
+            ErrorKind::Unsupported
+        );
+    }
+    source.length.store(LENGTH as u64 - 1, Ordering::Relaxed);
+    assert_eq!(
+        portable_kind(volume.authenticate_tpm(RECOVERY_ID, &mut provider, 0x81000001, &[1; 32])),
+        ErrorKind::SourceChanged
+    );
+    source.length.store(LENGTH as u64, Ordering::Relaxed);
+    r.cancellation.cancel();
+    assert_eq!(
+        portable_kind(volume.authenticate_tpm(RECOVERY_ID, &mut provider, 0x81000001, &[1; 32])),
+        ErrorKind::Cancelled
+    );
+    let mut bytes = fixture(0x8004, 512);
+    for index in 0..3 {
+        mutate(&mut bytes, index, |metadata| w(metadata, 12, 2));
+    }
+    let volume = inspect(bytes, &resources());
+    assert_eq!(
+        portable_kind(volume.unlock_tpm([0xff; 16], &mut provider, 0x81000001, &[1; 32])),
+        ErrorKind::Unsupported
+    );
+}

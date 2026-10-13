@@ -6,9 +6,9 @@ interface with portable AES, CCM, SHA-256, and XTS implementations. It works wit
 `std` or `no_std` plus `alloc` and introduces no TPM or native-library dependency.
 
 ```toml
-partmgr = { version = "0.1.1", features = ["bitlocker"] }
+partmgr = { version = "0.1.2", features = ["bitlocker"] }
 # For portable consumers:
-# partmgr = { version = "0.1.1", default-features = false, features = ["bitlocker"] }
+# partmgr = { version = "0.1.2", default-features = false, features = ["bitlocker"] }
 ```
 
 This implementation is experimental. Windows build 26200 full-volume XTS-AES-128
@@ -46,8 +46,17 @@ extensions, conversion logs, flags, and build profiles remain unsupported.
 Inner filesystem readers retain their own geometry and feature limits; the current NTFS reader requires 512-byte
 sectors even though the BitLocker reader also supports 4096-byte sectors.
 
-TPM protectors can be enumerated, but native TPM/swtpm unlocking is unavailable.
-A VMK acquired externally can be supplied explicitly. Used-space-only encryption,
+The opt-in `bitlocker-tpm` feature adds experimental version-5 TPM-only protector
+decoding, a TPM 2.0 command provider, and Unix swtpm transport/state import. It
+implies `bitlocker` and `std`; portable consumers need not enable it. The narrow
+profile verifies SHA-256 `PolicyAuthValue` followed by `PolicyPCR`, requires an
+explicit persistent parent, empty object/parent authorization, and a trusted
+exclusive command endpoint. `authenticate_tpm` unseals and authenticates the FVEK
+without exposing keys; `unlock_tpm` additionally requires the existing supported
+read mapping. TPM+PIN and startup-key factors remain unsupported. See
+[provider usage and evidence](bitlocker-tpm.md) for exact qualification limits.
+
+A VMK acquired externally can also be supplied explicitly. Used-space-only encryption,
 conversion in progress, legacy CBC/diffuser methods, removable discovery layouts,
 password/BEK protectors, and hardware encryption are unsupported.
 The separate `bitlocker-write` feature supports explicit logical replacements for

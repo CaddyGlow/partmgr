@@ -1035,11 +1035,8 @@ mod tests {
         };
         assert_eq!(cause.kind(), error.kind());
         assert_eq!(cause.to_string(), error.to_string());
-        let native = std::error::Error::source(&cause)
-            .unwrap()
-            .downcast_ref::<io::Error>()
-            .unwrap();
-        assert_ne!(native.kind(), io::ErrorKind::Other);
+        let native = cause.host_error().unwrap();
+        assert_ne!(native.kind(), std::io::ErrorKind::Other);
         assert!(native.raw_os_error().is_some());
         assert_eq!(result.observations, 0);
         assert!(!path.exists());
